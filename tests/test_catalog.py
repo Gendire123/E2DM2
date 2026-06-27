@@ -15,7 +15,7 @@ from e2dm2.entitlements import AlphaEntitlementProvider, PRESET_EDITOR_FEATURE
 
 def test_builtin_catalog_and_filters():
     songs = load_song_catalog(custom_root=Path("missing-library"))
-    assert [song.song_id for song in songs] == ["epic-montage-1", "epic-montage-2"]
+    assert [song.song_id for song in songs] == ["epic-montage-1", "epic-montage-2", "epic-montage-3"]
     assert all(song.readonly for song in songs)
     assert filter_songs(songs, mood="heartbeat") == [songs[1]]
     assert filter_songs(songs, text="montage 1") == [songs[0]]

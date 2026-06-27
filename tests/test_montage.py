@@ -8,7 +8,7 @@ from e2dm2.montage import build_montage_segment_plan, validate_forward_progressi
 from e2dm2.render import _montage_filter
 
 
-@pytest.mark.parametrize("song_index", [0, 1])
+@pytest.mark.parametrize("song_index", [0, 1, 2])
 def test_builtin_plans_always_move_forward(song_index):
     song = load_song_catalog(custom_root=Path("missing-library"))[song_index]
     plan = build_montage_segment_plan(song.minimum_source_duration_seconds, song)
@@ -25,9 +25,10 @@ def test_builtin_plans_always_move_forward(song_index):
 
 
 def test_builtin_plan_durations_and_cut_counts():
-    first, second = load_song_catalog(custom_root=Path("missing-library"))
+    first, second, third = load_song_catalog(custom_root=Path("missing-library"))
     assert (first.total_duration_seconds, len(first.cut_timestamps)) == (150, 29)
     assert (second.total_duration_seconds, len(second.cut_timestamps)) == (227, 86)
+    assert (third.total_duration_seconds, len(third.cut_timestamps)) == (239.978, 32)
 
 
 def test_epic_two_filter_contains_all_heartbeat_effects():
