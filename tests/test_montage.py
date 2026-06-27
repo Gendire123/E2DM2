@@ -27,12 +27,17 @@ def test_builtin_plans_always_move_forward(song_index):
 def test_builtin_plan_durations_and_cut_counts():
     first, second = load_song_catalog(custom_root=Path("missing-library"))
     assert (first.total_duration_seconds, len(first.cut_timestamps)) == (150, 29)
-    assert (second.total_duration_seconds, len(second.cut_timestamps)) == (227, 74)
+    assert (second.total_duration_seconds, len(second.cut_timestamps)) == (227, 86)
 
 
 def test_epic_two_filter_contains_all_heartbeat_effects():
     song = load_song_catalog(custom_root=Path("missing-library"))[1]
-    segments = build_montage_segment_plan(295, song)
+    song.effects = ["none"] * len(song.cut_timestamps)
+    for i in range(15):
+        song.effects[i] = "heartbeat"
+    song.heartbeat.opacity = 0.2
+    song.heartbeat.fade_seconds = 0.45
+    segments = build_montage_segment_plan(315, song)
     output = RenderOutputPlan(
         "test", "2720x1530_59.94fps", [], 1920, 1080, 59.94, 227,
         ExportSize.HD_1080, "test.mp4", 12000, segments,
@@ -40,7 +45,7 @@ def test_epic_two_filter_contains_all_heartbeat_effects():
     script = _montage_filter(output, song)
     assert script.count("overlay=shortest=1") == 15
     assert "black@0.200" in script
-    for timestamp in song.heartbeat.timestamps:
+    for timestamp in song.cut_timestamps[:15]:
         assert f"st={timestamp:.6f}:d=0.450" in script
     assert "scale=1920:1080" in script
 

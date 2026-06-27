@@ -85,25 +85,9 @@ class MarkerTable(QWidget):
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.itemChanged.connect(self._emit_values)
         self.table.currentCellChanged.connect(lambda row, _column, _old_row, _old_column: self.selection_changed.emit(row))
-        add_button = QPushButton("Add")
-        paste_button = QPushButton("Paste list")
-        remove_button = QPushButton("Remove")
-        sort_button = QPushButton("Sort")
-        add_button.clicked.connect(lambda: self.add_value(0.0))
-        paste_button.clicked.connect(self.paste_values)
-        remove_button.clicked.connect(self.remove_selected)
-        sort_button.clicked.connect(self.sort_values)
-        buttons = QHBoxLayout()
-        buttons.addWidget(add_button)
-        buttons.addWidget(paste_button)
-        buttons.addWidget(remove_button)
-        buttons.addWidget(sort_button)
-        buttons.addStretch()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.table)
-        layout.addLayout(buttons)
-        self.action_buttons = [add_button, paste_button, remove_button, sort_button]
 
     def _get_widget_row(self, widget: QWidget) -> int:
         for r in range(self.table.rowCount()):
@@ -266,8 +250,7 @@ class MarkerTable(QWidget):
         header_height = self.table.horizontalHeader().sizeHint().height()
         table_height = header_height + rows * row_height + self.table.frameWidth() * 2 + 2
         self.table.setFixedHeight(table_height)
-        action_height = max(button.sizeHint().height() for button in self.action_buttons)
-        self.setFixedHeight(table_height + self.layout().spacing() + action_height)
+        self.setFixedHeight(table_height)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
 
@@ -430,7 +413,7 @@ class SongEditorDialog(QDialog):
             lambda: self.waveform.set_window_seconds(self.waveform_zoom.currentData())
         )
         self.cut_markers = MarkerTable("Cut timestamp (seconds)")
-        self.cut_markers.set_visible_row_count(7)
+        self.cut_markers.set_visible_row_count(10)
         self.cut_markers.values_changed.connect(self.waveform.set_markers)
         self.cut_markers.selection_changed.connect(self.select_cut_from_table)
         layout.addLayout(controls)

@@ -24,7 +24,7 @@ def test_create_plan_snapshots_song_and_serializes(tmp_path):
     project = create_project("Plan", tmp_path / "projects")
     source = project.path / "source" / "clip.mp4"
     source.write_bytes(b"placeholder")
-    project.settings.media = [MediaItem("source/clip.mp4", "clip.mp4", 2720, 1530, 59.94, 300, "h264", 1_000_000_000)]
+    project.settings.media = [MediaItem("source/clip.mp4", "clip.mp4", 2720, 1530, 59.94, 350, "h264", 1_000_000_000)]
     request = RenderRequest(WorkflowMode.EPIC_MONTAGE, [ExportSize.SOURCE, ExportSize.HD_1080], "epic-montage-2")
     plan = create_render_plan(
         project,

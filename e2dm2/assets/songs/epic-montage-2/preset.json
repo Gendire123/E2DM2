@@ -12,7 +12,7 @@
   "bpm": null,
   "energy": "high",
   "total_duration_seconds": 227.0,
-  "minimum_source_duration_seconds": 295.0,
+  "minimum_source_duration_seconds": 315.0,
   "opening_fade_seconds": 5.0,
   "cuts_end_seconds": 222.145,
   "fade_out_seconds": 4.855,

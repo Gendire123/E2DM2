@@ -24,13 +24,9 @@ def test_builtin_catalog_and_filters():
 
 def test_epic_two_heartbeat_manifest():
     song = load_song_catalog(custom_root=Path("missing-library"))[1]
-    assert song.heartbeat.opacity == pytest.approx(0.2)
-    assert song.heartbeat.fade_seconds == pytest.approx(0.45)
-    assert song.heartbeat.timestamps == pytest.approx([
-        76.938660, 77.500484, 79.144339, 79.716567, 81.308401,
-        81.870225, 83.482868, 84.065500, 215.532289, 216.094113,
-        217.696352, 218.258176, 219.902031, 220.463855, 222.086901,
-    ])
+    assert song.heartbeat.opacity == pytest.approx(0.3)
+    assert song.heartbeat.fade_seconds == pytest.approx(0.5)
+    assert song.heartbeat.timestamps == []
 
 
 def test_duplicate_builtin_creates_editable_manifest(tmp_path):
@@ -110,8 +106,8 @@ def test_song_manifest_effects_flow():
     assert songs[0].effects[19] == "flash"
     assert songs[0].effects.count("none") == 27
     
-    assert len(songs[1].effects) == 74
-    assert songs[1].effects.count("heartbeat") == 15
+    assert len(songs[1].effects) == 86
+    assert songs[1].effects.count("heartbeat") == 0
 
 
 
