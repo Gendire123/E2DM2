@@ -352,3 +352,30 @@ def test_preview_builds_and_reuses_fast_proxy(qtbot, tmp_path):
     qtbot.addWidget(cached)
     assert cached.proxy_process is None
     assert Path(cached.player.source().toLocalFile()) == proxy
+
+
+def test_splash_screen(qtbot):
+    from e2dm2.ui import AppSplashScreen
+    from PySide6.QtWidgets import QLabel
+    splash = AppSplashScreen()
+    qtbot.addWidget(splash)
+    splash.show()
+    
+    # Assert elements exist and have correct labels/properties
+    assert splash.logo_label is not None
+    
+    # Find child elements and assert their properties
+    title = splash.findChild(QLabel, "splashTitle")
+    assert title is None
+    
+    version = splash.findChild(QLabel, "splashVersion")
+    assert version is not None
+    assert version.text() == "Version 1.0"
+    
+    status = splash.findChild(QLabel, "splashStatus")
+    assert status is not None
+    assert status.text() == "Initializing workflows..."
+    
+    # The splash screen should start visible
+    assert splash.isVisible()
+

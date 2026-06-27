@@ -397,7 +397,8 @@ class WorkspacePage(QWidget):
         media_actions.addWidget(remove)
         media_actions.addStretch()
         self.media_total = QLabel("No footage imported")
-        self.media_total.setStyleSheet("color: #68716b; font-weight: 500;")
+        self.media_total.setStyleSheet("color: #68716b; font-weight: 500; padding-right: 6px;")
+        self.media_total.setMinimumWidth(self.media_total.sizeHint().width())
         media_actions.addWidget(self.media_total)
 
         # Footage workspace card
@@ -656,7 +657,8 @@ class WorkspacePage(QWidget):
                 self.media_table.setItem(row, column, table_item)
         total_duration = sum(item.duration for item in media)
         total_size = sum(item.size_bytes for item in media)
-        self.media_total.setText(f"{len(media)} clips | {_duration(total_duration)} | {total_size / 1024 ** 3:.2f} GB")
+        self.media_total.setText(f"{len(media)} clips | {_duration(total_duration)} | {total_size / 1024 ** 3:.2f} GB ")
+        self.media_total.setMinimumWidth(self.media_total.sizeHint().width())
 
     def refresh_catalog(self, selected_id: str | None = None) -> None:
         try:
@@ -1007,6 +1009,71 @@ class WorkspacePage(QWidget):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.project.path / "renders")))
 
 
+class AppSplashScreen(QWidget):
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWindowFlags(Qt.WindowType.SplashScreen | Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+        container = QFrame()
+        container.setObjectName("splashCard")
+
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(30, 30, 30, 30)
+        container_layout.setSpacing(15)
+        container_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.logo_label = QLabel()
+        self.logo_label.setObjectName("splashLogo")
+        self.logo_label.setFixedSize(300, 200)
+        self.logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        logo_path = Path(__file__).parent / "assets" / "logo.jpg"
+        logo_pixmap = QPixmap(str(logo_path))
+        if logo_pixmap.isNull():
+            self.logo_label.setText("E2DM2")
+            self.logo_label.setStyleSheet("font-size: 32pt; font-weight: bold; color: #246447;")
+        else:
+            self.logo_label.setPixmap(logo_pixmap.scaled(
+                self.logo_label.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            ))
+
+        version_label = QLabel("Version 1.0")
+        version_label.setObjectName("splashVersion")
+        version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        status_label = QLabel("Initializing workflows...")
+        status_label.setObjectName("splashStatus")
+        status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        copyright_label = QLabel("© 2026 E2DM2. All rights reserved.")
+        copyright_label.setObjectName("splashCopyright")
+        copyright_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        container_layout.addWidget(self.logo_label)
+        container_layout.addWidget(version_label)
+        container_layout.addWidget(status_label)
+        container_layout.addSpacing(10)
+        container_layout.addWidget(copyright_label)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(container)
+
+        self.resize(360, 390)
+        self.center_on_screen()
+
+    def center_on_screen(self) -> None:
+        screen = QGuiApplication.primaryScreen()
+        if screen:
+            geo = self.frameGeometry()
+            geo.moveCenter(screen.availableGeometry().center())
+            self.move(geo.topLeft())
+
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -1133,6 +1200,30 @@ QFrame#produceCard QLabel, QFrame#produceCard QCheckBox {
 }
 QFrame#produceCard QTableWidget {
     border: none;
+}
+
+/* Splash Screen Design */
+QFrame#splashCard {
+    background-color: #fcfcfc;
+    border: 2px solid #246447;
+    border-radius: 12px;
+}
+QFrame#splashCard QLabel {
+    background: transparent;
+}
+QLabel#splashVersion {
+    font-size: 11pt;
+    font-weight: 600;
+    color: #d08a2f;
+}
+QLabel#splashStatus {
+    font-size: 9.5pt;
+    color: #68716b;
+    font-style: italic;
+}
+QLabel#splashCopyright {
+    font-size: 8pt;
+    color: #99a19b;
 }
 """
 
