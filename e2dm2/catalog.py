@@ -184,15 +184,23 @@ def filter_songs(
 
 def save_custom_song(song: SongManifest, audio_source: Path, library_root: Path | None = None) -> SongManifest:
     root = library_root or custom_library_root()
-    destination = root / song.song_id
+    if song.manifest_path is not None:
+        target_manifest = song.manifest_path
+        destination = target_manifest.parent
+    else:
+        destination = root / song.song_id
+        target_manifest = destination / "preset.json"
+
     preliminary_errors = validate_song_manifest(song, require_audio=False)
     if preliminary_errors:
         raise ValueError("\n".join(preliminary_errors))
-    if any(path.parent.name == song.song_id for path in _manifest_paths(BUILTIN_SONG_ROOT)):
-        raise ValueError(f"Song ID is reserved by a built-in preset: {song.song_id}")
-    target_manifest = destination / "preset.json"
-    if target_manifest.exists() and (song.manifest_path is None or song.manifest_path.resolve() != target_manifest.resolve()):
-        raise ValueError(f"A custom song already uses this ID: {song.song_id}")
+
+    if song.manifest_path is None:
+        if any(path.parent.name == song.song_id for path in _manifest_paths(BUILTIN_SONG_ROOT)):
+            raise ValueError(f"Song ID is reserved by a built-in preset: {song.song_id}")
+        if target_manifest.exists():
+            raise ValueError(f"A custom song already uses this ID: {song.song_id}")
+
     destination.mkdir(parents=True, exist_ok=True)
     audio_destination = destination / audio_source.name
     if audio_source.resolve() != audio_destination.resolve():
@@ -201,7 +209,7 @@ def save_custom_song(song: SongManifest, audio_source: Path, library_root: Path 
         partial.replace(audio_destination)
     song.audio_file = audio_destination.name
     song.manifest_path = target_manifest
-    song.readonly = False
+    song.readonly = True
     errors = validate_song_manifest(song)
     if not errors:
         audio_duration = probe_audio_duration(audio_destination)
@@ -220,7 +228,7 @@ def save_custom_song(song: SongManifest, audio_source: Path, library_root: Path 
 
 def duplicate_song(song: SongManifest, song_id: str, title: str, library_root: Path | None = None) -> SongManifest:
     data = song.to_dict()
-    data.update({"song_id": song_id, "title": title, "readonly": False})
+    data.update({"song_id": song_id, "title": title, "readonly": True})
     duplicate = SongManifest.from_dict(data)
     return save_custom_song(duplicate, song.audio_path, library_root)
 

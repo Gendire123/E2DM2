@@ -36,7 +36,7 @@ def test_epic_two_heartbeat_manifest():
 def test_duplicate_builtin_creates_editable_manifest(tmp_path):
     original = load_song_catalog(custom_root=tmp_path)[0]
     duplicate = duplicate_song(original, "my-epic-song", "My Epic Song", tmp_path)
-    assert not duplicate.readonly
+    assert duplicate.readonly
     assert duplicate.audio_path.is_file()
     loaded = load_song_manifest(tmp_path / "my-epic-song" / "preset.json")
     assert loaded.song_id == "my-epic-song"
@@ -63,4 +63,30 @@ def test_alpha_entitlement_unlocks_only_editor():
     entitlement = AlphaEntitlementProvider()
     assert entitlement.has_feature(PRESET_EDITOR_FEATURE)
     assert not entitlement.has_feature("future_feature")
+
+
+def test_save_builtin_song_is_allowed(tmp_path):
+    import shutil
+    from e2dm2.catalog import save_custom_song
+    
+    song = load_song_catalog(custom_root=tmp_path)[0]
+    temp_manifest_dir = tmp_path / "fake-builtin"
+    temp_manifest_dir.mkdir()
+    temp_manifest = temp_manifest_dir / "preset.json"
+    
+    shutil.copy2(song.manifest_path, temp_manifest)
+    shutil.copy2(song.audio_path, temp_manifest_dir / song.audio_path.name)
+    
+    loaded_builtin = load_song_manifest(temp_manifest, readonly=True)
+    assert loaded_builtin.readonly
+    
+    loaded_builtin.title = "Updated Builtin Title"
+    saved = save_custom_song(loaded_builtin, loaded_builtin.audio_path, tmp_path)
+    
+    assert saved.readonly
+    assert saved.title == "Updated Builtin Title"
+    
+    reloaded = load_song_manifest(temp_manifest, readonly=True)
+    assert reloaded.title == "Updated Builtin Title"
+
 

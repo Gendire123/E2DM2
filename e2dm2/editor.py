@@ -429,9 +429,10 @@ class SongEditorDialog(QDialog):
             self.flash_opacity.setValue(song.flash_cue.opacity)
         self.player.setSource(QUrl.fromLocalFile(str(song.audio_path)))
         self.load_waveform(song.audio_path)
-        can_edit = not song.readonly and self.entitlement.has_feature(PRESET_EDITOR_FEATURE)
+        # For now, built-in songs CAN be edited (cuts, effects values, etc.)
+        can_edit = self.entitlement.has_feature(PRESET_EDITOR_FEATURE)
         self._set_editable(can_edit)
-        self.status_label.setText("Built-in preset. Duplicate it to make changes." if song.readonly else "Custom preset")
+        self.status_label.setText("Built-in preset (Editable for now)" if song.readonly else "Custom preset")
 
     def _set_editable(self, editable: bool) -> None:
         controls = [
@@ -510,7 +511,8 @@ class SongEditorDialog(QDialog):
         self.status_label.setText("New custom preset")
 
     def add_cut_timestamp(self, timestamp: float) -> None:
-        if not self.current or self.current.readonly:
+        # For now, built-in songs CAN be edited
+        if not self.current:
             return
         timestamp = max(0.0, min(float(timestamp), self.total_spin.value()))
         values = self.cut_markers.values()
@@ -625,7 +627,8 @@ class SongEditorDialog(QDialog):
             heartbeat=HeartbeatSettings(self.heartbeat_markers.values(), self.heartbeat_opacity.value(), self.heartbeat_fade.value()),
             dark_cue=dark,
             flash_cue=flash,
-            manifest_path=self.current.manifest_path if self.current and not self.current.readonly else None,
+            # For now, built-in songs CAN be edited (preserve manifest_path)
+            manifest_path=self.current.manifest_path if self.current else None,
         )
 
     def save_current(self) -> None:
