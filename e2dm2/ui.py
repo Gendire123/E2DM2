@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QDockWidget,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -343,49 +344,83 @@ class WorkspacePage(QWidget):
         music_scroll.setWidgetResizable(True)
         music_scroll.setWidget(music_panel)
 
+        # Export options card
+        config_card = QFrame()
+        config_card.setObjectName("produceCard")
+        config_layout = QHBoxLayout(config_card)
+        config_layout.setContentsMargins(20, 16, 20, 16)
+        config_layout.setSpacing(16)
+
+        export_label = QLabel("Export Resolution:")
+        export_label.setStyleSheet("font-weight: bold; color: #18342a;")
+        config_layout.addWidget(export_label)
+
         self.source_export = QCheckBox("Source resolution")
         self.hd_export = QCheckBox("1080p maximum")
         self.source_export.setChecked(True)
-        export_row = QHBoxLayout()
-        export_row.addWidget(QLabel("Exports"))
-        export_row.addWidget(self.source_export)
-        export_row.addWidget(self.hd_export)
-        export_row.addStretch()
+        config_layout.addWidget(self.source_export)
+        config_layout.addWidget(self.hd_export)
+        config_layout.addStretch(1)
+
         self.render_button = QPushButton("Produce")
         self.render_button.setObjectName("primaryButton")
         self.render_button.clicked.connect(self.start_render)
+
         self.cancel_button = QPushButton("Cancel")
         self.cancel_button.setEnabled(False)
         self.cancel_button.clicked.connect(self.cancel_operation)
-        render_actions = QHBoxLayout()
-        render_actions.addLayout(export_row, 1)
-        render_actions.addWidget(self.render_button)
-        render_actions.addWidget(self.cancel_button)
 
+        config_layout.addWidget(self.render_button)
+        config_layout.addWidget(self.cancel_button)
+
+        # Status / Progress card
+        status_card = QFrame()
+        status_card.setObjectName("produceCard")
+        status_layout = QVBoxLayout(status_card)
+        status_layout.setContentsMargins(20, 20, 20, 20)
+        status_layout.setSpacing(14)
+
+        status_header = QHBoxLayout()
+        status_title = QLabel("Production Status")
+        status_title.setStyleSheet("font-size: 11pt; font-weight: bold; color: #18342a;")
+        status_header.addWidget(status_title)
+        status_header.addStretch()
+        status_layout.addLayout(status_header)
+
+        # Status message display
         self.status_label = QLabel("Ready")
         self.status_label.setWordWrap(True)
+        self.status_label.setStyleSheet("font-size: 10.5pt; color: #354039;")
+        status_layout.addWidget(self.status_label)
+
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
+        status_layout.addWidget(self.progress_bar)
+
         self.results_list = QListWidget()
         self.results_list.itemDoubleClicked.connect(self.open_result)
         self.results_list.setVisible(False)
-        open_folder = QPushButton("Open Renders Folder")
-        open_folder.clicked.connect(self.open_renders_folder)
-        status_panel = QWidget()
-        status_layout = QVBoxLayout(status_panel)
-        status_layout.setContentsMargins(0, 0, 0, 0)
-        status_layout.addWidget(QLabel("Production"))
-        status_layout.addWidget(self.status_label)
-        status_layout.addWidget(self.progress_bar)
+        self.results_list.setMinimumHeight(140)
         status_layout.addWidget(self.results_list, 1)
-        status_layout.addWidget(open_folder)
 
+        open_folder = QPushButton("Open Renders Folder")
+        open_folder.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
+        open_folder.clicked.connect(self.open_renders_folder)
+        
+        folder_layout = QHBoxLayout()
+        folder_layout.addWidget(open_folder)
+        folder_layout.addStretch()
+        status_layout.addLayout(folder_layout)
+
+        # Main Produce tab layout
         produce_panel = QWidget()
         produce_layout = QVBoxLayout(produce_panel)
         produce_layout.setContentsMargins(16, 16, 16, 16)
-        produce_layout.setSpacing(12)
-        produce_layout.addLayout(render_actions)
-        produce_layout.addWidget(status_panel, 1)
+        produce_layout.setSpacing(16)
+        produce_layout.addWidget(config_card)
+        produce_layout.addWidget(status_card)
+        produce_layout.addStretch(1)
+
         produce_scroll = QScrollArea()
         produce_scroll.setWidgetResizable(True)
         produce_scroll.setWidget(produce_panel)
@@ -942,6 +977,16 @@ QTabWidget::pane { border: 1px solid #c8cec9; background: #ffffff; }
 QTabBar::tab { background: #e7ebe7; padding: 8px 16px; }
 QTabBar::tab:selected { background: #ffffff; color: #246447; }
 QSplitter::handle { background: #d7dcd8; width: 1px; }
+
+/* Produce Tab Card Design */
+QFrame#produceCard {
+    background-color: #ffffff;
+    border: 1px solid #d3dad4;
+    border-radius: 8px;
+}
+QFrame#produceCard QLabel, QFrame#produceCard QCheckBox {
+    background: transparent;
+}
 """
 
 
