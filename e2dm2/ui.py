@@ -432,8 +432,6 @@ class WorkspacePage(QWidget):
     def _full_panel(self) -> QWidget:
         panel = QWidget()
         self.track_combo = QComboBox()
-        for track in FULL_LENGTH_TRACKS:
-            self.track_combo.addItem(f"{track.title} - {track.description}", track.track_id)
         layout = QFormLayout(panel)
         layout.setContentsMargins(0, 18, 0, 8)
         layout.addRow("Soundtrack", self.track_combo)
@@ -480,7 +478,21 @@ class WorkspacePage(QWidget):
         except ValueError as exc:
             self.songs = []
             QMessageBox.critical(self, "Epic library error", str(exc))
-        moods = sorted({mood for song in self.songs for mood in song.moods}, key=str.casefold)
+            
+        if hasattr(self, "track_combo"):
+            current_track_id = self.track_combo.currentData()
+            self.track_combo.blockSignals(True)
+            self.track_combo.clear()
+            for track in FULL_LENGTH_TRACKS:
+                self.track_combo.addItem(f"{track.title} - {track.description}", track.track_id)
+            full_length_presets = [s for s in self.songs if s.workflow == WorkflowMode.FULL_LENGTH]
+            for song in full_length_presets:
+                self.track_combo.addItem(f"{song.title} - {song.artist}", song.song_id)
+            index = self.track_combo.findData(current_track_id)
+            self.track_combo.setCurrentIndex(max(0, index))
+            self.track_combo.blockSignals(False)
+
+        moods = sorted({mood for song in self.songs if song.workflow == WorkflowMode.EPIC_MONTAGE for mood in song.moods}, key=str.casefold)
         current_mood = self.mood_filter.currentText() if hasattr(self, "mood_filter") else "All moods"
         if hasattr(self, "mood_filter"):
             self.mood_filter.blockSignals(True)
@@ -498,7 +510,8 @@ class WorkspacePage(QWidget):
             selected_id = None
         mood = self.mood_filter.currentData() or ""
         energy = "" if self.energy_filter.currentIndex() == 0 else self.energy_filter.currentText().lower()
-        filtered = filter_songs(self.songs, self.song_search.text(), mood, energy)
+        montage_songs = [s for s in self.songs if s.workflow == WorkflowMode.EPIC_MONTAGE]
+        filtered = filter_songs(montage_songs, self.song_search.text(), mood, energy)
         current_id = selected_id or (self.project.settings.song_id if self.project else None)
         self.song_table.setRowCount(len(filtered))
         selected_row = -1

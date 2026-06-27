@@ -15,10 +15,15 @@ from e2dm2.entitlements import AlphaEntitlementProvider, PRESET_EDITOR_FEATURE
 
 def test_builtin_catalog_and_filters():
     songs = load_song_catalog(custom_root=Path("missing-library"))
-    assert [song.song_id for song in songs] == ["epic-montage-1", "epic-montage-2", "epic-montage-3"]
+    song_ids = [song.song_id for song in songs]
+    assert "epic-montage-1" in song_ids
+    assert "epic-montage-2" in song_ids
+    assert "epic-montage-3" in song_ids
     assert all(song.readonly for song in songs)
-    assert filter_songs(songs, mood="heartbeat") == [songs[1]]
-    assert filter_songs(songs, text="montage 1") == [songs[0]]
+    epic_1 = next(song for song in songs if song.song_id == "epic-montage-1")
+    epic_2 = next(song for song in songs if song.song_id == "epic-montage-2")
+    assert filter_songs(songs, mood="heartbeat") == [epic_2]
+    assert filter_songs(songs, text="montage 1") == [epic_1]
     assert filter_songs(songs, energy="high") == songs
 
 
@@ -163,7 +168,7 @@ def test_rename_song_id(monkeypatch, tmp_path, qtbot):
     dialog.id_edit.setText("renamed-song")
     
     # Mock save_custom_song or reload_catalog library root so it saves to the temp folder
-    monkeypatch.setattr("e2dm2.editor.save_custom_song", lambda song, audio, lib_root=library_dir: save_custom_song(song, audio, library_dir))
+    monkeypatch.setattr("e2dm2.editor.save_custom_song", lambda song, audio, library_root=None: save_custom_song(song, audio, library_dir))
     monkeypatch.setattr(dialog, "reload_catalog", lambda *args, **kwargs: None)
     
     from e2dm2.catalog import save_custom_song
@@ -175,6 +180,45 @@ def test_rename_song_id(monkeypatch, tmp_path, qtbot):
     
     # Check that old folder is deleted
     assert not duplicate.manifest_path.exists()
+
+
+def test_new_song_workflow_dialog(monkeypatch, tmp_path, qtbot):
+    from e2dm2.editor import SongEditorDialog, WorkflowSelectionDialog
+    from e2dm2.ui import AlphaEntitlementProvider
+    from PySide6.QtWidgets import QDialog, QFileDialog
+    
+    dialog = SongEditorDialog(AlphaEntitlementProvider())
+    qtbot.addWidget(dialog)
+    
+    test_audio = tmp_path / "test_track.m4a"
+    test_audio.write_bytes(b"mock audio data")
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *args: (str(test_audio), "Audio"))
+    
+    monkeypatch.setattr(WorkflowSelectionDialog, "exec", lambda self: QDialog.DialogCode.Accepted)
+    monkeypatch.setattr(WorkflowSelectionDialog, "selected_workflow", lambda self: "epic_montage")
+    monkeypatch.setattr(WorkflowSelectionDialog, "is_builtin", lambda self: True)
+    
+    # Calculate expected index based on the initial catalog
+    import re
+    existing_indices = []
+    for s in dialog.songs:
+        match = re.match(r"^epic-montage-(\d+)$", s.song_id)
+        if match:
+            existing_indices.append(int(match.group(1)))
+    next_idx = max(existing_indices, default=0) + 1
+
+    dialog.new_song()
+    
+    assert dialog.current is not None
+    assert dialog.current.workflow.value == "epic_montage"
+    assert dialog.current.readonly is True
+    assert dialog.current.title == f"Epic Montage {next_idx}"
+    assert dialog.current.song_id == f"epic-montage-{next_idx}"
+    assert dialog.current.audio_file == f"EpicMusic{next_idx}.m4a"
+    assert dialog.current.artist == "E2DM2 Library"
+    from e2dm2.catalog import BUILTIN_SONG_ROOT
+    expected_path = BUILTIN_SONG_ROOT / f"epic-montage-{next_idx}" / f"EpicMusic{next_idx}.m4a"
+    assert dialog.audio_edit.text() == str(expected_path)
 
 
 

@@ -8,9 +8,10 @@ from e2dm2.montage import build_montage_segment_plan, validate_forward_progressi
 from e2dm2.render import _montage_filter
 
 
-@pytest.mark.parametrize("song_index", [0, 1, 2])
-def test_builtin_plans_always_move_forward(song_index):
-    song = load_song_catalog(custom_root=Path("missing-library"))[song_index]
+@pytest.mark.parametrize("song_id", ["epic-montage-1", "epic-montage-2", "epic-montage-3"])
+def test_builtin_plans_always_move_forward(song_id):
+    songs = load_song_catalog(custom_root=Path("missing-library"))
+    song = next(s for s in songs if s.song_id == song_id)
     plan = build_montage_segment_plan(song.minimum_source_duration_seconds, song)
     assert validate_forward_progression(
         plan,
@@ -25,14 +26,18 @@ def test_builtin_plans_always_move_forward(song_index):
 
 
 def test_builtin_plan_durations_and_cut_counts():
-    first, second, third = load_song_catalog(custom_root=Path("missing-library"))
+    songs = load_song_catalog(custom_root=Path("missing-library"))
+    first = next(s for s in songs if s.song_id == "epic-montage-1")
+    second = next(s for s in songs if s.song_id == "epic-montage-2")
+    third = next(s for s in songs if s.song_id == "epic-montage-3")
     assert (first.total_duration_seconds, len(first.cut_timestamps)) == (150, 29)
     assert (second.total_duration_seconds, len(second.cut_timestamps)) == (227, 86)
     assert (third.total_duration_seconds, len(third.cut_timestamps)) == (239.978, 32)
 
 
 def test_epic_two_filter_contains_all_heartbeat_effects():
-    song = load_song_catalog(custom_root=Path("missing-library"))[1]
+    songs = load_song_catalog(custom_root=Path("missing-library"))
+    song = next(s for s in songs if s.song_id == "epic-montage-2")
     song.effects = ["none"] * len(song.cut_timestamps)
     for i in range(15):
         song.effects[i] = "heartbeat"

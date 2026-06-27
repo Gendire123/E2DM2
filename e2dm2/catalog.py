@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from .models import SongManifest
+from .models import SongManifest, WorkflowMode
 
 
 LOGGER = logging.getLogger(__name__)
@@ -204,7 +204,8 @@ def save_custom_song(song: SongManifest, audio_source: Path, library_root: Path 
             raise ValueError(f"A custom song already uses this ID: {song.song_id}")
 
     destination.mkdir(parents=True, exist_ok=True)
-    audio_destination = destination / audio_source.name
+    target_filename = song.audio_file if song.audio_file else audio_source.name
+    audio_destination = destination / target_filename
     if audio_source.resolve() != audio_destination.resolve():
         partial = audio_destination.with_suffix(audio_destination.suffix + ".partial")
         shutil.copy2(audio_source, partial)
@@ -239,4 +240,16 @@ def full_length_track(track_id: str) -> FullLengthTrack:
     for track in FULL_LENGTH_TRACKS:
         if track.track_id == track_id:
             return track
+    try:
+        songs = load_song_catalog()
+        for song in songs:
+            if song.song_id == track_id and song.workflow == WorkflowMode.FULL_LENGTH:
+                return FullLengthTrack(
+                    track_id=song.song_id,
+                    title=song.title,
+                    description=song.artist,
+                    path=song.audio_path
+                )
+    except Exception:
+        pass
     raise KeyError(f"Unknown full-length soundtrack: {track_id}")

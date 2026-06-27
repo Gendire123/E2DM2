@@ -101,6 +101,7 @@ class SongManifest:
     dark_cue: DarkCue | None = None
     flash_cue: FlashCue | None = None
     effects: list[str] = field(default_factory=list)
+    workflow: WorkflowMode = WorkflowMode.EPIC_MONTAGE
     readonly: bool = False
     manifest_path: Path | None = field(default=None, repr=False, compare=False)
 
@@ -114,6 +115,7 @@ class SongManifest:
         data = asdict(self)
         data.pop("manifest_path", None)
         data["energy"] = self.energy.value
+        data["workflow"] = self.workflow.value
         return data
 
     @classmethod
@@ -147,6 +149,9 @@ class SongManifest:
             elif len(effects) > len(cut_timestamps):
                 effects = effects[:len(cut_timestamps)]
 
+        workflow_str = data.get("workflow", "epic_montage")
+        workflow = WorkflowMode(workflow_str)
+
         return cls(
             schema_version=int(data.get("schema_version", 1)),
             song_id=str(data["song_id"]),
@@ -169,6 +174,7 @@ class SongManifest:
             dark_cue=DarkCue(**data["dark_cue"]) if data.get("dark_cue") else None,
             flash_cue=FlashCue(**data["flash_cue"]) if data.get("flash_cue") else None,
             effects=effects,
+            workflow=workflow,
             readonly=readonly or bool(data.get("readonly", False)),
             manifest_path=manifest_path,
         )

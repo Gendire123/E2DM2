@@ -35,7 +35,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .catalog import duplicate_song, load_song_catalog, probe_audio_duration, save_custom_song, validate_song_manifest
+from .catalog import (
+    BUILTIN_SONG_ROOT,
+    duplicate_song,
+    load_song_catalog,
+    probe_audio_duration,
+    save_custom_song,
+    validate_song_manifest,
+)
 from .entitlements import PRESET_EDITOR_FEATURE, EntitlementProvider
 from .models import (
     DarkCue,
@@ -45,6 +52,7 @@ from .models import (
     SongManifest,
     SourceProgressionSettings,
     TransitionSettings,
+    WorkflowMode,
 )
 from .waveform import WaveformData, WaveformTask, WaveformWidget
 
@@ -342,6 +350,35 @@ class MarkerTable(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
 
+class WorkflowSelectionDialog(QDialog):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("New Song Details")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+        
+        layout.addWidget(QLabel("Select workflow type for the new song:"))
+        self.combo = QComboBox()
+        self.combo.addItem("Epic Montage", "epic_montage")
+        self.combo.addItem("Full-length Video", "full_length")
+        layout.addWidget(self.combo)
+        
+        self.builtin_cb = QCheckBox("Built-In")
+        layout.addWidget(self.builtin_cb)
+        
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        
+    def selected_workflow(self) -> str:
+        return self.combo.currentData()
+        
+    def is_builtin(self) -> bool:
+        return self.builtin_cb.isChecked()
+
+
 class SongEditorDialog(QDialog):
     catalog_changed = Signal()
 
@@ -547,14 +584,24 @@ class SongEditorDialog(QDialog):
             return
         song = self.songs[row]
         self.current = song
-        self.audio_source = song.audio_path
+        if not (song.manifest_path is None and hasattr(self, "audio_source") and self.audio_source and self.audio_source.is_absolute()):
+            self.audio_source = song.audio_path
         self.title_edit.setText(song.title)
         self.artist_edit.setText(song.artist)
         self.id_edit.setText(song.song_id)
         self.moods_edit.setText(", ".join(song.moods))
         self.energy_combo.setCurrentText(song.energy.value.title())
         self.bpm_spin.setValue(song.bpm or 0)
-        self.audio_edit.setText(str(song.audio_path))
+        
+        if song.manifest_path is None:
+            # Predict the target path to show in the UI
+            from .catalog import BUILTIN_SONG_ROOT, custom_library_root
+            root = BUILTIN_SONG_ROOT if song.readonly else custom_library_root()
+            display_path = root / song.song_id / song.audio_file
+        else:
+            display_path = self.audio_source
+            
+        self.audio_edit.setText(str(display_path))
         self.total_spin.setValue(song.total_duration_seconds)
         self.minimum_source_spin.setValue(song.minimum_source_duration_seconds)
         self.opening_spin.setValue(song.opening_fade_seconds)
@@ -617,23 +664,48 @@ class SongEditorDialog(QDialog):
         return super().eventFilter(watched, event)
 
     def new_song(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Add Epic song", "", "Audio (*.m4a *.mp3 *.wav *.aac *.flac)")
+        path, _ = QFileDialog.getOpenFileName(self, "Add song", "", "Audio (*.m4a *.mp3 *.wav *.aac *.flac)")
         if not path:
             return
-        title = Path(path).stem
-        song_id = "-".join(part for part in title.lower().replace("_", "-").split("-") if part.isalnum()) or "custom-song"
+        
+        wf_dialog = WorkflowSelectionDialog(self)
+        if wf_dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        
+        workflow_type = wf_dialog.selected_workflow()
+        is_builtin = wf_dialog.is_builtin()
+        
+        suffix_ext = Path(path).suffix
+        
+        if workflow_type == "epic_montage":
+            import re
+            existing_indices = []
+            for s in self.songs:
+                match = re.match(r"^epic-montage-(\d+)$", s.song_id)
+                if match:
+                    existing_indices.append(int(match.group(1)))
+            next_idx = max(existing_indices, default=0) + 1
+            
+            title = f"Epic Montage {next_idx}"
+            song_id = f"epic-montage-{next_idx}"
+            audio_file_name = f"EpicMusic{next_idx}{suffix_ext}" if next_idx > 1 else f"EpicMusic{suffix_ext}"
+        else:
+            title = Path(path).stem
+            song_id = "-".join(part for part in title.lower().replace("_", "-").split("-") if part.isalnum()) or "custom-song"
+            audio_file_name = Path(path).name
+
         self.current = SongManifest(
-            schema_version=1, song_id=song_id, title=title, artist="", audio_file=Path(path).name,
+            schema_version=1, song_id=song_id, title=title, artist="E2DM2 Library", audio_file=audio_file_name,
             moods=["epic"], bpm=None, energy=EnergyLevel.HIGH, total_duration_seconds=1,
             minimum_source_duration_seconds=1, opening_fade_seconds=0, cuts_end_seconds=1,
-            fade_out_seconds=0, escalation_seconds=0, cut_timestamps=[0], readonly=False,
+            fade_out_seconds=0, escalation_seconds=0, cut_timestamps=[0], readonly=is_builtin,
+            workflow=WorkflowMode(workflow_type)
         )
         self.audio_source = Path(path)
         self.songs.append(self.current)
-        self.song_list.addItem(f"{title}  [unsaved]")
+        suffix = "  [built-in]" if is_builtin else "  [unsaved]"
+        self.song_list.addItem(title + suffix)
         self.song_list.setCurrentRow(self.song_list.count() - 1)
-        self.audio_source = Path(path)
-        self.audio_edit.setText(path)
         self.player.setSource(QUrl.fromLocalFile(path))
         self.load_waveform(Path(path))
         try:
@@ -644,7 +716,7 @@ class SongEditorDialog(QDialog):
         except ValueError:
             pass
         self._set_editable(True)
-        self.status_label.setText("New custom preset")
+        self.status_label.setText("New built-in preset" if is_builtin else "New custom preset")
 
     def add_cut_timestamp(self, timestamp: float) -> None:
         # For now, built-in songs CAN be edited
@@ -799,7 +871,8 @@ class SongEditorDialog(QDialog):
             heartbeat=heartbeat,
             dark_cue=dark,
             flash_cue=flash,
-            # For now, built-in songs CAN be edited (preserve manifest_path)
+            workflow=self.current.workflow if self.current else WorkflowMode.EPIC_MONTAGE,
+            readonly=self.current.readonly if self.current else False,
             manifest_path=self.current.manifest_path if self.current else None,
         )
 
@@ -822,7 +895,8 @@ class SongEditorDialog(QDialog):
                 old_manifest_path = self.current.manifest_path
                 song.manifest_path = None
             
-            saved_song = save_custom_song(song, self.audio_source)
+            lib_root = BUILTIN_SONG_ROOT if (self.current and self.current.readonly) else None
+            saved_song = save_custom_song(song, self.audio_source, library_root=lib_root)
             
             if old_manifest_path and old_manifest_path.exists():
                 try:
