@@ -81,6 +81,7 @@ class MarkerTable(QWidget):
         self.table.setHorizontalHeaderLabels([label, "Visual Effect"])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.table.setColumnWidth(0, 220)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.itemChanged.connect(self._emit_values)
         self.table.currentCellChanged.connect(lambda row, _column, _old_row, _old_column: self.selection_changed.emit(row))
@@ -104,21 +105,70 @@ class MarkerTable(QWidget):
         layout.addLayout(buttons)
         self.action_buttons = [add_button, paste_button, remove_button, sort_button]
 
-    def _create_effect_combo(self, effect_val: str) -> QComboBox:
-        combo = QComboBox()
-        for name, val in EFFECT_OPTIONS:
-            combo.addItem(name, val)
-        idx = combo.findData(effect_val)
-        combo.setCurrentIndex(max(0, idx))
-        combo.currentIndexChanged.connect(self._emit_effects)
-        return combo
+    def _get_widget_row(self, widget: QWidget) -> int:
+        for r in range(self.table.rowCount()):
+            if self.table.cellWidget(r, 1) == widget:
+                return r
+        return -1
+
+    def _on_plus_clicked(self, wrapper: QWidget) -> None:
+        row = self._get_widget_row(wrapper)
+        if row == -1:
+            return
+        combo_wrapper = self._create_effect_widget("heartbeat")
+        self.table.setCellWidget(row, 1, combo_wrapper)
+        combo = combo_wrapper.findChild(QComboBox)
+        if combo:
+            combo.showPopup()
+        self._emit_effects()
+
+    def _on_combo_changed(self, wrapper: QWidget, index: int) -> None:
+        row = self._get_widget_row(wrapper)
+        if row == -1:
+            return
+        combo = wrapper.findChild(QComboBox)
+        if not combo:
+            return
+        val = combo.currentData()
+        if val == "none":
+            btn_wrapper = self._create_effect_widget("none")
+            self.table.setCellWidget(row, 1, btn_wrapper)
+        self._emit_effects()
+
+    def _create_effect_widget(self, effect_val: str) -> QWidget:
+        wrapper = QWidget()
+        layout = QHBoxLayout(wrapper)
+        layout.setContentsMargins(6, 2, 6, 2)
+        if effect_val == "none" or not effect_val:
+            layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            btn = QLabel("+")
+            btn.setFixedSize(24, 24)
+            btn.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet(
+                "QLabel { font-weight: bold; font-size: 16px; border-radius: 12px; "
+                "border: 1px solid #a0a0a0; background-color: #ffffff; color: #333333; padding: 0px 0px 3px 0px; } "
+                "QLabel:hover { background-color: #f5f5f5; border-color: #666666; }"
+            )
+            btn.mousePressEvent = lambda event: self._on_plus_clicked(wrapper)
+            layout.addWidget(btn)
+        else:
+            layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+            combo = QComboBox()
+            for name, val in EFFECT_OPTIONS:
+                combo.addItem(name, val)
+            idx = combo.findData(effect_val)
+            combo.setCurrentIndex(max(0, idx))
+            combo.currentIndexChanged.connect(lambda index: self._on_combo_changed(wrapper, index))
+            layout.addWidget(combo)
+        return wrapper
 
     def add_value(self, value: float, effect: str = "none") -> None:
         row = self.table.rowCount()
         self.table.insertRow(row)
         self.table.setItem(row, 0, QTableWidgetItem(f"{value:.6f}"))
-        combo = self._create_effect_combo(effect)
-        self.table.setCellWidget(row, 1, combo)
+        wrapper = self._create_effect_widget(effect)
+        self.table.setCellWidget(row, 1, wrapper)
         self.table.scrollToBottom()
         self._emit_values()
         self._emit_effects()
@@ -139,9 +189,13 @@ class MarkerTable(QWidget):
     def effects(self) -> list[str]:
         effects = []
         for row in range(self.table.rowCount()):
-            combo = self.table.cellWidget(row, 1)
-            if isinstance(combo, QComboBox):
-                effects.append(combo.currentData())
+            wrapper = self.table.cellWidget(row, 1)
+            if wrapper:
+                combo = wrapper.findChild(QComboBox)
+                if combo:
+                    effects.append(combo.currentData())
+                else:
+                    effects.append("none")
             else:
                 effects.append("none")
         return effects
@@ -157,8 +211,8 @@ class MarkerTable(QWidget):
                 row = self.table.rowCount()
                 self.table.insertRow(row)
                 self.table.setItem(row, 0, QTableWidgetItem(f"{value:.6f}"))
-                combo = self._create_effect_combo(effect)
-                self.table.setCellWidget(row, 1, combo)
+                wrapper = self._create_effect_widget(effect)
+                self.table.setCellWidget(row, 1, wrapper)
         self.values_changed.emit(self.values())
         self.effects_changed.emit(self.effects())
 
@@ -223,6 +277,7 @@ class SongEditorDialog(QDialog):
     def __init__(self, entitlement: EntitlementProvider, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Epic Song Library")
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowMinMaxButtonsHint)
         self.resize(1220, 700)
         self.entitlement = entitlement
         self.songs: list[SongManifest] = []
