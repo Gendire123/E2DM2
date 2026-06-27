@@ -10,6 +10,7 @@ from typing import Any
 class WorkflowMode(str, Enum):
     FULL_LENGTH = "full_length"
     EPIC_MONTAGE = "epic_montage"
+    REAL_ESTATE = "real_estate"
 
 
 class ExportSize(str, Enum):

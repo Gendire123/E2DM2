@@ -362,6 +362,7 @@ class WorkflowSelectionDialog(QDialog):
         self.combo = QComboBox()
         self.combo.addItem("Epic Montage", "epic_montage")
         self.combo.addItem("Full-length Video", "full_length")
+        self.combo.addItem("Real Estate Showcase", "real_estate")
         layout.addWidget(self.combo)
         
         self.builtin_cb = QCheckBox("Built-In")
@@ -382,9 +383,20 @@ class WorkflowSelectionDialog(QDialog):
 class SongEditorDialog(QDialog):
     catalog_changed = Signal()
 
-    def __init__(self, entitlement: EntitlementProvider, parent: QWidget | None = None) -> None:
+    def __init__(self, entitlement: EntitlementProvider, parent: QWidget | None = None, workflow_filter: WorkflowMode | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Epic Song Library")
+        self.workflow_filter = workflow_filter
+        
+        if self.workflow_filter == WorkflowMode.REAL_ESTATE:
+            title_text = "Real Estate Song Library"
+        elif self.workflow_filter == WorkflowMode.EPIC_MONTAGE:
+            title_text = "Epic Song Library"
+        elif self.workflow_filter == WorkflowMode.FULL_LENGTH:
+            title_text = "Full-length Song Library"
+        else:
+            title_text = "Song Library"
+            
+        self.setWindowTitle(title_text)
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowMinMaxButtonsHint)
         self.resize(1220, 700)
         self.entitlement = entitlement
@@ -429,7 +441,17 @@ class SongEditorDialog(QDialog):
         left_buttons.addWidget(self.delete_button)
         left = QWidget()
         left_layout = QVBoxLayout(left)
-        left_layout.addWidget(QLabel("Epic songs"))
+        
+        if self.workflow_filter == WorkflowMode.REAL_ESTATE:
+            label_text = "Real Estate songs"
+        elif self.workflow_filter == WorkflowMode.EPIC_MONTAGE:
+            label_text = "Epic songs"
+        elif self.workflow_filter == WorkflowMode.FULL_LENGTH:
+            label_text = "Full-length songs"
+        else:
+            label_text = "Songs"
+            
+        left_layout.addWidget(QLabel(label_text))
         left_layout.addWidget(self.song_list)
         left_layout.addLayout(left_buttons)
 
@@ -563,26 +585,34 @@ class SongEditorDialog(QDialog):
         if not self.position_slider.isSliderDown():
             self.position_slider.setValue(position)
 
+    @property
+    def filtered_songs(self) -> list[SongManifest]:
+        if getattr(self, "workflow_filter", None) is not None:
+            return [s for s in self.songs if s.workflow == self.workflow_filter]
+        return self.songs
+
     def reload_catalog(self, select_id: str | None = None) -> None:
         try:
             self.songs = load_song_catalog()
         except ValueError as exc:
             QMessageBox.critical(self, "Library error", str(exc))
             self.songs = []
+            
         self.song_list.clear()
         selected_row = 0
-        for row, song in enumerate(self.songs):
+        for row, song in enumerate(self.filtered_songs):
             suffix = "  [built-in]" if song.readonly else ""
             self.song_list.addItem(song.title + suffix)
             if song.song_id == select_id:
                 selected_row = row
-        if self.songs:
+        if self.filtered_songs:
             self.song_list.setCurrentRow(selected_row)
 
     def _load_selected(self, row: int) -> None:
-        if not 0 <= row < len(self.songs):
+        songs = self.filtered_songs
+        if not 0 <= row < len(songs):
             return
-        song = self.songs[row]
+        song = songs[row]
         self.current = song
         if not (song.manifest_path is None and hasattr(self, "audio_source") and self.audio_source and self.audio_source.is_absolute()):
             self.audio_source = song.audio_path
@@ -689,6 +719,18 @@ class SongEditorDialog(QDialog):
             title = f"Epic Montage {next_idx}"
             song_id = f"epic-montage-{next_idx}"
             audio_file_name = f"EpicMusic{next_idx}{suffix_ext}" if next_idx > 1 else f"EpicMusic{suffix_ext}"
+        elif workflow_type == "real_estate":
+            import re
+            existing_indices = []
+            for s in self.songs:
+                match = re.match(r"^real-estate-(\d+)$", s.song_id)
+                if match:
+                    existing_indices.append(int(match.group(1)))
+            next_idx = max(existing_indices, default=0) + 1
+            
+            title = f"Real Estate {next_idx}"
+            song_id = f"real-estate-{next_idx}"
+            audio_file_name = f"RealEstate{next_idx}{suffix_ext}"
         else:
             title = Path(path).stem
             song_id = "-".join(part for part in title.lower().replace("_", "-").split("-") if part.isalnum()) or "custom-song"

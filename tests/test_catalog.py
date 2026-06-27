@@ -221,4 +221,42 @@ def test_new_song_workflow_dialog(monkeypatch, tmp_path, qtbot):
     assert dialog.audio_edit.text() == str(expected_path)
 
 
+def test_real_estate_song_dialog_workflow(monkeypatch, tmp_path, qtbot):
+    from e2dm2.editor import SongEditorDialog, WorkflowSelectionDialog
+    from e2dm2.ui import AlphaEntitlementProvider
+    from e2dm2.models import WorkflowMode
+    from PySide6.QtWidgets import QDialog, QFileDialog
+    
+    dialog = SongEditorDialog(AlphaEntitlementProvider(), workflow_filter=WorkflowMode.REAL_ESTATE)
+    qtbot.addWidget(dialog)
+    
+    assert dialog.workflow_filter == WorkflowMode.REAL_ESTATE
+    
+    test_audio = tmp_path / "real_estate_music.mp3"
+    test_audio.write_bytes(b"mock audio data")
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *args: (str(test_audio), "Audio"))
+    
+    monkeypatch.setattr(WorkflowSelectionDialog, "exec", lambda self: QDialog.DialogCode.Accepted)
+    monkeypatch.setattr(WorkflowSelectionDialog, "selected_workflow", lambda self: "real_estate")
+    monkeypatch.setattr(WorkflowSelectionDialog, "is_builtin", lambda self: False)
+    
+    import re
+    existing_indices = []
+    for s in dialog.songs:
+        match = re.match(r"^real-estate-(\d+)$", s.song_id)
+        if match:
+            existing_indices.append(int(match.group(1)))
+    next_idx = max(existing_indices, default=0) + 1
+
+    dialog.new_song()
+    
+    assert dialog.current is not None
+    assert dialog.current.workflow == WorkflowMode.REAL_ESTATE
+    assert dialog.current.readonly is False
+    assert dialog.current.title == f"Real Estate {next_idx}"
+    assert dialog.current.song_id == f"real-estate-{next_idx}"
+    assert dialog.current.audio_file == f"RealEstate{next_idx}.mp3"
+    assert dialog.current.artist == "E2DM2 Library"
+
+
 

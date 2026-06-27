@@ -318,6 +318,7 @@ class WorkspacePage(QWidget):
         self.workflow_combo = QComboBox()
         self.workflow_combo.addItem("Epic Montage", WorkflowMode.EPIC_MONTAGE)
         self.workflow_combo.addItem("Full-length Video", WorkflowMode.FULL_LENGTH)
+        self.workflow_combo.addItem("Real Estate Showcase", WorkflowMode.REAL_ESTATE)
         self.workflow_combo.currentIndexChanged.connect(self.workflow_changed)
         workflow_row = QHBoxLayout()
         workflow_row.addWidget(QLabel("Workflow"))
@@ -325,9 +326,11 @@ class WorkspacePage(QWidget):
 
         self.epic_panel = self._epic_panel()
         self.full_panel = self._full_panel()
+        self.real_estate_panel = self._real_estate_panel()
         self.mode_stack = QStackedWidget()
         self.mode_stack.addWidget(self.epic_panel)
         self.mode_stack.addWidget(self.full_panel)
+        self.mode_stack.addWidget(self.real_estate_panel)
 
         music_panel = QWidget()
         music_layout = QVBoxLayout(music_panel)
@@ -437,6 +440,38 @@ class WorkspacePage(QWidget):
         layout.addRow("Soundtrack", self.track_combo)
         return panel
 
+    def _real_estate_panel(self) -> QWidget:
+        panel = QWidget()
+        self.re_song_search = QLineEdit()
+        self.re_song_search.setPlaceholderText("Search songs, artists, or moods")
+        self.re_song_search.textChanged.connect(self.apply_song_filters)
+        self.re_mood_filter = QComboBox()
+        self.re_energy_filter = QComboBox()
+        self.re_mood_filter.currentIndexChanged.connect(self.apply_song_filters)
+        self.re_energy_filter.addItems(["All energies", "Low", "Medium", "High"])
+        self.re_energy_filter.currentIndexChanged.connect(self.apply_song_filters)
+        manage = QPushButton("Manage Library")
+        manage.clicked.connect(self.open_library)
+        filters = QHBoxLayout()
+        filters.addWidget(self.re_song_search, 1)
+        filters.addWidget(self.re_mood_filter)
+        filters.addWidget(self.re_energy_filter)
+        filters.addWidget(manage)
+        self.re_song_table = QTableWidget(0, 4)
+        self.re_song_table.setHorizontalHeaderLabels(["Song", "Mood", "Cuts", "Length"])
+        self.re_song_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.re_song_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.re_song_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.re_song_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for column in range(1, 4):
+            self.re_song_table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        self.re_song_table.itemSelectionChanged.connect(self.song_selected)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 8, 0, 8)
+        layout.addLayout(filters)
+        layout.addWidget(self.re_song_table)
+        return panel
+
     def set_project(self, project: Project) -> None:
         self.project = project
         self.project_title.setText(project.settings.name)
@@ -492,6 +527,7 @@ class WorkspacePage(QWidget):
             self.track_combo.setCurrentIndex(max(0, index))
             self.track_combo.blockSignals(False)
 
+        # Epic Montage moods & filter
         moods = sorted({mood for song in self.songs if song.workflow == WorkflowMode.EPIC_MONTAGE for mood in song.moods}, key=str.casefold)
         current_mood = self.mood_filter.currentText() if hasattr(self, "mood_filter") else "All moods"
         if hasattr(self, "mood_filter"):
@@ -503,44 +539,96 @@ class WorkspacePage(QWidget):
             index = self.mood_filter.findText(current_mood)
             self.mood_filter.setCurrentIndex(max(0, index))
             self.mood_filter.blockSignals(False)
-            self.apply_song_filters(selected_id)
+            
+        # Real Estate Showcase moods & filter
+        re_moods = sorted({mood for song in self.songs if song.workflow == WorkflowMode.REAL_ESTATE for mood in song.moods}, key=str.casefold)
+        current_re_mood = self.re_mood_filter.currentText() if hasattr(self, "re_mood_filter") else "All moods"
+        if hasattr(self, "re_mood_filter"):
+            self.re_mood_filter.blockSignals(True)
+            self.re_mood_filter.clear()
+            self.re_mood_filter.addItem("All moods", "")
+            for mood in re_moods:
+                self.re_mood_filter.addItem(mood.title(), mood)
+            index = self.re_mood_filter.findText(current_re_mood)
+            self.re_mood_filter.setCurrentIndex(max(0, index))
+            self.re_mood_filter.blockSignals(False)
+
+        self.apply_song_filters(selected_id)
 
     def apply_song_filters(self, selected_id: str | None = None) -> None:
         if isinstance(selected_id, int):
             selected_id = None
-        mood = self.mood_filter.currentData() or ""
-        energy = "" if self.energy_filter.currentIndex() == 0 else self.energy_filter.currentText().lower()
-        montage_songs = [s for s in self.songs if s.workflow == WorkflowMode.EPIC_MONTAGE]
-        filtered = filter_songs(montage_songs, self.song_search.text(), mood, energy)
         current_id = selected_id or (self.project.settings.song_id if self.project else None)
-        self.song_table.setRowCount(len(filtered))
-        selected_row = -1
-        for row, song in enumerate(filtered):
-            values = [song.title, ", ".join(song.moods), str(len(song.cut_timestamps)), _duration(song.total_duration_seconds)]
-            for column, value in enumerate(values):
-                item = QTableWidgetItem(value)
-                if column == 0:
-                    item.setData(Qt.ItemDataRole.UserRole, song.song_id)
-                    item.setToolTip(f"{song.artist}\nMinimum footage: {_duration(song.minimum_source_duration_seconds)}")
-                self.song_table.setItem(row, column, item)
-            if song.song_id == current_id:
-                selected_row = row
-        if selected_row < 0 and filtered:
-            selected_row = 0
-        if selected_row >= 0:
-            self.song_table.selectRow(selected_row)
+        
+        # 1. Epic Montage filter
+        if hasattr(self, "mood_filter"):
+            mood = self.mood_filter.currentData() or ""
+            energy = "" if self.energy_filter.currentIndex() == 0 else self.energy_filter.currentText().lower()
+            montage_songs = [s for s in self.songs if s.workflow == WorkflowMode.EPIC_MONTAGE]
+            filtered = filter_songs(montage_songs, self.song_search.text(), mood, energy)
+            self.song_table.setRowCount(len(filtered))
+            selected_row = -1
+            for row, song in enumerate(filtered):
+                values = [song.title, ", ".join(song.moods), str(len(song.cut_timestamps)), _duration(song.total_duration_seconds)]
+                for column, value in enumerate(values):
+                    item = QTableWidgetItem(value)
+                    if column == 0:
+                        item.setData(Qt.ItemDataRole.UserRole, song.song_id)
+                        item.setToolTip(f"{song.artist}\nMinimum footage: {_duration(song.minimum_source_duration_seconds)}")
+                    self.song_table.setItem(row, column, item)
+                if song.song_id == current_id:
+                    selected_row = row
+            if selected_row < 0 and filtered:
+                selected_row = 0
+            if selected_row >= 0:
+                self.song_table.selectRow(selected_row)
+
+        # 2. Real Estate Showcase filter
+        if hasattr(self, "re_mood_filter"):
+            re_mood = self.re_mood_filter.currentData() or ""
+            re_energy = "" if self.re_energy_filter.currentIndex() == 0 else self.re_energy_filter.currentText().lower()
+            re_songs = [s for s in self.songs if s.workflow == WorkflowMode.REAL_ESTATE]
+            re_filtered = filter_songs(re_songs, self.re_song_search.text(), re_mood, re_energy)
+            self.re_song_table.setRowCount(len(re_filtered))
+            selected_re_row = -1
+            for row, song in enumerate(re_filtered):
+                values = [song.title, ", ".join(song.moods), str(len(song.cut_timestamps)), _duration(song.total_duration_seconds)]
+                for column, value in enumerate(values):
+                    item = QTableWidgetItem(value)
+                    if column == 0:
+                        item.setData(Qt.ItemDataRole.UserRole, song.song_id)
+                        item.setToolTip(f"{song.artist}\nMinimum footage: {_duration(song.minimum_source_duration_seconds)}")
+                    self.re_song_table.setItem(row, column, item)
+                if song.song_id == current_id:
+                    selected_re_row = row
+            if selected_re_row < 0 and re_filtered:
+                selected_re_row = 0
+            if selected_re_row >= 0:
+                self.re_song_table.selectRow(selected_re_row)
 
     def song_selected(self) -> None:
         if not self.project:
             return
-        row = self.song_table.currentRow()
-        item = self.song_table.item(row, 0) if row >= 0 else None
-        if item:
-            self.project.settings.song_id = item.data(Qt.ItemDataRole.UserRole)
+        sender = self.sender()
+        if sender == self.song_table:
+            row = self.song_table.currentRow()
+            item = self.song_table.item(row, 0) if row >= 0 else None
+            if item:
+                self.project.settings.song_id = item.data(Qt.ItemDataRole.UserRole)
+        elif sender == self.re_song_table:
+            row = self.re_song_table.currentRow()
+            item = self.re_song_table.item(row, 0) if row >= 0 else None
+            if item:
+                self.project.settings.song_id = item.data(Qt.ItemDataRole.UserRole)
 
     def workflow_changed(self) -> None:
         workflow = self.workflow_combo.currentData()
-        self.mode_stack.setCurrentIndex(0 if workflow == WorkflowMode.EPIC_MONTAGE else 1)
+        if workflow == WorkflowMode.EPIC_MONTAGE:
+            self.mode_stack.setCurrentIndex(0)
+        elif workflow == WorkflowMode.FULL_LENGTH:
+            self.mode_stack.setCurrentIndex(1)
+        elif workflow == WorkflowMode.REAL_ESTATE:
+            self.mode_stack.setCurrentIndex(2)
 
     def add_files(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(self, "Import drone footage", "", "Video (*.mp4 *.mov *.m4v)")
@@ -625,7 +713,7 @@ class WorkspacePage(QWidget):
         self.refresh_media()
 
     def open_library(self) -> None:
-        dialog = SongEditorDialog(self.entitlement, self)
+        dialog = SongEditorDialog(self.entitlement, self, workflow_filter=self.workflow_combo.currentData())
         dialog.catalog_changed.connect(lambda: self.refresh_catalog(self.project.settings.song_id if self.project else None))
         dialog.exec()
         self.refresh_catalog(self.project.settings.song_id if self.project else None)
@@ -656,8 +744,9 @@ class WorkspacePage(QWidget):
             return
         workflow = WorkflowMode(self.workflow_combo.currentData())
         song_id = self.project.settings.song_id
-        if workflow == WorkflowMode.EPIC_MONTAGE and not song_id:
-            QMessageBox.warning(self, "Epic song", "Choose an Epic song.")
+        if workflow in {WorkflowMode.EPIC_MONTAGE, WorkflowMode.REAL_ESTATE} and not song_id:
+            msg = "Choose a Real Estate song." if workflow == WorkflowMode.REAL_ESTATE else "Choose an Epic song."
+            QMessageBox.warning(self, "Missing song", msg)
             return
         self.project.settings.workflow = workflow
         self.project.settings.full_length_track_id = self.track_combo.currentData()

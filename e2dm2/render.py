@@ -122,9 +122,10 @@ def create_render_plan(
     )
     song_data: dict | None = None
     song: SongManifest | None = None
-    if request.workflow == WorkflowMode.EPIC_MONTAGE:
+    if request.workflow in {WorkflowMode.EPIC_MONTAGE, WorkflowMode.REAL_ESTATE}:
         if not request.song_id:
-            raise ValueError("Choose an Epic song before rendering.")
+            msg = "Choose a Real Estate song before rendering." if request.workflow == WorkflowMode.REAL_ESTATE else "Choose an Epic song before rendering."
+            raise ValueError(msg)
         song = find_song(request.song_id, songs or load_song_catalog())
         music_path, song_data = _snapshot_epic_song(project, song)
     else:
@@ -425,9 +426,9 @@ def render(
         destination.parent.mkdir(parents=True, exist_ok=True)
         _write_concat(output.media_paths, concat)
         try:
-            if plan.workflow == WorkflowMode.EPIC_MONTAGE:
+            if plan.workflow in {WorkflowMode.EPIC_MONTAGE, WorkflowMode.REAL_ESTATE}:
                 if song is None:
-                    raise ValueError("Epic render plan is missing its song manifest.")
+                    raise ValueError("Render plan is missing its song manifest.")
                 filter_path.write_text(_montage_filter(output, song), encoding="utf-8")
                 command = _montage_command(plan, output, concat, filter_path, temporary)
             else:
