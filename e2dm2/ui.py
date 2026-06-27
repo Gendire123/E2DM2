@@ -292,13 +292,20 @@ class WorkspacePage(QWidget):
         header_view.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         for column in range(1, 6):
             header_view.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        
+        # Add files and folder buttons with icons
         add_files = QPushButton("Add Files")
+        add_files.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon))
         add_folder = QPushButton("Add Folder")
+        add_folder.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon))
         add_files.clicked.connect(self.add_files)
         add_folder.clicked.connect(self.add_folder)
+        
         up = self._tool_button(QStyle.StandardPixmap.SP_ArrowUp, "Move selected clip up", lambda: self.move_selected(-1))
         down = self._tool_button(QStyle.StandardPixmap.SP_ArrowDown, "Move selected clip down", lambda: self.move_selected(1))
         remove = self._tool_button(QStyle.StandardPixmap.SP_TrashIcon, "Remove selected clip", self.remove_selected)
+        
+        # Actions row
         media_actions = QHBoxLayout()
         media_actions.addWidget(add_files)
         media_actions.addWidget(add_folder)
@@ -307,14 +314,34 @@ class WorkspacePage(QWidget):
         media_actions.addWidget(remove)
         media_actions.addStretch()
         self.media_total = QLabel("No footage imported")
+        self.media_total.setStyleSheet("color: #68716b; font-weight: 500;")
         media_actions.addWidget(self.media_total)
+
+        # Footage workspace card
+        footage_card = QFrame()
+        footage_card.setObjectName("produceCard")
+        footage_layout = QVBoxLayout(footage_card)
+        footage_layout.setContentsMargins(20, 20, 20, 20)
+        footage_layout.setSpacing(14)
+
+        # Card Title Header
+        footage_header = QHBoxLayout()
+        footage_title = QLabel("Imported Clips")
+        footage_title.setStyleSheet("font-size: 11pt; font-weight: bold; color: #18342a;")
+        footage_header.addWidget(footage_title)
+        footage_header.addStretch()
+        footage_layout.addLayout(footage_header)
+
+        # Add table and actions into the card
+        footage_layout.addWidget(self.media_table, 1)
+        footage_layout.addLayout(media_actions)
+
+        # Main panel layout
         media_panel = QWidget()
         media_layout = QVBoxLayout(media_panel)
         media_layout.setContentsMargins(16, 16, 16, 16)
-        media_layout.setSpacing(12)
-        media_layout.addWidget(QLabel("Footage"))
-        media_layout.addWidget(self.media_table)
-        media_layout.addLayout(media_actions)
+        media_layout.setSpacing(16)
+        media_layout.addWidget(footage_card, 1)
 
         self.workflow_combo = QComboBox()
         self.workflow_combo.addItem("Epic Montage", WorkflowMode.EPIC_MONTAGE)
@@ -986,6 +1013,9 @@ QFrame#produceCard {
 }
 QFrame#produceCard QLabel, QFrame#produceCard QCheckBox {
     background: transparent;
+}
+QFrame#produceCard QTableWidget {
+    border: none;
 }
 """
 
