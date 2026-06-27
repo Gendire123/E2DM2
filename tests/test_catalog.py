@@ -90,3 +90,28 @@ def test_save_builtin_song_is_allowed(tmp_path):
     assert reloaded.title == "Updated Builtin Title"
 
 
+def test_song_manifest_effects_flow():
+    from e2dm2.models import SongManifest, EnergyLevel
+    from e2dm2.catalog import validate_song_manifest
+    
+    song = SongManifest(
+        schema_version=1, song_id="test-song", title="Test Song", artist="Artist",
+        audio_file="audio.m4a", moods=["epic"], bpm=120.0, energy=EnergyLevel.HIGH,
+        total_duration_seconds=10.0, minimum_source_duration_seconds=10.0,
+        opening_fade_seconds=0.0, cuts_end_seconds=10.0, fade_out_seconds=0.0,
+        escalation_seconds=0.0, cut_timestamps=[0.0, 5.0], effects=["none"]
+    )
+    errors = validate_song_manifest(song, require_audio=False)
+    assert any("number of effects must match" in error for error in errors)
+    
+    songs = load_song_catalog(custom_root=Path("missing-library"))
+    assert len(songs[0].effects) == 29
+    assert songs[0].effects[18] == "slow_fade_out"
+    assert songs[0].effects[19] == "flash"
+    assert songs[0].effects.count("none") == 27
+    
+    assert len(songs[1].effects) == 74
+    assert songs[1].effects.count("heartbeat") == 15
+
+
+

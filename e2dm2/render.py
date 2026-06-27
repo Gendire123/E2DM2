@@ -250,38 +250,67 @@ def _montage_filter(output: RenderOutputPlan, song: SongManifest) -> str:
         f"format=yuv420p[basevideo]"
     )
     video_label = "basevideo"
-    if song.dark_cue:
-        cue = song.dark_cue
-        end = cue.end_seconds + cue.fade_out_seconds
-        filters.append(
-            f"color=c=black@{cue.opacity:.3f}:s={source_width}x{source_height}:d={song.total_duration_seconds:.6f},"
-            f"format=yuva420p,fade=t=in:st={cue.start_seconds:.6f}:d={cue.end_seconds - cue.start_seconds:.6f}:alpha=1,"
-            f"fade=t=out:st={cue.end_seconds:.6f}:d={cue.fade_out_seconds:.6f}:alpha=1[darkcue]"
-        )
-        filters.append(f"[{video_label}][darkcue]overlay=shortest=1:enable='between(t\\,{cue.start_seconds:.6f}\\,{end:.6f})'[darkvideo]")
-        video_label = "darkvideo"
-    for index, timestamp in enumerate(song.heartbeat.timestamps):
-        end = timestamp + song.heartbeat.fade_seconds
-        filters.append(
-            f"color=c=black@{song.heartbeat.opacity:.3f}:s={source_width}x{source_height}:d={song.total_duration_seconds:.6f},"
-            f"format=yuva420p,fade=t=out:st={timestamp:.6f}:d={song.heartbeat.fade_seconds:.6f}:alpha=1[heartbeat{index}]"
-        )
-        filters.append(
-            f"[{video_label}][heartbeat{index}]overlay=shortest=1:enable='between(t\\,{timestamp:.6f}\\,{end:.6f})',"
-            f"format=yuv420p[heartbeatvideo{index}]"
-        )
-        video_label = f"heartbeatvideo{index}"
-    if song.flash_cue:
-        cue = song.flash_cue
-        fade_out_start = cue.start_seconds + cue.fade_in_seconds
-        end = cue.start_seconds + cue.duration_seconds
-        filters.append(
-            f"color=c=white@{cue.opacity:.3f}:s={source_width}x{source_height}:d={song.total_duration_seconds:.6f},"
-            f"format=yuva420p,fade=t=in:st={cue.start_seconds:.6f}:d={cue.fade_in_seconds:.6f}:alpha=1,"
-            f"fade=t=out:st={fade_out_start:.6f}:d={end - fade_out_start:.6f}:alpha=1[whiteflash]"
-        )
-        filters.append(f"[{video_label}][whiteflash]overlay=shortest=1:enable='between(t\\,{cue.start_seconds:.6f}\\,{end:.6f})'[effectvideo]")
-        video_label = "effectvideo"
+    effects = getattr(song, "effects", [])
+    
+    # Render heartbeat overlays
+    heartbeat_idx = 0
+    hb_opacity = song.heartbeat.opacity if song.heartbeat else 0.3
+    hb_fade = song.heartbeat.fade_seconds if song.heartbeat else 0.5
+    for idx, (timestamp, effect) in enumerate(zip(song.cut_timestamps, effects)):
+        if effect == "heartbeat":
+            end = timestamp + hb_fade
+            filters.append(
+                f"color=c=black@{hb_opacity:.3f}:s={source_width}x{source_height}:d={song.total_duration_seconds:.6f},"
+                f"format=yuva420p,fade=t=out:st={timestamp:.6f}:d={hb_fade:.6f}:alpha=1[heartbeat{heartbeat_idx}]"
+            )
+            filters.append(
+                f"[{video_label}][heartbeat{heartbeat_idx}]overlay=shortest=1:enable='between(t\\,{timestamp:.6f}\\,{end:.6f})',"
+                f"format=yuv420p[heartbeatvideo{heartbeat_idx}]"
+            )
+            video_label = f"heartbeatvideo{heartbeat_idx}"
+            heartbeat_idx += 1
+
+    # Render flash overlays
+    flash_idx = 0
+    flash_dur = song.flash_cue.duration_seconds if song.flash_cue else 0.3
+    flash_fade = song.flash_cue.fade_in_seconds if song.flash_cue else 0.05
+    flash_op = song.flash_cue.opacity if song.flash_cue else 0.8
+    for idx, (timestamp, effect) in enumerate(zip(song.cut_timestamps, effects)):
+        if effect == "flash":
+            fade_out_start = timestamp + flash_fade
+            end = timestamp + flash_dur
+            filters.append(
+                f"color=c=white@{flash_op:.3f}:s={source_width}x{source_height}:d={song.total_duration_seconds:.6f},"
+                f"format=yuva420p,fade=t=in:st={timestamp:.6f}:d={flash_fade:.6f}:alpha=1,"
+                f"fade=t=out:st={fade_out_start:.6f}:d={end - fade_out_start:.6f}:alpha=1[whiteflash{flash_idx}]"
+            )
+            filters.append(
+                f"[{video_label}][whiteflash{flash_idx}]overlay=shortest=1:enable='between(t\\,{timestamp:.6f}\\,{end:.6f})',"
+                f"format=yuv420p[flashvideo{flash_idx}]"
+            )
+            video_label = f"flashvideo{flash_idx}"
+            flash_idx += 1
+
+    # Render slow fade out overlays
+    slowfade_idx = 0
+    fade_in = (song.dark_cue.end_seconds - song.dark_cue.start_seconds) if song.dark_cue else 1.5
+    fade_out = song.dark_cue.fade_out_seconds if song.dark_cue else 1.0
+    slow_op = song.dark_cue.opacity if song.dark_cue else 0.9
+    for idx, (timestamp, effect) in enumerate(zip(song.cut_timestamps, effects)):
+        if effect == "slow_fade_out":
+            end = timestamp + fade_in + fade_out
+            filters.append(
+                f"color=c=black@{slow_op:.3f}:s={source_width}x{source_height}:d={song.total_duration_seconds:.6f},"
+                f"format=yuva420p,fade=t=in:st={timestamp:.6f}:d={fade_in:.6f}:alpha=1,"
+                f"fade=t=out:st={timestamp + fade_in:.6f}:d={fade_out:.6f}:alpha=1[slowfade{slowfade_idx}]"
+            )
+            filters.append(
+                f"[{video_label}][slowfade{slowfade_idx}]overlay=shortest=1:enable='between(t\\,{timestamp:.6f}\\,{end:.6f})',"
+                f"format=yuv420p[slowfadevideo{slowfade_idx}]"
+            )
+            video_label = f"slowfadevideo{slowfade_idx}"
+            slowfade_idx += 1
+
     filters.append(f"[{video_label}]scale={output.width}:{output.height}:flags=lanczos,setsar=1,format=yuv420p[videoout]")
     music_fade_start = song.total_duration_seconds - song.fade_out_seconds
     filters.append(

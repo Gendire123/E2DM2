@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
+    QHeaderView,
     QInputDialog,
     QLabel,
     QLineEdit,
@@ -60,15 +61,26 @@ def _spin(maximum: float = 100000.0, decimals: int = 3) -> QDoubleSpinBox:
     return control
 
 
+EFFECT_OPTIONS = [
+    ("None", "none"),
+    ("Heartbeat Flash", "heartbeat"),
+    ("Sepia Color", "sepia"),
+    ("Slow Fade Out", "slow_fade_out"),
+    ("Flash Effect", "flash"),
+]
+
+
 class MarkerTable(QWidget):
     values_changed = Signal(object)
+    effects_changed = Signal(object)
     selection_changed = Signal(int)
 
     def __init__(self, label: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.table = QTableWidget(0, 1)
-        self.table.setHorizontalHeaderLabels([label])
-        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table = QTableWidget(0, 2)
+        self.table.setHorizontalHeaderLabels([label, "Visual Effect"])
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.itemChanged.connect(self._emit_values)
         self.table.currentCellChanged.connect(lambda row, _column, _old_row, _old_column: self.selection_changed.emit(row))
@@ -79,7 +91,7 @@ class MarkerTable(QWidget):
         add_button.clicked.connect(lambda: self.add_value(0.0))
         paste_button.clicked.connect(self.paste_values)
         remove_button.clicked.connect(self.remove_selected)
-        sort_button.clicked.connect(lambda: self.set_values(sorted(set(self.values()))))
+        sort_button.clicked.connect(self.sort_values)
         buttons = QHBoxLayout()
         buttons.addWidget(add_button)
         buttons.addWidget(paste_button)
@@ -92,33 +104,79 @@ class MarkerTable(QWidget):
         layout.addLayout(buttons)
         self.action_buttons = [add_button, paste_button, remove_button, sort_button]
 
-    def add_value(self, value: float) -> None:
+    def _create_effect_combo(self, effect_val: str) -> QComboBox:
+        combo = QComboBox()
+        for name, val in EFFECT_OPTIONS:
+            combo.addItem(name, val)
+        idx = combo.findData(effect_val)
+        combo.setCurrentIndex(max(0, idx))
+        combo.currentIndexChanged.connect(self._emit_effects)
+        return combo
+
+    def add_value(self, value: float, effect: str = "none") -> None:
         row = self.table.rowCount()
         self.table.insertRow(row)
         self.table.setItem(row, 0, QTableWidgetItem(f"{value:.6f}"))
+        combo = self._create_effect_combo(effect)
+        self.table.setCellWidget(row, 1, combo)
         self.table.scrollToBottom()
+        self._emit_values()
+        self._emit_effects()
 
     def values(self) -> list[float]:
         values = []
         for row in range(self.table.rowCount()):
             item = self.table.item(row, 0)
             if item and item.text().strip():
-                values.append(float(item.text().strip()))
+                try:
+                    values.append(float(item.text().strip()))
+                except ValueError:
+                    values.append(0.0)
+            else:
+                values.append(0.0)
         return values
 
-    def set_values(self, values: list[float]) -> None:
+    def effects(self) -> list[str]:
+        effects = []
+        for row in range(self.table.rowCount()):
+            combo = self.table.cellWidget(row, 1)
+            if isinstance(combo, QComboBox):
+                effects.append(combo.currentData())
+            else:
+                effects.append("none")
+        return effects
+
+    def set_values_and_effects(self, values: list[float], effects: list[str]) -> None:
+        if len(effects) < len(values):
+            effects = effects + ["none"] * (len(values) - len(effects))
+        elif len(effects) > len(values):
+            effects = effects[:len(values)]
         with QSignalBlocker(self.table):
             self.table.setRowCount(0)
-            for value in values:
+            for value, effect in zip(values, effects):
                 row = self.table.rowCount()
                 self.table.insertRow(row)
                 self.table.setItem(row, 0, QTableWidgetItem(f"{value:.6f}"))
+                combo = self._create_effect_combo(effect)
+                self.table.setCellWidget(row, 1, combo)
         self.values_changed.emit(self.values())
+        self.effects_changed.emit(self.effects())
+
+    def set_values(self, values: list[float]) -> None:
+        self.set_values_and_effects(values, ["none"] * len(values))
+
+    def sort_values(self) -> None:
+        pairs = list(zip(self.values(), self.effects()))
+        pairs.sort(key=lambda p: p[0])
+        sorted_vals = [p[0] for p in pairs]
+        sorted_effects = [p[1] for p in pairs]
+        self.set_values_and_effects(sorted_vals, sorted_effects)
 
     def remove_selected(self) -> None:
         for row in sorted({index.row() for index in self.table.selectedIndexes()}, reverse=True):
             self.table.removeRow(row)
         self._emit_values()
+        self._emit_effects()
 
     def paste_values(self) -> None:
         text, accepted = QInputDialog.getMultiLineText(self, "Paste timestamps", "One timestamp per line")
@@ -129,7 +187,7 @@ class MarkerTable(QWidget):
         except ValueError:
             QMessageBox.warning(self, "Invalid timestamps", "Every timestamp must be a number of seconds.")
             return
-        self.set_values(sorted(set(values)))
+        self.set_values_and_effects(sorted(set(values)), ["none"] * len(values))
 
     def _emit_values(self) -> None:
         try:
@@ -137,11 +195,16 @@ class MarkerTable(QWidget):
         except ValueError:
             return
 
+    def _emit_effects(self) -> None:
+        self.effects_changed.emit(self.effects())
+
     def select_row(self, row: int) -> None:
         if 0 <= row < self.table.rowCount():
             self.table.setCurrentCell(row, 0)
             self.table.selectRow(row)
-            self.table.scrollToItem(self.table.item(row, 0))
+            item = self.table.item(row, 0)
+            if item:
+                self.table.scrollToItem(item)
 
     def set_visible_row_count(self, rows: int) -> None:
         row_height = 31
@@ -208,7 +271,6 @@ class SongEditorDialog(QDialog):
         self.tabs.addTab(self._general_tab(), "General")
         self.cuts_tab = self._timing_tab()
         self.tabs.addTab(self.cuts_tab, "Cuts")
-        self.tabs.addTab(self._effects_tab(), "Effects")
         self.status_label = QLabel()
         self.status_label.setWordWrap(True)
         self.status_label.setObjectName("statusLabel")
@@ -321,43 +383,6 @@ class SongEditorDialog(QDialog):
         layout.addWidget(self.cut_markers)
         return widget
 
-    def _effects_tab(self) -> QWidget:
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        self.heartbeat_markers = MarkerTable("Heartbeat timestamp (seconds)")
-        self.heartbeat_opacity = _spin(1, 3)
-        self.heartbeat_fade = _spin(10)
-        heartbeat_form = QFormLayout()
-        heartbeat_form.addRow("Heartbeat opacity", self.heartbeat_opacity)
-        heartbeat_form.addRow("Heartbeat fade", self.heartbeat_fade)
-        layout.addWidget(QLabel("Heartbeat markers"))
-        layout.addWidget(self.heartbeat_markers, 1)
-        layout.addLayout(heartbeat_form)
-
-        cues = QHBoxLayout()
-        dark_widget = QWidget()
-        dark_form = QFormLayout(dark_widget)
-        self.dark_enabled = QCheckBox("Enable dark cue")
-        self.dark_start, self.dark_end, self.dark_fade, self.dark_opacity = _spin(), _spin(), _spin(), _spin(1, 3)
-        dark_form.addRow(self.dark_enabled)
-        dark_form.addRow("Start", self.dark_start)
-        dark_form.addRow("End", self.dark_end)
-        dark_form.addRow("Fade out", self.dark_fade)
-        dark_form.addRow("Opacity", self.dark_opacity)
-        flash_widget = QWidget()
-        flash_form = QFormLayout(flash_widget)
-        self.flash_enabled = QCheckBox("Enable flash cue")
-        self.flash_start, self.flash_duration, self.flash_fade, self.flash_opacity = _spin(), _spin(), _spin(), _spin(1, 3)
-        flash_form.addRow(self.flash_enabled)
-        flash_form.addRow("Start", self.flash_start)
-        flash_form.addRow("Duration", self.flash_duration)
-        flash_form.addRow("Fade in", self.flash_fade)
-        flash_form.addRow("Opacity", self.flash_opacity)
-        cues.addWidget(dark_widget)
-        cues.addWidget(flash_widget)
-        layout.addLayout(cues)
-        return widget
-
     def _connect_player(self) -> None:
         self.player.positionChanged.connect(self._position_changed)
         self.player.durationChanged.connect(self.position_slider.setMaximum)
@@ -411,22 +436,7 @@ class SongEditorDialog(QDialog):
         self.hard_cut_spin.setValue(song.transitions.hard_cut_threshold_seconds)
         self.short_threshold_spin.setValue(song.source_progression.short_cut_threshold_seconds)
         self.short_advance_spin.setValue(song.source_progression.short_cut_advance_seconds)
-        self.cut_markers.set_values(song.cut_timestamps)
-        self.heartbeat_markers.set_values(song.heartbeat.timestamps)
-        self.heartbeat_opacity.setValue(song.heartbeat.opacity)
-        self.heartbeat_fade.setValue(song.heartbeat.fade_seconds)
-        self.dark_enabled.setChecked(song.dark_cue is not None)
-        if song.dark_cue:
-            self.dark_start.setValue(song.dark_cue.start_seconds)
-            self.dark_end.setValue(song.dark_cue.end_seconds)
-            self.dark_fade.setValue(song.dark_cue.fade_out_seconds)
-            self.dark_opacity.setValue(song.dark_cue.opacity)
-        self.flash_enabled.setChecked(song.flash_cue is not None)
-        if song.flash_cue:
-            self.flash_start.setValue(song.flash_cue.start_seconds)
-            self.flash_duration.setValue(song.flash_cue.duration_seconds)
-            self.flash_fade.setValue(song.flash_cue.fade_in_seconds)
-            self.flash_opacity.setValue(song.flash_cue.opacity)
+        self.cut_markers.set_values_and_effects(song.cut_timestamps, song.effects)
         self.player.setSource(QUrl.fromLocalFile(str(song.audio_path)))
         self.load_waveform(song.audio_path)
         # For now, built-in songs CAN be edited (cuts, effects values, etc.)
@@ -439,10 +449,7 @@ class SongEditorDialog(QDialog):
             self.title_edit, self.artist_edit, self.moods_edit, self.energy_combo, self.bpm_spin, self.audio_edit,
             self.audio_button, self.total_spin, self.minimum_source_spin, self.opening_spin, self.cuts_end_spin,
             self.fade_out_spin, self.escalation_spin, self.transition_spin, self.hard_cut_spin,
-            self.short_threshold_spin, self.short_advance_spin, self.cut_markers, self.heartbeat_markers,
-            self.heartbeat_opacity, self.heartbeat_fade, self.dark_enabled, self.dark_start, self.dark_end,
-            self.dark_fade, self.dark_opacity, self.flash_enabled, self.flash_start, self.flash_duration,
-            self.flash_fade, self.flash_opacity,
+            self.short_threshold_spin, self.short_advance_spin, self.cut_markers,
         ]
         for control in controls:
             control.setEnabled(editable)
@@ -600,12 +607,25 @@ class SongEditorDialog(QDialog):
             QMessageBox.warning(self, "Could not duplicate preset", str(exc))
 
     def _collect_song(self) -> SongManifest:
-        dark = None
-        if self.dark_enabled.isChecked():
-            dark = DarkCue(self.dark_start.value(), self.dark_end.value(), self.dark_fade.value(), self.dark_opacity.value())
+        # Determine fallback cues/heartbeat for backward compatibility
+        cut_vals = self.cut_markers.values()
+        cut_effs = self.cut_markers.effects()
+        
+        hb_timestamps = [ts for ts, eff in zip(cut_vals, cut_effs) if eff == "heartbeat"]
+        heartbeat = HeartbeatSettings(hb_timestamps, opacity=0.3, fade_seconds=0.5)
+        
         flash = None
-        if self.flash_enabled.isChecked():
-            flash = FlashCue(self.flash_start.value(), self.flash_duration.value(), self.flash_fade.value(), self.flash_opacity.value())
+        for ts, eff in zip(cut_vals, cut_effs):
+            if eff == "flash":
+                flash = FlashCue(start_seconds=ts, duration_seconds=0.3, fade_in_seconds=0.05, opacity=0.8)
+                break
+                
+        dark = None
+        for ts, eff in zip(cut_vals, cut_effs):
+            if eff == "slow_fade_out":
+                dark = DarkCue(start_seconds=ts, end_seconds=ts + 1.5, fade_out_seconds=1.0, opacity=0.9)
+                break
+
         return SongManifest(
             schema_version=1,
             song_id=self.id_edit.text().strip(),
@@ -621,10 +641,11 @@ class SongEditorDialog(QDialog):
             cuts_end_seconds=self.cuts_end_spin.value(),
             fade_out_seconds=self.fade_out_spin.value(),
             escalation_seconds=self.escalation_spin.value(),
-            cut_timestamps=self.cut_markers.values(),
+            cut_timestamps=cut_vals,
+            effects=cut_effs,
             transitions=TransitionSettings(self.transition_spin.value(), self.hard_cut_spin.value()),
             source_progression=SourceProgressionSettings(self.short_threshold_spin.value(), self.short_advance_spin.value()),
-            heartbeat=HeartbeatSettings(self.heartbeat_markers.values(), self.heartbeat_opacity.value(), self.heartbeat_fade.value()),
+            heartbeat=heartbeat,
             dark_cue=dark,
             flash_cue=flash,
             # For now, built-in songs CAN be edited (preserve manifest_path)

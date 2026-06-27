@@ -54,6 +54,8 @@ def validate_song_manifest(song: SongManifest, require_audio: bool = True) -> li
         errors.append("Song ID must contain lowercase letters, numbers, and single hyphens only.")
     if not song.title.strip():
         errors.append("Title is required.")
+    if len(song.effects) != len(song.cut_timestamps):
+        errors.append("The number of effects must match the number of cut timestamps.")
     if require_audio and not song.audio_path.is_file():
         errors.append(f"Audio file does not exist: {song.audio_path}")
     if song.total_duration_seconds <= 0:

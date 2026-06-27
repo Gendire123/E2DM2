@@ -100,6 +100,7 @@ class SongManifest:
     heartbeat: HeartbeatSettings = field(default_factory=HeartbeatSettings)
     dark_cue: DarkCue | None = None
     flash_cue: FlashCue | None = None
+    effects: list[str] = field(default_factory=list)
     readonly: bool = False
     manifest_path: Path | None = field(default=None, repr=False, compare=False)
 
@@ -117,6 +118,35 @@ class SongManifest:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any], manifest_path: Path | None = None, readonly: bool = False) -> "SongManifest":
+        cut_timestamps = [float(value) for value in data["cut_timestamps"]]
+        effects_data = data.get("effects")
+        if effects_data is None:
+            effects = ["none"] * len(cut_timestamps)
+            # Upgrade heartbeat
+            hb_timestamps = data.get("heartbeat", {}).get("timestamps", [])
+            for ts in hb_timestamps:
+                for idx, cut_ts in enumerate(cut_timestamps):
+                    if abs(cut_ts - ts) < 0.01:
+                        effects[idx] = "heartbeat"
+            # Upgrade flash cue
+            flash_start = data.get("flash_cue", {}).get("start_seconds") if data.get("flash_cue") else None
+            if flash_start is not None:
+                for idx, cut_ts in enumerate(cut_timestamps):
+                    if abs(cut_ts - flash_start) < 0.01:
+                        effects[idx] = "flash"
+            # Upgrade dark cue (slow_fade_out)
+            dark_start = data.get("dark_cue", {}).get("start_seconds") if data.get("dark_cue") else None
+            if dark_start is not None:
+                for idx, cut_ts in enumerate(cut_timestamps):
+                    if abs(cut_ts - dark_start) < 0.01:
+                        effects[idx] = "slow_fade_out"
+        else:
+            effects = [str(val) for val in effects_data]
+            if len(effects) < len(cut_timestamps):
+                effects = effects + ["none"] * (len(cut_timestamps) - len(effects))
+            elif len(effects) > len(cut_timestamps):
+                effects = effects[:len(cut_timestamps)]
+
         return cls(
             schema_version=int(data.get("schema_version", 1)),
             song_id=str(data["song_id"]),
@@ -132,12 +162,13 @@ class SongManifest:
             cuts_end_seconds=float(data["cuts_end_seconds"]),
             fade_out_seconds=float(data["fade_out_seconds"]),
             escalation_seconds=float(data.get("escalation_seconds", 0)),
-            cut_timestamps=[float(value) for value in data["cut_timestamps"]],
+            cut_timestamps=cut_timestamps,
             transitions=TransitionSettings(**data.get("transitions", {})),
             source_progression=SourceProgressionSettings(**data.get("source_progression", {})),
             heartbeat=HeartbeatSettings(**data.get("heartbeat", {})),
             dark_cue=DarkCue(**data["dark_cue"]) if data.get("dark_cue") else None,
             flash_cue=FlashCue(**data["flash_cue"]) if data.get("flash_cue") else None,
+            effects=effects,
             readonly=readonly or bool(data.get("readonly", False)),
             manifest_path=manifest_path,
         )

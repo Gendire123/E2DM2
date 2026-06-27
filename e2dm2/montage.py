@@ -71,7 +71,7 @@ def build_montage_segment_plan(video_duration: float, song: SongManifest) -> lis
             source_duration=source_duration,
             output_duration=output_duration,
             speed=speeds[index],
-            style=color_styles[index % len(color_styles)],
+            style="sepia" if index < len(song.effects) and song.effects[index] == "sepia" else "natural",
             zoom=1.045 if index % 3 != 1 else 1.0,
             motion_blur=index / max(segment_count - 1, 1) > 0.45 and index % 5 == 0,
             cue=index == cue_index,
