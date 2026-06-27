@@ -353,6 +353,7 @@ class WorkspacePage(QWidget):
         self.progress_bar.setRange(0, 100)
         self.results_list = QListWidget()
         self.results_list.itemDoubleClicked.connect(self.open_result)
+        self.results_list.setVisible(False)
         open_folder = QPushButton("Open Renders Folder")
         open_folder.clicked.connect(self.open_renders_folder)
         status_panel = QWidget()
@@ -439,6 +440,7 @@ class WorkspacePage(QWidget):
         self.refresh_catalog(project.settings.song_id)
         self.workflow_changed()
         self.results_list.clear()
+        self.results_list.setVisible(False)
         self.status_label.setText("Ready")
         self.progress_bar.setValue(0)
         self.workspace_tabs.setCurrentIndex(0)
@@ -652,6 +654,7 @@ class WorkspacePage(QWidget):
         self.thread = thread
         self.worker = worker
         self.results_list.clear()
+        self.results_list.setVisible(False)
         self._set_busy(True)
         LOGGER.info("UI started production")
         thread.start()
@@ -669,6 +672,8 @@ class WorkspacePage(QWidget):
             item = self.results_list.item(self.results_list.count() - 1)
             item.setData(Qt.ItemDataRole.UserRole, output.output_path if output.success else "")
             item.setToolTip(output.output_path if output.success else (output.error or "Render failed"))
+        if result.outputs:
+            self.results_list.setVisible(True)
         if result.cancelled:
             self.status_label.setText("Production cancelled. Completed outputs were kept.")
         elif result.successful_outputs:

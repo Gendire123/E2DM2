@@ -112,3 +112,46 @@ def test_song_editor_uses_compact_seven_row_cut_table(qtbot):
     assert dialog.height() == 700
     assert row_height == 31
     assert 7 * row_height <= body_height <= 7 * row_height + 8
+
+
+def test_results_list_visibility_flow(qtbot, tmp_path, monkeypatch):
+    from e2dm2.models import OutputResult
+
+    class FakeRenderWorker(QObject):
+        progress = Signal(object)
+        finished = Signal(object)
+        failed = Signal(str)
+
+        def __init__(self, project, request, cancellation):
+            super().__init__()
+
+        @Slot()
+        def run(self):
+            outputs = [OutputResult("out1", "path1.mp4", True)]
+            self.finished.emit(RenderResult(outputs))
+
+    monkeypatch.setattr("e2dm2.ui.RenderWorker", FakeRenderWorker)
+    page = WorkspacePage()
+    qtbot.addWidget(page)
+    
+    # 1. Initially hidden
+    assert page.results_list.isHidden()
+    
+    page.set_project(create_project("Visibility Test", tmp_path / "projects"))
+    assert page.results_list.isHidden()
+    
+    page.start_render()
+    # During render, it should remain hidden
+    assert page.results_list.isHidden()
+    
+    qtbot.waitUntil(lambda: page.thread is None, timeout=5000)
+    
+    # 2. Once finished with outputs, it should be visible
+    assert not page.results_list.isHidden()
+    assert page.results_list.count() == 1
+    
+    # 3. Starting a new render should hide it again
+    page.start_render()
+    assert page.results_list.isHidden()
+    qtbot.waitUntil(lambda: page.thread is None, timeout=5000)
+
