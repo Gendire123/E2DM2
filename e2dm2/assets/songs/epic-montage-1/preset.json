@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "song_id": "epic-montage-1",
+  "title": "Epic Montage 1",
+  "artist": "E2DM2 Library",
+  "audio_file": "EpicMusic.m4a",
+  "moods": ["epic", "cinematic", "dramatic"],
+  "bpm": null,
+  "energy": "high",
+  "total_duration_seconds": 150.0,
+  "minimum_source_duration_seconds": 180.0,
+  "opening_fade_seconds": 10.0,
+  "cuts_end_seconds": 145.0,
+  "fade_out_seconds": 5.0,
+  "escalation_seconds": 108.0,
+  "cut_timestamps": [
+    0.0, 13.427, 24.726, 36.035, 47.295, 52.967, 58.597,
+    68.478, 68.663, 68.993, 69.535, 69.906, 81.188, 86.832,
+    87.353, 91.082, 91.247, 91.611, 92.091, 98.127, 109.422,
+    119.303, 119.481, 119.824, 120.188, 120.69, 126.395, 131.995,
+    143.287
+  ],
+  "transitions": {
+    "duration_seconds": 0.25,
+    "hard_cut_threshold_seconds": 2.0
+  },
+  "source_progression": {
+    "short_cut_threshold_seconds": 5.0,
+    "short_cut_advance_seconds": 1.0
+  },
+  "heartbeat": {
+    "timestamps": [],
+    "opacity": 0.2,
+    "fade_seconds": 0.45
+  },
+  "dark_cue": {
+    "start_seconds": 92.091,
+    "end_seconds": 97.0,
+    "fade_out_seconds": 1.0,
+    "opacity": 0.8
+  },
+  "flash_cue": {
+    "start_seconds": 98.127,
+    "duration_seconds": 1.0,
+    "fade_in_seconds": 0.35,
+    "opacity": 0.9
+  }
+}
