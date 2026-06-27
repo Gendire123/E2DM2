@@ -34,10 +34,56 @@ def test_waveform_scroll_mapping_and_click_to_add(qtbot):
     assert widget.time_at_x(280) == 50
     assert widget.time_at_x(780) == 70
 
-    spy = QSignalSpy(widget.timestamp_clicked)
+    spy = QSignalSpy(widget.timestamp_added)
     qtbot.mouseClick(widget, Qt.MouseButton.LeftButton, pos=QPoint(780, 90))
     assert spy.count() == 1
     assert spy.at(0)[0] == 70
+
+
+def test_waveform_drag_creates_and_moves_markers(qtbot):
+    widget = WaveformWidget()
+    qtbot.addWidget(widget)
+    widget.resize(1000, 180)
+    widget.set_waveform(WaveformData([0.5] * 2500, 25, 100))
+    widget.set_position(50)
+    widget.set_window_seconds(40)
+    widget.set_markers([50, 60])
+    widget.show()
+
+    added = QSignalSpy(widget.timestamp_added)
+    qtbot.mousePress(widget, Qt.MouseButton.LeftButton, pos=QPoint(600, 90))
+    qtbot.mouseMove(widget, QPoint(700, 90))
+    qtbot.mouseRelease(widget, Qt.MouseButton.LeftButton, pos=QPoint(700, 90))
+    assert added.count() == 1
+    assert added.at(0)[0] == 66.8
+
+    moved = QSignalSpy(widget.marker_moved)
+    marker_x = round(widget.x_for_time(60))
+    qtbot.mousePress(widget, Qt.MouseButton.LeftButton, pos=QPoint(marker_x, 90))
+    qtbot.mouseMove(widget, QPoint(marker_x + 125, 90))
+    qtbot.mouseRelease(widget, Qt.MouseButton.LeftButton, pos=QPoint(marker_x + 125, 90))
+    assert moved.count() == 1
+    assert moved.at(0)[0] == 1
+    assert moved.at(0)[1] == 65
+
+
+def test_selected_waveform_marker_has_clickable_delete_control(qtbot):
+    widget = WaveformWidget()
+    qtbot.addWidget(widget)
+    widget.resize(1000, 180)
+    widget.set_waveform(WaveformData([0.5] * 2500, 25, 100))
+    widget.set_position(50)
+    widget.set_markers([0, 50])
+    widget.select_marker(1)
+    widget.show()
+    remove_requested = QSignalSpy(widget.marker_remove_requested)
+    delete_center = widget.delete_rect().center().toPoint()
+    qtbot.mouseClick(widget, Qt.MouseButton.LeftButton, pos=delete_center)
+    assert remove_requested.count() == 1
+    assert remove_requested.at(0)[0] == 1
+
+    widget.select_marker(0)
+    assert widget.delete_rect().isEmpty()
 
 
 def test_full_song_view_maps_edges(qtbot):

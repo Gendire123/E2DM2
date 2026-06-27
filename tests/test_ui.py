@@ -3,9 +3,11 @@ import subprocess
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QObject, Signal, Slot
+from PySide6.QtCore import QObject, Qt, Signal, Slot
 
 from e2dm2.models import RenderResult, WorkflowMode
+from e2dm2.editor import SongEditorDialog
+from e2dm2.entitlements import AlphaEntitlementProvider
 from e2dm2.ui import MainWindow
 from e2dm2.project import create_project
 from e2dm2.ui import WorkspacePage
@@ -56,3 +58,50 @@ def test_produce_coerces_qt_combo_data_to_workflow_enum(qtbot, tmp_path, monkeyp
     page.start_render()
     qtbot.waitUntil(lambda: page.thread is None, timeout=5000)
     assert page.project.settings.workflow is WorkflowMode.EPIC_MONTAGE
+
+
+def test_cut_table_and_waveform_selection_stay_synchronized(qtbot):
+    dialog = SongEditorDialog(AlphaEntitlementProvider())
+    qtbot.addWidget(dialog)
+    dialog.current.readonly = False
+    dialog._set_editable(True)
+    dialog.cut_markers.select_row(3)
+    assert dialog.waveform.selected_marker_index == 3
+
+    original_count = len(dialog.cut_markers.values())
+    dialog.move_cut_timestamp(3, 40.0)
+    assert 40.0 in dialog.cut_markers.values()
+    assert dialog.waveform.selected_marker_index == dialog.cut_markers.values().index(40.0)
+    dialog.remove_cut_timestamp(dialog.cut_markers.values().index(40.0))
+    assert len(dialog.cut_markers.values()) == original_count - 1
+
+
+def test_song_editor_space_shortcut_is_limited_to_cuts_tab(qtbot):
+    dialog = SongEditorDialog(AlphaEntitlementProvider())
+    qtbot.addWidget(dialog)
+    dialog.show()
+    dialog.current.readonly = False
+    dialog._set_editable(True)
+    toggles = []
+    dialog.toggle_playback = lambda: toggles.append(True)
+    dialog.tabs.setCurrentIndex(0)
+    dialog.title_edit.setText("Epic")
+    dialog.title_edit.setFocus()
+    dialog.title_edit.setCursorPosition(len(dialog.title_edit.text()))
+    qtbot.keyClick(dialog.title_edit, Qt.Key.Key_Space)
+    assert toggles == []
+    assert dialog.title_edit.text() == "Epic "
+    dialog.tabs.setCurrentIndex(1)
+    dialog.cut_markers.table.setFocus()
+    qtbot.keyClick(dialog.cut_markers.table, Qt.Key.Key_Space)
+    assert toggles == [True]
+
+
+def test_song_editor_uses_compact_seven_row_cut_table(qtbot):
+    dialog = SongEditorDialog(AlphaEntitlementProvider())
+    qtbot.addWidget(dialog)
+    row_height = dialog.cut_markers.table.verticalHeader().defaultSectionSize()
+    body_height = dialog.cut_markers.table.height() - dialog.cut_markers.table.horizontalHeader().sizeHint().height()
+    assert dialog.height() == 700
+    assert row_height == 31
+    assert 7 * row_height <= body_height <= 7 * row_height + 8

@@ -21,6 +21,7 @@ LOGGER = logging.getLogger(__name__)
 WAVEFORM_VERSION = 1
 SAMPLE_RATE = 800
 PEAKS_PER_SECOND = 25
+_ACTIVE_WAVEFORM_TASKS: set["WaveformTask"] = set()
 
 
 @dataclass(slots=True)
@@ -98,8 +99,10 @@ class WaveformTaskSignals(QObject):
 class WaveformTask(QRunnable):
     def __init__(self, audio_path: Path) -> None:
         super().__init__()
+        self.setAutoDelete(False)
         self.audio_path = audio_path.resolve()
         self.signals = WaveformTaskSignals()
+        _ACTIVE_WAVEFORM_TASKS.add(self)
 
     @Slot()
     def run(self) -> None:
@@ -108,10 +111,15 @@ class WaveformTask(QRunnable):
         except Exception as exc:
             LOGGER.exception("Waveform analysis failed: %s", self.audio_path)
             self.signals.failed.emit(str(self.audio_path), str(exc))
+        finally:
+            _ACTIVE_WAVEFORM_TASKS.discard(self)
 
 
 class WaveformWidget(QWidget):
-    timestamp_clicked = Signal(float)
+    timestamp_added = Signal(float)
+    marker_selected = Signal(int)
+    marker_moved = Signal(int, float)
+    marker_remove_requested = Signal(int)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -124,12 +132,16 @@ class WaveformWidget(QWidget):
         self.error = ""
         self.marker_editable = True
         self.hover_x: float | None = None
+        self.selected_marker_index = -1
+        self.drag_marker_index: int | None = None
+        self.drag_time: float | None = None
+        self.creating_marker = False
         self.playhead_fraction = 0.28
         self.setMinimumHeight(155)
         self.setMaximumHeight(220)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setMouseTracking(True)
-        self.setToolTip("Click the waveform to add a cut timestamp")
+        self.setToolTip("Press and drag to place a cut timestamp")
 
     def set_loading(self) -> None:
         self.data = None
@@ -160,13 +172,28 @@ class WaveformWidget(QWidget):
             self.update()
 
     def set_markers(self, markers: list[float]) -> None:
-        self.markers = sorted(markers)
+        selected_value = (
+            self.markers[self.selected_marker_index]
+            if 0 <= self.selected_marker_index < len(self.markers)
+            else None
+        )
+        self.markers = list(markers)
+        if selected_value is not None and self.markers:
+            self.selected_marker_index = min(
+                range(len(self.markers)), key=lambda index: abs(self.markers[index] - selected_value)
+            )
+        elif self.selected_marker_index >= len(self.markers):
+            self.selected_marker_index = -1
+        self.update()
+
+    def select_marker(self, index: int) -> None:
+        self.selected_marker_index = index if 0 <= index < len(self.markers) else -1
         self.update()
 
     def set_marker_editable(self, editable: bool) -> None:
         self.marker_editable = editable
-        self.setCursor(Qt.CursorShape.PointingHandCursor if editable else Qt.CursorShape.ArrowCursor)
-        self.setToolTip("Click the waveform to add a cut timestamp" if editable else "Duplicate this built-in preset to edit cut timestamps")
+        self.setCursor(Qt.CursorShape.CrossCursor if editable else Qt.CursorShape.ArrowCursor)
+        self.setToolTip("Press and drag to place or move a cut timestamp" if editable else "Duplicate this built-in preset to edit cut timestamps")
 
     def set_window_seconds(self, seconds: float | None) -> None:
         self.window_seconds = seconds
@@ -185,17 +212,92 @@ class WaveformWidget(QWidget):
         value = start + max(0.0, min(x, self.width())) / max(self.width(), 1) * (end - start)
         return max(0.0, min(value, self.duration_seconds))
 
+    def x_for_time(self, timestamp: float) -> float:
+        start, end = self.visible_window()
+        return (timestamp - start) / max(end - start, 0.001) * self.width()
+
+    def marker_at_x(self, x: float, tolerance: float = 9.0) -> int:
+        candidates = [
+            (abs(self.x_for_time(timestamp) - x), index)
+            for index, timestamp in enumerate(self.markers)
+            if -tolerance <= self.x_for_time(timestamp) <= self.width() + tolerance
+        ]
+        if not candidates:
+            return -1
+        distance, index = min(candidates)
+        return index if distance <= tolerance else -1
+
+    def delete_rect(self) -> QRectF:
+        if not self.marker_editable:
+            return QRectF()
+        if not 0 <= self.selected_marker_index < len(self.markers):
+            return QRectF()
+        timestamp = self.markers[self.selected_marker_index]
+        if timestamp <= 0.000001:
+            return QRectF()
+        x = self.x_for_time(timestamp)
+        if not 0 <= x <= self.width():
+            return QRectF()
+        return QRectF(x - 9, self.height() - 19, 18, 18)
+
     def mousePressEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.LeftButton and self.data and self.marker_editable:
-            self.timestamp_clicked.emit(round(self.time_at_x(event.position().x()), 6))
+        if event.button() == Qt.MouseButton.LeftButton and self.data:
+            if self.marker_editable and self.delete_rect().contains(event.position()):
+                index = self.selected_marker_index
+                self.selected_marker_index = -1
+                self.marker_remove_requested.emit(index)
+                self.update()
+                event.accept()
+                return
+            index = self.marker_at_x(event.position().x())
+            if index >= 0:
+                self.select_marker(index)
+                self.marker_selected.emit(index)
+                if self.marker_editable and self.markers[index] > 0.000001:
+                    self.drag_marker_index = index
+                    self.drag_time = self.markers[index]
+            elif self.marker_editable:
+                self.selected_marker_index = -1
+                self.creating_marker = True
+                self.drag_time = self.time_at_x(event.position().x())
+                self.update()
             event.accept()
             return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         self.hover_x = event.position().x()
+        if self.marker_editable and event.buttons() & Qt.MouseButton.LeftButton:
+            if self.creating_marker or self.drag_marker_index is not None:
+                self.drag_time = self.time_at_x(event.position().x())
+                self.update()
+                event.accept()
+                return
+        if self.delete_rect().contains(event.position()):
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+        elif self.marker_at_x(event.position().x()) >= 0 and self.marker_editable:
+            self.setCursor(Qt.CursorShape.SizeHorCursor)
+        else:
+            self.setCursor(Qt.CursorShape.CrossCursor if self.marker_editable else Qt.CursorShape.ArrowCursor)
         self.update()
         super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self.data and self.marker_editable:
+            timestamp = round(self.drag_time if self.drag_time is not None else self.time_at_x(event.position().x()), 6)
+            if self.creating_marker:
+                self.timestamp_added.emit(timestamp)
+            elif self.drag_marker_index is not None:
+                original = self.markers[self.drag_marker_index]
+                if abs(original - timestamp) >= 0.0005:
+                    self.marker_moved.emit(self.drag_marker_index, timestamp)
+            self.creating_marker = False
+            self.drag_marker_index = None
+            self.drag_time = None
+            self.update()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     def leaveEvent(self, event) -> None:
         self.hover_x = None
@@ -259,18 +361,43 @@ class WaveformWidget(QWidget):
 
         painter.setPen(QPen(QColor("#e0a03f"), 1))
         painter.setBrush(QColor("#e0a03f"))
-        for marker in self.markers:
+        for index, marker in enumerate(self.markers):
+            if self.drag_marker_index == index and self.drag_time is not None:
+                marker = self.drag_time
             if start <= marker <= end:
                 x = (marker - start) / span * self.width()
+                if index == self.selected_marker_index:
+                    painter.setPen(QPen(QColor("#ffd36f"), 3))
+                else:
+                    painter.setPen(QPen(QColor("#e0a03f"), 1))
                 painter.drawLine(round(x), content.top(), round(x), content.bottom())
                 painter.drawPolygon(QPolygonF([
                     QPointF(x - 4, content.top()), QPointF(x + 4, content.top()), QPointF(x, content.top() + 6),
                 ]))
 
+        if self.creating_marker and self.drag_time is not None and start <= self.drag_time <= end:
+            x = (self.drag_time - start) / span * self.width()
+            painter.setPen(QPen(QColor("#ffd36f"), 2, Qt.PenStyle.DashLine))
+            painter.drawLine(round(x), content.top(), round(x), content.bottom())
+
+        delete_rect = self.delete_rect()
+        if not delete_rect.isEmpty() and not self.creating_marker and self.drag_marker_index is None:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            painter.setPen(QPen(QColor("#ff6258"), 2))
+            painter.setBrush(QColor("#3a1d1b"))
+            painter.drawEllipse(delete_rect)
+            inset = 5
+            painter.drawLine(delete_rect.left() + inset, delete_rect.top() + inset, delete_rect.right() - inset, delete_rect.bottom() - inset)
+            painter.drawLine(delete_rect.right() - inset, delete_rect.top() + inset, delete_rect.left() + inset, delete_rect.bottom() - inset)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+
         painter.setPen(QPen(QColor("#f04f43"), 2))
         painter.drawLine(round(playhead_x), content.top() - 5, round(playhead_x), content.bottom() + 5)
         painter.setPen(QColor("#f4f6f4"))
-        painter.drawText(QRectF(playhead_x - 42, self.height() - 19, 84, 17), Qt.AlignmentFlag.AlignCenter, self._time_text(self.position_seconds))
+        label_x = playhead_x + 14
+        if label_x + 84 > self.width():
+            label_x = playhead_x - 98
+        painter.drawText(QRectF(label_x, self.height() - 19, 84, 17), Qt.AlignmentFlag.AlignCenter, self._time_text(self.position_seconds))
 
         if self.hover_x is not None and self.marker_editable:
             hover_time = self.time_at_x(self.hover_x)

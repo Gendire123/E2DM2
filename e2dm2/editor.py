@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from PySide6.QtCore import QSignalBlocker, QThreadPool, Qt, QUrl, Signal
+from PySide6.QtCore import QEvent, QSignalBlocker, QThreadPool, Qt, QUrl, Signal
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -20,7 +20,9 @@ from PySide6.QtWidgets import (
     QListWidget,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSlider,
+    QSizePolicy,
     QSplitter,
     QTabWidget,
     QTableWidget,
@@ -60,6 +62,7 @@ def _spin(maximum: float = 100000.0, decimals: int = 3) -> QDoubleSpinBox:
 
 class MarkerTable(QWidget):
     values_changed = Signal(object)
+    selection_changed = Signal(int)
 
     def __init__(self, label: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -68,6 +71,7 @@ class MarkerTable(QWidget):
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.itemChanged.connect(self._emit_values)
+        self.table.currentCellChanged.connect(lambda row, _column, _old_row, _old_column: self.selection_changed.emit(row))
         add_button = QPushButton("Add")
         paste_button = QPushButton("Paste list")
         remove_button = QPushButton("Remove")
@@ -86,6 +90,7 @@ class MarkerTable(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.table)
         layout.addLayout(buttons)
+        self.action_buttons = [add_button, paste_button, remove_button, sort_button]
 
     def add_value(self, value: float) -> None:
         row = self.table.rowCount()
@@ -132,6 +137,22 @@ class MarkerTable(QWidget):
         except ValueError:
             return
 
+    def select_row(self, row: int) -> None:
+        if 0 <= row < self.table.rowCount():
+            self.table.setCurrentCell(row, 0)
+            self.table.selectRow(row)
+            self.table.scrollToItem(self.table.item(row, 0))
+
+    def set_visible_row_count(self, rows: int) -> None:
+        row_height = 31
+        self.table.verticalHeader().setDefaultSectionSize(row_height)
+        header_height = self.table.horizontalHeader().sizeHint().height()
+        table_height = header_height + rows * row_height + self.table.frameWidth() * 2 + 2
+        self.table.setFixedHeight(table_height)
+        action_height = max(button.sizeHint().height() for button in self.action_buttons)
+        self.setFixedHeight(table_height + self.layout().spacing() + action_height)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
 
 class SongEditorDialog(QDialog):
     catalog_changed = Signal()
@@ -139,7 +160,7 @@ class SongEditorDialog(QDialog):
     def __init__(self, entitlement: EntitlementProvider, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Epic Song Library")
-        self.resize(1220, 820)
+        self.resize(1220, 700)
         self.entitlement = entitlement
         self.songs: list[SongManifest] = []
         self.current: SongManifest | None = None
@@ -147,12 +168,16 @@ class SongEditorDialog(QDialog):
         self.waveform_source = ""
         self.waveform_tasks: dict[str, WaveformTask] = {}
         self.waveform_pool = QThreadPool.globalInstance()
+        self.selecting_from_waveform = False
         self.player = QMediaPlayer(self)
         self.audio_output = QAudioOutput(self)
         self.player.setAudioOutput(self.audio_output)
         self.audio_output.setVolume(0.7)
         self._build_ui()
         self._connect_player()
+        self.cuts_tab.installEventFilter(self)
+        for child in self.cuts_tab.findChildren(QWidget):
+            child.installEventFilter(self)
         self.reload_catalog()
         allowed = self.entitlement.has_feature(PRESET_EDITOR_FEATURE)
         self.new_button.setEnabled(allowed)
@@ -181,7 +206,8 @@ class SongEditorDialog(QDialog):
 
         self.tabs = QTabWidget()
         self.tabs.addTab(self._general_tab(), "General")
-        self.tabs.addTab(self._timing_tab(), "Cuts")
+        self.cuts_tab = self._timing_tab()
+        self.tabs.addTab(self.cuts_tab, "Cuts")
         self.tabs.addTab(self._effects_tab(), "Effects")
         self.status_label = QLabel()
         self.status_label.setWordWrap(True)
@@ -205,8 +231,8 @@ class SongEditorDialog(QDialog):
         layout.addWidget(splitter)
 
     def _general_tab(self) -> QWidget:
-        widget = QWidget()
-        form = QFormLayout(widget)
+        content = QWidget()
+        form = QFormLayout(content)
         self.title_edit = QLineEdit()
         self.artist_edit = QLineEdit()
         self.id_edit = QLineEdit()
@@ -246,11 +272,15 @@ class SongEditorDialog(QDialog):
             ("Short-cut source advance", self.short_advance_spin),
         ]:
             form.addRow(label, control)
-        return widget
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(content)
+        return scroll
 
     def _timing_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         controls = QHBoxLayout()
         self.play_button = QToolButton()
         self.play_button.setText("Play")
@@ -275,12 +305,17 @@ class SongEditorDialog(QDialog):
         controls.addWidget(self.waveform_zoom)
         controls.addWidget(self.add_playhead_button)
         self.waveform = WaveformWidget()
-        self.waveform.timestamp_clicked.connect(self.add_cut_timestamp)
+        self.waveform.timestamp_added.connect(self.add_cut_timestamp)
+        self.waveform.marker_selected.connect(self.select_cut_from_waveform)
+        self.waveform.marker_moved.connect(self.move_cut_timestamp)
+        self.waveform.marker_remove_requested.connect(self.remove_cut_timestamp)
         self.waveform_zoom.currentIndexChanged.connect(
             lambda: self.waveform.set_window_seconds(self.waveform_zoom.currentData())
         )
         self.cut_markers = MarkerTable("Cut timestamp (seconds)")
+        self.cut_markers.set_visible_row_count(7)
         self.cut_markers.values_changed.connect(self.waveform.set_markers)
+        self.cut_markers.selection_changed.connect(self.select_cut_from_table)
         layout.addLayout(controls)
         layout.addWidget(self.waveform)
         layout.addWidget(self.cut_markers)
@@ -432,6 +467,18 @@ class SongEditorDialog(QDialog):
         else:
             self.player.play()
 
+    def eventFilter(self, watched, event) -> bool:
+        if (
+            self.tabs.currentWidget() is self.cuts_tab
+            and event.type() == QEvent.Type.KeyPress
+            and event.key() == Qt.Key.Key_Space
+            and event.modifiers() == Qt.KeyboardModifier.NoModifier
+        ):
+            self.toggle_playback()
+            event.accept()
+            return True
+        return super().eventFilter(watched, event)
+
     def new_song(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Add Epic song", "", "Audio (*.m4a *.mp3 *.wav *.aac *.flac)")
         if not path:
@@ -470,7 +517,47 @@ class SongEditorDialog(QDialog):
         if any(abs(value - timestamp) < 0.0005 for value in values):
             return
         values.append(round(timestamp, 6))
-        self.cut_markers.set_values(sorted(values))
+        values = sorted(values)
+        self.cut_markers.set_values(values)
+        selected = min(range(len(values)), key=lambda index: abs(values[index] - timestamp))
+        self.cut_markers.select_row(selected)
+
+    def move_cut_timestamp(self, index: int, timestamp: float) -> None:
+        values = self.cut_markers.values()
+        if not 0 < index < len(values):
+            return
+        timestamp = max(0.0, min(float(timestamp), self.total_spin.value()))
+        if any(other != index and abs(value - timestamp) < 0.0005 for other, value in enumerate(values)):
+            self.waveform.set_markers(values)
+            self.waveform.select_marker(index)
+            return
+        values[index] = round(timestamp, 6)
+        values.sort()
+        self.cut_markers.set_values(values)
+        selected = min(range(len(values)), key=lambda row: abs(values[row] - timestamp))
+        self.cut_markers.select_row(selected)
+
+    def remove_cut_timestamp(self, index: int) -> None:
+        values = self.cut_markers.values()
+        if not 0 < index < len(values):
+            return
+        values.pop(index)
+        self.cut_markers.set_values(values)
+        if values:
+            self.cut_markers.select_row(min(index, len(values) - 1))
+
+    def select_cut_from_waveform(self, index: int) -> None:
+        self.selecting_from_waveform = True
+        try:
+            self.cut_markers.select_row(index)
+        finally:
+            self.selecting_from_waveform = False
+
+    def select_cut_from_table(self, index: int) -> None:
+        values = self.cut_markers.values()
+        self.waveform.select_marker(index)
+        if not self.selecting_from_waveform and 0 <= index < len(values):
+            self.player.setPosition(round(values[index] * 1000))
 
     def load_waveform(self, audio_path: Path) -> None:
         source = str(audio_path.resolve())
