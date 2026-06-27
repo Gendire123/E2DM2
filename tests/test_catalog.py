@@ -110,4 +110,71 @@ def test_song_manifest_effects_flow():
     assert songs[1].effects.count("heartbeat") == 0
 
 
+def test_delete_current_song(monkeypatch, tmp_path, qtbot):
+    from e2dm2.catalog import load_song_catalog, duplicate_song
+    from e2dm2.editor import SongEditorDialog
+    from e2dm2.ui import AlphaEntitlementProvider
+    from PySide6.QtWidgets import QMessageBox
+    
+    library_dir = tmp_path / "library"
+    library_dir.mkdir()
+    
+    songs = load_song_catalog(custom_root=library_dir)
+    original = songs[0]
+    duplicate = duplicate_song(original, "dup-song", "Duplicate Title", library_root=library_dir)
+    
+    dialog = SongEditorDialog(AlphaEntitlementProvider())
+    qtbot.addWidget(dialog)
+    dialog.songs = load_song_catalog(custom_root=library_dir)
+    dialog._load_selected(len(dialog.songs) - 1)
+    
+    assert dialog.current.song_id == "dup-song"
+    assert dialog.current.manifest_path.exists()
+    
+    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(dialog, "reload_catalog", lambda *args, **kwargs: None)
+    
+    dialog.delete_current()
+    
+    assert not duplicate.manifest_path.exists()
+
+
+def test_rename_song_id(monkeypatch, tmp_path, qtbot):
+    from e2dm2.catalog import load_song_catalog, duplicate_song
+    from e2dm2.editor import SongEditorDialog
+    from e2dm2.ui import AlphaEntitlementProvider
+    
+    library_dir = tmp_path / "library"
+    library_dir.mkdir()
+    
+    songs = load_song_catalog(custom_root=library_dir)
+    original = songs[0]
+    duplicate = duplicate_song(original, "dup-song", "Duplicate Title", library_root=library_dir)
+    
+    dialog = SongEditorDialog(AlphaEntitlementProvider())
+    qtbot.addWidget(dialog)
+    dialog.songs = load_song_catalog(custom_root=library_dir)
+    dialog._load_selected(len(dialog.songs) - 1)
+    
+    assert dialog.current.song_id == "dup-song"
+    assert dialog.current.manifest_path.exists()
+    
+    # Change the song ID in the editor
+    dialog.id_edit.setText("renamed-song")
+    
+    # Mock save_custom_song or reload_catalog library root so it saves to the temp folder
+    monkeypatch.setattr("e2dm2.editor.save_custom_song", lambda song, audio, lib_root=library_dir: save_custom_song(song, audio, library_dir))
+    monkeypatch.setattr(dialog, "reload_catalog", lambda *args, **kwargs: None)
+    
+    from e2dm2.catalog import save_custom_song
+    dialog.save_current()
+    
+    # Check that new folder and manifest exist
+    new_manifest = library_dir / "renamed-song" / "preset.json"
+    assert new_manifest.exists()
+    
+    # Check that old folder is deleted
+    assert not duplicate.manifest_path.exists()
+
+
 

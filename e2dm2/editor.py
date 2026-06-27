@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -25,6 +26,7 @@ from PySide6.QtWidgets import (
     QSlider,
     QSizePolicy,
     QSplitter,
+    QStyle,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -70,6 +72,33 @@ EFFECT_OPTIONS = [
 ]
 
 
+class ClickPassingWidget(QWidget):
+    def __init__(self, table: QTableWidget, label: QLabel, x_btn: QLabel, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.table = table
+        self.label = label
+        self.x_btn = x_btn
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(6, 2, 6, 2)
+        layout.setSpacing(4)
+        layout.addWidget(label, 1)
+        layout.addWidget(x_btn)
+        
+        self.setStyleSheet("background: transparent;")
+        
+    def mousePressEvent(self, event) -> None:
+        row = -1
+        for r in range(self.table.rowCount()):
+            if self.table.cellWidget(r, 0) == self:
+                row = r
+                break
+        if row != -1:
+            self.table.setCurrentCell(row, 0)
+            self.table.selectRow(row)
+        super().mousePressEvent(event)
+
+
 class MarkerTable(QWidget):
     values_changed = Signal(object)
     effects_changed = Signal(object)
@@ -83,20 +112,26 @@ class MarkerTable(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.table.setColumnWidth(0, 220)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.itemChanged.connect(self._emit_values)
         self.table.currentCellChanged.connect(lambda row, _column, _old_row, _old_column: self.selection_changed.emit(row))
+        self.table.itemSelectionChanged.connect(self._update_x_visibility)
+        self.table.currentCellChanged.connect(lambda: self._update_x_visibility())
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.table)
 
-    def _get_widget_row(self, widget: QWidget) -> int:
+    def changeEvent(self, event: QEvent) -> None:
+        if event.type() == QEvent.Type.EnabledChange:
+            self._update_x_visibility()
+        super().changeEvent(event)
+
+    def _get_widget_row(self, widget: QWidget, col: int) -> int:
         for r in range(self.table.rowCount()):
-            if self.table.cellWidget(r, 1) == widget:
+            if self.table.cellWidget(r, col) == widget:
                 return r
         return -1
 
     def _on_plus_clicked(self, wrapper: QWidget) -> None:
-        row = self._get_widget_row(wrapper)
+        row = self._get_widget_row(wrapper, 1)
         if row == -1:
             return
         combo_wrapper = self._create_effect_widget("heartbeat")
@@ -107,7 +142,7 @@ class MarkerTable(QWidget):
         self._emit_effects()
 
     def _on_combo_changed(self, wrapper: QWidget, index: int) -> None:
-        row = self._get_widget_row(wrapper)
+        row = self._get_widget_row(wrapper, 1)
         if row == -1:
             return
         combo = wrapper.findChild(QComboBox)
@@ -118,6 +153,53 @@ class MarkerTable(QWidget):
             btn_wrapper = self._create_effect_widget("none")
             self.table.setCellWidget(row, 1, btn_wrapper)
         self._emit_effects()
+
+    def _on_x_clicked(self, wrapper: QWidget) -> None:
+        row = self._get_widget_row(wrapper, 0)
+        if row == -1:
+            return
+        self.table.removeRow(row)
+        self._emit_values()
+        self._emit_effects()
+
+    def _update_x_visibility(self) -> None:
+        selected_rows = {index.row() for index in self.table.selectedIndexes()}
+        is_editable = self.isEnabled()
+        for row in range(self.table.rowCount()):
+            wrapper = self.table.cellWidget(row, 0)
+            if wrapper:
+                x_btn = wrapper.findChild(QLabel, "x_btn")
+                label = wrapper.findChild(QLabel, "ts_label")
+                is_selected = row in selected_rows
+                if x_btn:
+                    x_btn.setVisible(is_selected and is_editable)
+                if label:
+                    if is_selected:
+                        label.setStyleSheet("background: transparent; color: #ffffff; font-size: 13px;")
+                    else:
+                        label.setStyleSheet("background: transparent; color: #333333; font-size: 13px;")
+
+    def _create_timestamp_widget(self, value: float) -> QWidget:
+        label = QLabel(f"{value:.6f}")
+        label.setObjectName("ts_label")
+        label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        label.setStyleSheet("background: transparent; color: #333333; font-size: 13px;")
+        
+        x_btn = QLabel("×")
+        x_btn.setObjectName("x_btn")
+        x_btn.setFixedSize(16, 16)
+        x_btn.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        x_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        x_btn.setStyleSheet(
+            "QLabel { font-weight: bold; font-size: 14px; color: #ffffff; background-color: rgba(255, 255, 255, 0.2); border-radius: 8px; padding-bottom: 2px; }"
+            "QLabel:hover { background-color: rgba(255, 255, 255, 0.4); }"
+        )
+        # Create wrapper
+        wrapper = ClickPassingWidget(self.table, label, x_btn)
+        x_btn.mousePressEvent = lambda event: self._on_x_clicked(wrapper)
+        x_btn.setVisible(False)
+        
+        return wrapper
 
     def _create_effect_widget(self, effect_val: str) -> QWidget:
         wrapper = QWidget()
@@ -150,21 +232,27 @@ class MarkerTable(QWidget):
     def add_value(self, value: float, effect: str = "none") -> None:
         row = self.table.rowCount()
         self.table.insertRow(row)
-        self.table.setItem(row, 0, QTableWidgetItem(f"{value:.6f}"))
+        ts_wrapper = self._create_timestamp_widget(value)
+        self.table.setCellWidget(row, 0, ts_wrapper)
         wrapper = self._create_effect_widget(effect)
         self.table.setCellWidget(row, 1, wrapper)
         self.table.scrollToBottom()
         self._emit_values()
         self._emit_effects()
+        self._update_x_visibility()
 
     def values(self) -> list[float]:
         values = []
         for row in range(self.table.rowCount()):
-            item = self.table.item(row, 0)
-            if item and item.text().strip():
-                try:
-                    values.append(float(item.text().strip()))
-                except ValueError:
+            wrapper = self.table.cellWidget(row, 0)
+            if wrapper:
+                label = wrapper.findChild(QLabel, "ts_label")
+                if label and label.text().strip():
+                    try:
+                        values.append(float(label.text().strip()))
+                    except ValueError:
+                        values.append(0.0)
+                else:
                     values.append(0.0)
             else:
                 values.append(0.0)
@@ -194,11 +282,13 @@ class MarkerTable(QWidget):
             for value, effect in zip(values, effects):
                 row = self.table.rowCount()
                 self.table.insertRow(row)
-                self.table.setItem(row, 0, QTableWidgetItem(f"{value:.6f}"))
+                ts_wrapper = self._create_timestamp_widget(value)
+                self.table.setCellWidget(row, 0, ts_wrapper)
                 wrapper = self._create_effect_widget(effect)
                 self.table.setCellWidget(row, 1, wrapper)
         self.values_changed.emit(self.values())
         self.effects_changed.emit(self.effects())
+        self._update_x_visibility()
 
     def set_values(self, values: list[float]) -> None:
         self.set_values_and_effects(values, ["none"] * len(values))
@@ -240,9 +330,7 @@ class MarkerTable(QWidget):
         if 0 <= row < self.table.rowCount():
             self.table.setCurrentCell(row, 0)
             self.table.selectRow(row)
-            item = self.table.item(row, 0)
-            if item:
-                self.table.scrollToItem(item)
+            self.table.scrollTo(self.table.model().index(row, 0))
 
     def set_visible_row_count(self, rows: int) -> None:
         row_height = 31
@@ -292,13 +380,16 @@ class SongEditorDialog(QDialog):
         self.song_list.currentRowChanged.connect(self._load_selected)
         self.new_button = QPushButton("New song")
         self.duplicate_button = QPushButton("Duplicate")
+        self.delete_button = QPushButton("Delete")
         self.save_button = QPushButton("Save")
         self.new_button.clicked.connect(self.new_song)
         self.duplicate_button.clicked.connect(self.duplicate_current)
+        self.delete_button.clicked.connect(self.delete_current)
         self.save_button.clicked.connect(self.save_current)
         left_buttons = QHBoxLayout()
         left_buttons.addWidget(self.new_button)
         left_buttons.addWidget(self.duplicate_button)
+        left_buttons.addWidget(self.delete_button)
         left = QWidget()
         left_layout = QVBoxLayout(left)
         left_layout.addWidget(QLabel("Epic songs"))
@@ -491,7 +582,7 @@ class SongEditorDialog(QDialog):
         ]
         for control in controls:
             control.setEnabled(editable)
-        self.id_edit.setEnabled(editable and bool(self.current and self.current.manifest_path is None))
+        self.id_edit.setEnabled(editable)
         self.play_button.setEnabled(True)
         self.position_slider.setEnabled(True)
         self.waveform_zoom.setEnabled(True)
@@ -644,6 +735,28 @@ class SongEditorDialog(QDialog):
         except (OSError, ValueError) as exc:
             QMessageBox.warning(self, "Could not duplicate preset", str(exc))
 
+    def delete_current(self) -> None:
+        if not self.current:
+            return
+        song_title = self.current.title
+        reply = QMessageBox.question(
+            self,
+            "Confirm Delete",
+            f"Are you sure you want to delete the song '{song_title}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            manifest_path = self.current.manifest_path
+            if manifest_path and manifest_path.exists():
+                try:
+                    manifest_path.unlink()
+                    self.catalog_changed.emit()
+                    self.reload_catalog()
+                    self.status_label.setText(f"Deleted '{song_title}'")
+                except Exception as exc:
+                    QMessageBox.critical(self, "Could not delete preset", str(exc))
+
     def _collect_song(self) -> SongManifest:
         # Determine fallback cues/heartbeat for backward compatibility
         cut_vals = self.cut_markers.values()
@@ -704,9 +817,25 @@ class SongEditorDialog(QDialog):
             QMessageBox.warning(self, "Preset validation", "\n".join(errors))
             return
         try:
-            save_custom_song(song, self.audio_source)
+            old_manifest_path = None
+            if self.current and self.current.manifest_path and self.current.song_id != song.song_id:
+                old_manifest_path = self.current.manifest_path
+                song.manifest_path = None
+            
+            saved_song = save_custom_song(song, self.audio_source)
+            
+            if old_manifest_path and old_manifest_path.exists():
+                try:
+                    old_manifest_path.unlink()
+                except Exception:
+                    pass
+                try:
+                    shutil.rmtree(old_manifest_path.parent)
+                except Exception:
+                    pass
+            
             self.catalog_changed.emit()
-            self.reload_catalog(song.song_id)
+            self.reload_catalog(saved_song.song_id)
             self.status_label.setText("Preset saved")
         except (OSError, ValueError) as exc:
             QMessageBox.critical(self, "Could not save preset", str(exc))
