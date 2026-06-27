@@ -37,7 +37,7 @@ def create_project(name: str, root: Path | None = None) -> Project:
     for folder in ("source", "music", "renders", "temp", "plans"):
         (project_path / folder).mkdir(parents=True, exist_ok=True)
     now = _now()
-    settings = ProjectSettings(schema_version=1, name=name.strip() or "Drone Project", created_at=now, updated_at=now)
+    settings = ProjectSettings(schema_version=2, name=name.strip() or "Drone Project", created_at=now, updated_at=now)
     save_project(project_path, settings)
     remember_project(project_path)
     LOGGER.info("Created project '%s' at %s", settings.name, project_path)

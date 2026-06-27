@@ -41,8 +41,9 @@ from PySide6.QtWidgets import (
 from .catalog import FULL_LENGTH_TRACKS, default_project_root, filter_songs, load_song_catalog
 from .editor import SongEditorDialog
 from .entitlements import AlphaEntitlementProvider
-from .media import VIDEO_EXTENSIONS
+from .media import VIDEO_EXTENSIONS, preview_proxy_path
 from .models import CancellationToken, ExportSize, ProgressEvent, Project, RenderRequest, WorkflowMode
+from .preview import ClipPreviewDialog
 from .project import create_project, import_media, load_project, move_media, recent_projects, remove_media, save_project
 from .render import create_render_plan, render
 from .logging_setup import log_file_path
@@ -283,23 +284,27 @@ class WorkspacePage(QWidget):
         header.addWidget(self.project_title)
         header.addWidget(self.project_path, 1)
 
-        self.media_table = QTableWidget(0, 6)
-        self.media_table.setHorizontalHeaderLabels(["Clip", "Duration", "Resolution", "FPS", "Codec", "Size"])
+        self.media_table = QTableWidget(0, 7)
+        self.media_table.setHorizontalHeaderLabels(["Clip", "Marks", "Duration", "Resolution", "FPS", "Codec", "Size"])
         self.media_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.media_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.media_table.setSortingEnabled(False)
         header_view = self.media_table.horizontalHeader()
         header_view.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for column in range(1, 6):
+        for column in range(1, 7):
             header_view.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        self.media_table.itemDoubleClicked.connect(lambda *_: self.open_preview())
         
         # Add files and folder buttons with icons
         add_files = QPushButton("Add Files")
         add_files.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon))
         add_folder = QPushButton("Add Folder")
         add_folder.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon))
+        self.preview_button = QPushButton("Preview / Edit")
+        self.preview_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
         add_files.clicked.connect(self.add_files)
         add_folder.clicked.connect(self.add_folder)
+        self.preview_button.clicked.connect(self.open_preview)
         
         up = self._tool_button(QStyle.StandardPixmap.SP_ArrowUp, "Move selected clip up", lambda: self.move_selected(-1))
         down = self._tool_button(QStyle.StandardPixmap.SP_ArrowDown, "Move selected clip down", lambda: self.move_selected(1))
@@ -309,6 +314,7 @@ class WorkspacePage(QWidget):
         media_actions = QHBoxLayout()
         media_actions.addWidget(add_files)
         media_actions.addWidget(add_folder)
+        media_actions.addWidget(self.preview_button)
         media_actions.addWidget(up)
         media_actions.addWidget(down)
         media_actions.addWidget(remove)
@@ -559,12 +565,18 @@ class WorkspacePage(QWidget):
         media = self.project.settings.media
         self.media_table.setRowCount(len(media))
         for row, item in enumerate(media):
+            excluded = sum(selection.type.value == "exclude" for selection in item.selections)
+            required = sum(selection.type.value == "required" for selection in item.selections)
+            marks = " / ".join(part for part in (f"R {excluded}" if excluded else "", f"G {required}" if required else "") if part)
             values = [
-                item.original_name, _duration(item.duration), f"{item.width} x {item.height}",
+                item.original_name, marks or "-", _duration(item.duration), f"{item.width} x {item.height}",
                 f"{item.fps:.2f}", item.codec, f"{item.size_bytes / 1024 ** 2:.1f} MB",
             ]
             for column, value in enumerate(values):
-                self.media_table.setItem(row, column, QTableWidgetItem(value))
+                table_item = QTableWidgetItem(value)
+                if column == 1 and (excluded or required):
+                    table_item.setToolTip(f"{excluded} excluded range(s)\n{required} required range(s)")
+                self.media_table.setItem(row, column, table_item)
         total_duration = sum(item.duration for item in media)
         total_size = sum(item.size_bytes for item in media)
         self.media_total.setText(f"{len(media)} clips | {_duration(total_duration)} | {total_size / 1024 ** 3:.2f} GB")
@@ -742,6 +754,26 @@ class WorkspacePage(QWidget):
     def selected_media_row(self) -> int:
         return self.media_table.currentRow()
 
+    def open_preview(self) -> None:
+        if not self.project or self.thread:
+            return
+        row = self.selected_media_row()
+        if not 0 <= row < len(self.project.settings.media):
+            QMessageBox.information(self, "Preview footage", "Select a clip to preview.")
+            return
+        media = self.project.settings.media[row]
+        dialog = ClipPreviewDialog(
+            media,
+            str(media.resolve(self.project.path)),
+            self,
+            str(preview_proxy_path(self.project.path, media)),
+        )
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.project.settings.schema_version = 2
+            save_project(self.project.path, self.project.settings)
+            self.refresh_media()
+            self.media_table.selectRow(row)
+
     def move_selected(self, direction: int) -> None:
         if not self.project:
             return
@@ -883,6 +915,7 @@ class WorkspacePage(QWidget):
         self.render_button.setEnabled(not busy)
         self.cancel_button.setEnabled(busy)
         self.media_table.setEnabled(not busy)
+        self.preview_button.setEnabled(not busy)
         self.workflow_combo.setEnabled(not busy)
 
     def open_result(self, item) -> None:

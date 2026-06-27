@@ -4,7 +4,7 @@ import pytest
 
 from e2dm2.catalog import load_song_catalog
 from e2dm2.models import ExportSize, RenderOutputPlan
-from e2dm2.montage import build_montage_segment_plan, validate_forward_progression
+from e2dm2.montage import build_full_length_segment_plan, build_montage_segment_plan, validate_forward_progression
 from e2dm2.render import _montage_filter
 
 
@@ -61,3 +61,73 @@ def test_too_little_source_is_rejected():
     with pytest.raises(ValueError, match="too short"):
         build_montage_segment_plan(200, song)
 
+
+def test_constrained_plan_excludes_red_and_preserves_green_once():
+    songs = load_song_catalog(custom_root=Path("missing-library"))
+    song = next(s for s in songs if s.song_id == "epic-montage-1")
+    plan = build_montage_segment_plan(
+        220, song, excluded_ranges=[(20, 30)], required_ranges=[(50, 60)], source_boundaries=[110],
+    )
+    assert sum(segment.visible_duration for segment in plan) == pytest.approx(song.total_duration_seconds)
+    assert not any(
+        segment.source_start < 30 and segment.source_start + segment.source_duration > 20
+        for segment in plan
+    )
+    protected = [segment for segment in plan if segment.protected]
+    assert len(protected) == 1
+    assert (protected[0].source_start, protected[0].source_duration, protected[0].speed) == (50, 10, 1)
+    assert protected[0].style == "natural"
+    assert protected[0].zoom == 1
+    assert not protected[0].motion_blur
+    assert not any(
+        not segment.protected and segment.source_start < 60 and segment.source_start + segment.source_duration > 50
+        for segment in plan
+    )
+    protected_end = protected[0].visible_start + protected[0].visible_duration
+    assert not any(
+        protected[0].visible_start < segment.visible_start < protected_end
+        for segment in plan if segment is not protected[0]
+    )
+
+
+def test_multiple_required_ranges_stay_in_source_order():
+    song = next(s for s in load_song_catalog(custom_root=Path("missing-library")) if s.song_id == "epic-montage-1")
+    plan = build_montage_segment_plan(240, song, required_ranges=[(40, 45), (150, 158)])
+    protected = [segment for segment in plan if segment.protected]
+    assert [segment.source_start for segment in protected] == [40, 150]
+    assert [segment.visible_start for segment in protected] == sorted(segment.visible_start for segment in protected)
+
+
+def test_infeasible_required_and_excluded_constraints_are_rejected():
+    song = next(s for s in load_song_catalog(custom_root=Path("missing-library")) if s.song_id == "epic-montage-1")
+    with pytest.raises(ValueError, match="exceeds the song"):
+        build_montage_segment_plan(220, song, required_ranges=[(0, 160)])
+    with pytest.raises(ValueError, match="short"):
+        build_montage_segment_plan(220, song, excluded_ranges=[(0, 50)])
+
+
+def test_full_length_plan_removes_exclusions_and_respects_clip_boundaries():
+    plan = build_full_length_segment_plan(10, [(2, 4), (7, 8)], [5])
+    assert [(segment.source_start, segment.source_duration) for segment in plan] == [
+        (0, 2), (4, 1), (5, 2), (8, 2),
+    ]
+    assert sum(segment.visible_duration for segment in plan) == 7
+
+
+def test_music_effects_are_suppressed_inside_protected_output():
+    song = next(s for s in load_song_catalog(custom_root=Path("missing-library")) if s.song_id == "epic-montage-1")
+    segments = build_montage_segment_plan(220, song, required_ranges=[(50, 60)])
+    protected = next(segment for segment in segments if segment.protected)
+    protected_end = protected.visible_start + protected.visible_duration
+    effect_index = next(
+        index for index, timestamp in enumerate(song.cut_timestamps)
+        if protected.visible_start < timestamp < protected_end
+    )
+    song.effects = ["none"] * len(song.cut_timestamps)
+    song.effects[effect_index] = "heartbeat"
+    output = RenderOutputPlan(
+        "protected", "2720x1530_59.94fps", [], 1920, 1080, 59.94, song.total_duration_seconds,
+        ExportSize.HD_1080, "test.mp4", 12000, segments,
+    )
+    script = _montage_filter(output, song)
+    assert f"st={song.cut_timestamps[effect_index]:.6f}" not in script

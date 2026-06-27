@@ -24,6 +24,12 @@ Run tests with:
 .\.venv\Scripts\python -m pytest
 ```
 
+## Footage Marking
+
+Select an imported clip and choose **Preview / Edit**, or double-click the clip. Drag on the full-video timeline with the red tool to exclude footage or the green tool to require an uncut segment. Required ranges are limited to 20 seconds. Saved markings are restored with the project and are enforced by every production workflow.
+
+The first time a clip is opened, E2DM2 builds a low-resolution, all-keyframe preview in the background. The original remains available while it is prepared, and later preview sessions reuse the cached proxy for substantially faster timeline hovering.
+
 ## Song Library
 
 Built-in presets live under `e2dm2/assets/songs`. Custom presets created by the library editor live under `Documents\E2DM2\Library`. Each song folder contains its audio file and a versioned `preset.json`; projects copy a snapshot of both for reproducible renders.

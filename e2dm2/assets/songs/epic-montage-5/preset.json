@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "song_id": "epic-montage-5",
+  "title": "Epic Montage 5",
+  "artist": "E2DM2 Library",
+  "audio_file": "EpicMusic5.m4a",
+  "moods": [
+    "epic"
+  ],
+  "bpm": null,
+  "energy": "high",
+  "total_duration_seconds": 63.781,
+  "minimum_source_duration_seconds": 63.781,
+  "opening_fade_seconds": 0.0,
+  "cuts_end_seconds": 63.781,
+  "fade_out_seconds": 0.0,
+  "escalation_seconds": 0.0,
+  "cut_timestamps": [
+    0.0
+  ],
+  "transitions": {
+    "duration_seconds": 0.25,
+    "hard_cut_threshold_seconds": 2.0
+  },
+  "source_progression": {
+    "short_cut_threshold_seconds": 5.0,
+    "short_cut_advance_seconds": 1.0
+  },
+  "heartbeat": {
+    "timestamps": [],
+    "opacity": 0.3,
+    "fade_seconds": 0.5
+  },
+  "dark_cue": null,
+  "flash_cue": null,
+  "effects": [
+    "none"
+  ],
+  "workflow": "epic_montage",
+  "readonly": true
+}

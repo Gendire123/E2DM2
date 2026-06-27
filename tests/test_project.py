@@ -4,7 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from e2dm2.models import ExportSize, WorkflowMode
+from e2dm2.models import (
+    ClipSelection,
+    ExportSize,
+    SelectionType,
+    WorkflowMode,
+    validate_clip_selections,
+)
 from e2dm2.project import create_project, import_media, load_project, move_media, save_project
 
 
@@ -54,3 +60,51 @@ def test_move_media_changes_project_order(tmp_path):
     move_media(project.settings, 1, 0)
     assert [item.original_name for item in project.settings.media] == ["two.mp4", "one.mp4"]
 
+
+def test_clip_selections_round_trip_with_millisecond_precision(tmp_path):
+    project = create_project("Marks", tmp_path / "projects")
+    source = tmp_path / "marked.mp4"
+    make_video(source, duration=1.0)
+    import_media(project.path, project.settings, [source])
+    project.settings.media[0].selections = [
+        ClipSelection(SelectionType.EXCLUDE, 25, 125),
+        ClipSelection(SelectionType.REQUIRED, 200, 900),
+    ]
+    save_project(project.path, project.settings)
+
+    loaded = load_project(project.path)
+    assert loaded.settings.schema_version == 2
+    assert loaded.settings.media[0].selections == project.settings.media[0].selections
+    data = json.loads((project.path / "project.json").read_text(encoding="utf-8"))
+    assert data["media"][0]["selections"][0] == {"type": "exclude", "start_ms": 25, "end_ms": 125}
+
+
+def test_version_one_project_migrates_with_empty_selections(tmp_path):
+    project = create_project("Legacy", tmp_path / "projects")
+    data = json.loads((project.path / "project.json").read_text(encoding="utf-8"))
+    data["schema_version"] = 1
+    data["media"] = [{
+        "relative_path": "source/old.mp4", "original_name": "old.mp4", "width": 320, "height": 180,
+        "fps": 30, "duration": 2, "codec": "h264", "size_bytes": 100,
+    }]
+    (project.path / "project.json").write_text(json.dumps(data), encoding="utf-8")
+    loaded = load_project(project.path)
+    assert loaded.settings.schema_version == 2
+    assert loaded.settings.media[0].selections == []
+
+
+def test_selection_validation_limits_and_overlap_rules():
+    touching = [
+        ClipSelection(SelectionType.EXCLUDE, 0, 1000),
+        ClipSelection(SelectionType.REQUIRED, 1000, 21_000),
+    ]
+    assert validate_clip_selections(touching, 30) == touching
+    with pytest.raises(ValueError, match="20 seconds"):
+        validate_clip_selections([ClipSelection(SelectionType.REQUIRED, 0, 20_001)], 30)
+    with pytest.raises(ValueError, match="overlap"):
+        validate_clip_selections([
+            ClipSelection(SelectionType.EXCLUDE, 0, 1001),
+            ClipSelection(SelectionType.REQUIRED, 1000, 2000),
+        ], 30)
+    with pytest.raises(ValueError, match="within"):
+        validate_clip_selections([ClipSelection(SelectionType.EXCLUDE, 0, 30_001)], 30)

@@ -9,6 +9,7 @@ from .models import MediaItem
 
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v"}
+PREVIEW_PROXY_VERSION = 1
 
 
 def parse_fps(value: str | None) -> float:
@@ -61,3 +62,29 @@ def fit_within_1080(width: int, height: int) -> tuple[int, int]:
     target_height = max(2, int(height * scale) // 2 * 2)
     return target_width, target_height
 
+
+def preview_proxy_path(project_path: Path, media: MediaItem) -> Path:
+    source_name = Path(media.relative_path).name
+    source = Path(source_name)
+    identity = f"{source.stem}_{source.suffix.lstrip('.').lower()}"
+    return project_path / "temp" / "previews" / f"{identity}.preview-v{PREVIEW_PROXY_VERSION}.mp4"
+
+
+def preview_proxy_is_current(source: Path, proxy: Path) -> bool:
+    try:
+        return proxy.is_file() and proxy.stat().st_size > 0 and proxy.stat().st_mtime_ns >= source.stat().st_mtime_ns
+    except OSError:
+        return False
+
+
+def preview_proxy_arguments(source: Path, destination: Path) -> list[str]:
+    """Create a small all-keyframe proxy optimized for arbitrary seeking."""
+    return [
+        "-hide_banner", "-loglevel", "error", "-y", "-i", str(source),
+        "-map", "0:v:0", "-map", "0:a?",
+        "-vf", "scale=w='min(854,iw)':h=-2,fps=30",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "30",
+        "-g", "1", "-keyint_min", "1", "-sc_threshold", "0", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "96k", "-sn", "-dn", "-movflags", "+faststart",
+        "-progress", "pipe:1", "-nostats", str(destination),
+    ]

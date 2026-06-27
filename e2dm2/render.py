@@ -25,11 +25,12 @@ from .models import (
     RenderPlan,
     RenderRequest,
     RenderResult,
+    SelectionType,
     SegmentPlan,
     SongManifest,
     WorkflowMode,
 )
-from .montage import build_montage_segment_plan, validate_forward_progression
+from .montage import build_full_length_segment_plan, build_montage_segment_plan, validate_forward_progression
 
 
 ProgressCallback = Callable[[ProgressEvent], None]
@@ -104,6 +105,20 @@ def _snapshot_full_track(project: Project, track_id: str) -> Path:
     return _copy_snapshot(track.path, project.path / "music" / "full-length" / track.path.name)
 
 
+def _group_selection_ranges(media) -> tuple[list[tuple[float, float]], list[tuple[float, float]], list[float]]:
+    excluded: list[tuple[float, float]] = []
+    required: list[tuple[float, float]] = []
+    boundaries: list[float] = []
+    offset = 0.0
+    for item in media:
+        for selection in item.selections:
+            target = excluded if selection.type is SelectionType.EXCLUDE else required
+            target.append((offset + selection.start_ms / 1000, offset + selection.end_ms / 1000))
+        offset += item.duration
+        boundaries.append(offset)
+    return excluded, required, boundaries[:-1]
+
+
 def create_render_plan(
     project: Project,
     request: RenderRequest,
@@ -138,6 +153,8 @@ def create_render_plan(
     for group_key, media in group_media(project.settings.media).items():
         source_width, source_height, fps = media[0].width, media[0].height, media[0].fps
         source_duration = sum(item.duration for item in media)
+        excluded_ranges, required_ranges, source_boundaries = _group_selection_ranges(media)
+        constrained = bool(excluded_ranges or required_ranges)
         segments: list[SegmentPlan] = []
         if song:
             if source_duration < song.minimum_source_duration_seconds:
@@ -145,14 +162,29 @@ def create_render_plan(
                     f"{song.title} needs at least {song.minimum_source_duration_seconds:.1f} seconds "
                     f"of {group_key} footage; this project has {source_duration:.1f} seconds."
                 )
-            segments = build_montage_segment_plan(source_duration, song)
-            progression_errors = validate_forward_progression(
-                segments,
-                song.source_progression.short_cut_advance_seconds,
-                song.source_progression.short_cut_threshold_seconds,
-            )
-            if progression_errors:
-                raise ValueError(" ".join(progression_errors))
+            try:
+                segments = build_montage_segment_plan(
+                    source_duration, song, excluded_ranges, required_ranges, source_boundaries,
+                )
+            except ValueError as exc:
+                raise ValueError(f"{group_key}: {exc}") from exc
+            if not constrained:
+                progression_errors = validate_forward_progression(
+                    segments,
+                    song.source_progression.short_cut_advance_seconds,
+                    song.source_progression.short_cut_threshold_seconds,
+                )
+                if progression_errors:
+                    raise ValueError(" ".join(progression_errors))
+        elif excluded_ranges:
+            try:
+                segments = build_full_length_segment_plan(source_duration, excluded_ranges, source_boundaries)
+            except ValueError as exc:
+                raise ValueError(f"{group_key}: {exc}") from exc
+        output_duration = (
+            song.total_duration_seconds if song else
+            sum(segment.visible_duration for segment in segments) if segments else source_duration
+        )
         for export_size in dict.fromkeys(request.exports):
             if export_size == ExportSize.HD_1080:
                 width, height = fit_within_1080(source_width, source_height)
@@ -168,7 +200,7 @@ def create_render_plan(
                 width=width,
                 height=height,
                 fps=fps,
-                duration_seconds=song.total_duration_seconds if song else source_duration,
+                duration_seconds=output_duration,
                 export_size=export_size,
                 output_path=str(project.path / "renders" / output_name),
                 bitrate_kbps=_target_bitrate(media, width, height, fps),
@@ -252,13 +284,20 @@ def _montage_filter(output: RenderOutputPlan, song: SongManifest) -> str:
     )
     video_label = "basevideo"
     effects = getattr(song, "effects", [])
+    protected_ranges = [
+        (segment.visible_start, segment.visible_start + segment.visible_duration)
+        for segment in output.segments if segment.protected
+    ]
+
+    def is_protected_time(timestamp: float) -> bool:
+        return any(start - 0.000001 <= timestamp < end - 0.000001 for start, end in protected_ranges)
     
     # Render heartbeat overlays
     heartbeat_idx = 0
     hb_opacity = song.heartbeat.opacity if song.heartbeat else 0.3
     hb_fade = song.heartbeat.fade_seconds if song.heartbeat else 0.5
     for idx, (timestamp, effect) in enumerate(zip(song.cut_timestamps, effects)):
-        if effect == "heartbeat":
+        if effect == "heartbeat" and not is_protected_time(timestamp):
             end = timestamp + hb_fade
             filters.append(
                 f"color=c=black@{hb_opacity:.3f}:s={source_width}x{source_height}:d={song.total_duration_seconds:.6f},"
@@ -277,7 +316,7 @@ def _montage_filter(output: RenderOutputPlan, song: SongManifest) -> str:
     flash_fade = song.flash_cue.fade_in_seconds if song.flash_cue else 0.05
     flash_op = song.flash_cue.opacity if song.flash_cue else 0.8
     for idx, (timestamp, effect) in enumerate(zip(song.cut_timestamps, effects)):
-        if effect == "flash":
+        if effect == "flash" and not is_protected_time(timestamp):
             fade_out_start = timestamp + flash_fade
             end = timestamp + flash_dur
             filters.append(
@@ -298,7 +337,7 @@ def _montage_filter(output: RenderOutputPlan, song: SongManifest) -> str:
     fade_out = song.dark_cue.fade_out_seconds if song.dark_cue else 1.0
     slow_op = song.dark_cue.opacity if song.dark_cue else 0.9
     for idx, (timestamp, effect) in enumerate(zip(song.cut_timestamps, effects)):
-        if effect == "slow_fade_out":
+        if effect == "slow_fade_out" and not is_protected_time(timestamp):
             end = timestamp + fade_in + fade_out
             filters.append(
                 f"color=c=black@{slow_op:.3f}:s={source_width}x{source_height}:d={song.total_duration_seconds:.6f},"
@@ -322,7 +361,52 @@ def _montage_filter(output: RenderOutputPlan, song: SongManifest) -> str:
     return ";\n".join(filters)
 
 
-def _full_length_command(plan: RenderPlan, output: RenderOutputPlan, concat: Path, temporary: Path) -> list[str]:
+def _full_length_filter(output: RenderOutputPlan) -> str:
+    fade_in = min(3.0, output.duration_seconds / 3)
+    fade_out = min(8.0, output.duration_seconds / 3)
+    fade_out_start = max(output.duration_seconds - fade_out, 0)
+    audio_fade_in = min(5.0, output.duration_seconds / 3)
+    audio_fade_out = min(10.0, output.duration_seconds / 3)
+    audio_fade_start = max(output.duration_seconds - audio_fade_out, 0)
+    fps = _fps_value(output.fps)
+    split_labels = [f"[fv{segment.index}]" for segment in output.segments]
+    filters = [f"[0:v]split={len(split_labels)}{''.join(split_labels)}"]
+    for segment in output.segments:
+        filters.append(
+            f"[fv{segment.index}]trim=start={segment.source_start:.6f}:duration={segment.source_duration:.6f},"
+            f"setpts=PTS-STARTPTS,fps={fps},settb=AVTB,setsar=1,format=yuv420p[fs{segment.index}]"
+        )
+    if len(output.segments) == 1:
+        video_label = "fs0"
+    else:
+        joined = "".join(f"[fs{segment.index}]" for segment in output.segments)
+        filters.append(f"{joined}concat=n={len(output.segments)}:v=1:a=0,settb=AVTB[fulljoined]")
+        video_label = "fulljoined"
+    filters.append(
+        f"[{video_label}]fade=t=in:st=0:d={fade_in:.3f},fade=t=out:st={fade_out_start:.3f}:d={fade_out:.3f},"
+        f"scale={output.width}:{output.height}:flags=lanczos,setsar=1,format=yuv420p[videoout]"
+    )
+    filters.append(
+        f"[1:a]atrim=0:{output.duration_seconds:.6f},asetpts=N/SR/TB,"
+        f"afade=t=in:st=0:d={audio_fade_in:.3f},afade=t=out:st={audio_fade_start:.3f}:d={audio_fade_out:.3f}[musicout]"
+    )
+    return ";\n".join(filters)
+
+
+def _full_length_command(
+    plan: RenderPlan, output: RenderOutputPlan, concat: Path, temporary: Path, filter_path: Path | None = None,
+) -> list[str]:
+    if output.segments:
+        assert filter_path is not None
+        return [
+            "ffmpeg", "-hide_banner", "-y", "-fflags", "+genpts", "-f", "concat", "-safe", "0", "-i", str(concat),
+            "-stream_loop", "-1", "-i", plan.music_path, "-filter_complex_script", str(filter_path),
+            "-map", "[videoout]", "-map", "[musicout]", "-sn", "-dn", "-r", _fps_value(output.fps),
+            *encoder_arguments(plan.encoder, output.bitrate_kbps), "-profile:v", "high",
+            "-g", str(max(1, round(output.fps * 2))), "-c:a", "aac", "-b:a", "192k",
+            "-t", f"{output.duration_seconds:.6f}", "-shortest", "-avoid_negative_ts", "make_zero",
+            "-movflags", "+faststart", "-progress", "pipe:1", "-nostats", str(temporary),
+        ]
     fade_in = min(3.0, output.duration_seconds / 3)
     fade_out = min(8.0, output.duration_seconds / 3)
     fade_out_start = max(output.duration_seconds - fade_out, 0)
@@ -432,7 +516,9 @@ def render(
                 filter_path.write_text(_montage_filter(output, song), encoding="utf-8")
                 command = _montage_command(plan, output, concat, filter_path, temporary)
             else:
-                command = _full_length_command(plan, output, concat, temporary)
+                if output.segments:
+                    filter_path.write_text(_full_length_filter(output), encoding="utf-8")
+                command = _full_length_command(plan, output, concat, temporary, filter_path)
             success, error = _run_ffmpeg(command, output, cancellation, progress_callback)
             if success:
                 if destination.exists():

@@ -24,6 +24,54 @@ class EnergyLevel(str, Enum):
     HIGH = "high"
 
 
+class SelectionType(str, Enum):
+    EXCLUDE = "exclude"
+    REQUIRED = "required"
+
+
+MAX_REQUIRED_SELECTION_MS = 20_000
+
+
+@dataclass(slots=True)
+class ClipSelection:
+    type: SelectionType
+    start_ms: int
+    end_ms: int
+
+    @property
+    def duration_ms(self) -> int:
+        return self.end_ms - self.start_ms
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"type": self.type.value, "start_ms": self.start_ms, "end_ms": self.end_ms}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ClipSelection":
+        return cls(
+            type=SelectionType(data["type"]),
+            start_ms=int(data["start_ms"]),
+            end_ms=int(data["end_ms"]),
+        )
+
+
+def validate_clip_selections(selections: list[ClipSelection], clip_duration_seconds: float) -> list[ClipSelection]:
+    """Validate and return selections in deterministic timeline order."""
+    duration_ms = max(0, round(clip_duration_seconds * 1000))
+    ordered = sorted(selections, key=lambda selection: (selection.start_ms, selection.end_ms, selection.type.value))
+    previous: ClipSelection | None = None
+    for selection in ordered:
+        if selection.start_ms < 0 or selection.end_ms > duration_ms:
+            raise ValueError("Selection times must stay within the source clip.")
+        if selection.start_ms >= selection.end_ms:
+            raise ValueError("Selection end time must be after its start time.")
+        if selection.type is SelectionType.REQUIRED and selection.duration_ms > MAX_REQUIRED_SELECTION_MS:
+            raise ValueError("Required selections cannot be longer than 20 seconds.")
+        if previous is not None and selection.start_ms < previous.end_ms:
+            raise ValueError("Selections cannot overlap.")
+        previous = selection
+    return ordered
+
+
 @dataclass(slots=True)
 class MediaItem:
     relative_path: str
@@ -34,6 +82,7 @@ class MediaItem:
     duration: float
     codec: str
     size_bytes: int
+    selections: list[ClipSelection] = field(default_factory=list)
 
     @property
     def group_key(self) -> str:
@@ -42,6 +91,19 @@ class MediaItem:
 
     def resolve(self, project_path: Path) -> Path:
         return project_path / self.relative_path
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["selections"] = [selection.to_dict() for selection in self.selections]
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "MediaItem":
+        values = dict(data)
+        values["selections"] = [ClipSelection.from_dict(item) for item in data.get("selections", [])]
+        media = cls(**values)
+        media.selections = validate_clip_selections(media.selections, media.duration)
+        return media
 
 
 @dataclass(slots=True)
@@ -195,6 +257,7 @@ class ProjectSettings:
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
+        data["media"] = [item.to_dict() for item in self.media]
         data["workflow"] = WorkflowMode(self.workflow).value
         data["exports"] = [ExportSize(value).value for value in self.exports]
         return data
@@ -202,11 +265,11 @@ class ProjectSettings:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ProjectSettings":
         return cls(
-            schema_version=int(data.get("schema_version", 1)),
+            schema_version=2,
             name=str(data["name"]),
             created_at=str(data["created_at"]),
             updated_at=str(data["updated_at"]),
-            media=[MediaItem(**item) for item in data.get("media", [])],
+            media=[MediaItem.from_dict(item) for item in data.get("media", [])],
             workflow=WorkflowMode(data.get("workflow", WorkflowMode.EPIC_MONTAGE.value)),
             song_id=data.get("song_id"),
             full_length_track_id=str(data.get("full_length_track_id", "drone-music-1")),
@@ -242,6 +305,7 @@ class SegmentPlan:
     visible_start: float
     visible_duration: float
     transition_after: float
+    protected: bool = False
 
 
 @dataclass(slots=True)
