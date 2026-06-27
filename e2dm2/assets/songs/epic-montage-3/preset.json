@@ -2,10 +2,12 @@
   "schema_version": 1,
   "song_id": "epic-montage-3",
   "title": "Epic Montage 3",
-  "artist": "Unknown",
+  "artist": "E2DM2 Library",
   "audio_file": "EpicMusic3.m4a",
   "moods": [
-    "epic"
+    "epic",
+    "cinematic",
+    "dramatic"
   ],
   "bpm": null,
   "energy": "high",

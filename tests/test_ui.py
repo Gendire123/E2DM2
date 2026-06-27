@@ -23,6 +23,7 @@ def test_main_window_smoke(qtbot):
     assert window.workspace.song_table.rowCount() >= 2
     assert window.home.recent_list is not None
     assert window.log_dock.windowTitle() == "Backend Log"
+    assert not window.log_dock.isVisible()
     window.center_on_active_screen()
     screen_center = window.screen().availableGeometry().center()
     frame_center = window.frameGeometry().center()

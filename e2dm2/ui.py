@@ -309,7 +309,8 @@ class WorkspacePage(QWidget):
         media_actions.addWidget(self.media_total)
         media_panel = QWidget()
         media_layout = QVBoxLayout(media_panel)
-        media_layout.setContentsMargins(0, 0, 0, 0)
+        media_layout.setContentsMargins(16, 16, 16, 16)
+        media_layout.setSpacing(12)
         media_layout.addWidget(QLabel("Footage"))
         media_layout.addWidget(self.media_table)
         media_layout.addLayout(media_actions)
@@ -327,6 +328,17 @@ class WorkspacePage(QWidget):
         self.mode_stack = QStackedWidget()
         self.mode_stack.addWidget(self.epic_panel)
         self.mode_stack.addWidget(self.full_panel)
+
+        music_panel = QWidget()
+        music_layout = QVBoxLayout(music_panel)
+        music_layout.setContentsMargins(16, 16, 16, 16)
+        music_layout.setSpacing(12)
+        music_layout.addLayout(workflow_row)
+        music_layout.addWidget(self.mode_stack, 1)
+
+        music_scroll = QScrollArea()
+        music_scroll.setWidgetResizable(True)
+        music_scroll.setWidget(music_panel)
 
         self.source_export = QCheckBox("Source resolution")
         self.hd_export = QCheckBox("1080p maximum")
@@ -365,19 +377,20 @@ class WorkspacePage(QWidget):
         status_layout.addWidget(self.results_list, 1)
         status_layout.addWidget(open_folder)
 
-        right = QWidget()
-        right_layout = QVBoxLayout(right)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.addLayout(workflow_row)
-        right_layout.addWidget(self.mode_stack, 2)
-        right_layout.addLayout(render_actions)
-        right_layout.addWidget(status_panel, 1)
-        production_scroll = QScrollArea()
-        production_scroll.setWidgetResizable(True)
-        production_scroll.setWidget(right)
+        produce_panel = QWidget()
+        produce_layout = QVBoxLayout(produce_panel)
+        produce_layout.setContentsMargins(16, 16, 16, 16)
+        produce_layout.setSpacing(12)
+        produce_layout.addLayout(render_actions)
+        produce_layout.addWidget(status_panel, 1)
+        produce_scroll = QScrollArea()
+        produce_scroll.setWidgetResizable(True)
+        produce_scroll.setWidget(produce_panel)
+
         self.workspace_tabs = QTabWidget()
         self.workspace_tabs.addTab(media_panel, "Footage")
-        self.workspace_tabs.addTab(production_scroll, "Production")
+        self.workspace_tabs.addTab(music_scroll, "Music")
+        self.workspace_tabs.addTab(produce_scroll, "Produce")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 18, 24, 24)
@@ -401,13 +414,13 @@ class WorkspacePage(QWidget):
         filters.addWidget(self.mood_filter)
         filters.addWidget(self.energy_filter)
         filters.addWidget(manage)
-        self.song_table = QTableWidget(0, 5)
-        self.song_table.setHorizontalHeaderLabels(["Song", "Mood", "Energy", "BPM", "Length"])
+        self.song_table = QTableWidget(0, 4)
+        self.song_table.setHorizontalHeaderLabels(["Song", "Mood", "Cuts", "Length"])
         self.song_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.song_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.song_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.song_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for column in range(1, 5):
+        for column in range(1, 4):
             self.song_table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
         self.song_table.itemSelectionChanged.connect(self.song_selected)
         layout = QVBoxLayout(panel)
@@ -490,7 +503,7 @@ class WorkspacePage(QWidget):
         self.song_table.setRowCount(len(filtered))
         selected_row = -1
         for row, song in enumerate(filtered):
-            values = [song.title, ", ".join(song.moods), song.energy.value.title(), f"{song.bpm:g}" if song.bpm else "-", _duration(song.total_duration_seconds)]
+            values = [song.title, ", ".join(song.moods), str(len(song.cut_timestamps)), _duration(song.total_duration_seconds)]
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 if column == 0:
@@ -614,7 +627,7 @@ class WorkspacePage(QWidget):
 
     def start_render(self) -> None:
         LOGGER.info("Produce clicked")
-        self.workspace_tabs.setCurrentIndex(1)
+        self.workspace_tabs.setCurrentIndex(2)
         try:
             self._start_render()
         except Exception as exc:
@@ -737,6 +750,7 @@ class MainWindow(QMainWindow):
         self.log_dock.setWidget(BackendLogWidget())
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.log_dock)
         self.resizeDocks([self.log_dock], [120], Qt.Orientation.Vertical)
+        self.log_dock.hide()
         self.menuBar().addMenu("View").addAction(self.log_dock.toggleViewAction())
         self.home.new_requested.connect(self.new_project)
         self.home.open_requested.connect(self.open_project)
