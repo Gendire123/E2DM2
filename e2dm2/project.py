@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import shutil
 from datetime import datetime, timezone
@@ -10,6 +11,9 @@ from typing import Callable, Iterable
 from .catalog import default_project_root
 from .media import VIDEO_EXTENSIONS, probe_media
 from .models import CancellationToken, MediaItem, Project, ProjectSettings
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _now() -> str:
@@ -36,6 +40,7 @@ def create_project(name: str, root: Path | None = None) -> Project:
     settings = ProjectSettings(schema_version=1, name=name.strip() or "Drone Project", created_at=now, updated_at=now)
     save_project(project_path, settings)
     remember_project(project_path)
+    LOGGER.info("Created project '%s' at %s", settings.name, project_path)
     return Project(project_path, settings)
 
 
@@ -52,6 +57,7 @@ def load_project(project_path: Path) -> Project:
     data = json.loads(path.read_text(encoding="utf-8"))
     settings = ProjectSettings.from_dict(data)
     remember_project(path.parent)
+    LOGGER.info("Opened project '%s' from %s", settings.name, path.parent)
     return Project(path.parent, settings)
 
 
@@ -73,6 +79,7 @@ def import_media(
 ) -> list[MediaItem]:
     candidates = [path for path in sources if path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS]
     total_bytes = sum(path.stat().st_size for path in candidates)
+    LOGGER.info("Import requested: %d file(s), %.2f GB", len(candidates), total_bytes / 1024 ** 3)
     free_bytes = shutil.disk_usage(project_path).free
     if total_bytes > free_bytes:
         raise OSError(f"Not enough disk space. Need {total_bytes:,} bytes; {free_bytes:,} bytes are available.")
@@ -83,6 +90,7 @@ def import_media(
             break
         destination = _unique_destination(project_path / "source", source.name)
         partial = destination.with_suffix(destination.suffix + ".partial")
+        LOGGER.info("Copying %s to %s", source, destination)
         try:
             with source.open("rb") as input_file, partial.open("wb") as output_file:
                 while chunk := input_file.read(8 * 1024 * 1024):
@@ -96,12 +104,18 @@ def import_media(
                 raise OSError(f"Copied size does not match for {source.name}")
             partial.replace(destination)
             item = probe_media(destination, f"source/{destination.name}")
+            LOGGER.info(
+                "Imported %s | %dx%d | %.3f fps | %.3f seconds | %s",
+                destination.name, item.width, item.height, item.fps, item.duration, item.codec,
+            )
             imported.append(item)
             settings.media.append(item)
             save_project(project_path, settings)
         except Exception:
             partial.unlink(missing_ok=True)
+            LOGGER.exception("Import failed for %s", source)
             raise
+    LOGGER.info("Import completed: %d file(s)", len(imported))
     return imported
 
 

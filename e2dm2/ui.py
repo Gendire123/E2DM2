@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import logging
 import shutil
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QThread, Qt, QUrl, Signal, Slot
+from PySide6.QtCore import QObject, QThread, QTimer, Qt, QUrl, Signal, Slot
 from PySide6.QtGui import QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
@@ -11,6 +12,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QDockWidget,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
@@ -21,6 +23,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QProgressBar,
+    QPlainTextEdit,
     QPushButton,
     QSplitter,
     QStackedWidget,
@@ -39,6 +42,10 @@ from .media import VIDEO_EXTENSIONS
 from .models import CancellationToken, ExportSize, ProgressEvent, Project, RenderRequest, WorkflowMode
 from .project import create_project, import_media, load_project, move_media, recent_projects, remove_media, save_project
 from .render import create_render_plan, render
+from .logging_setup import log_file_path
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _duration(value: float) -> str:
@@ -86,7 +93,7 @@ class NewProjectDialog(QDialog):
 
 
 class ImportWorker(QObject):
-    progress = Signal(int, int, str)
+    progress = Signal(float, str)
     finished = Signal(object)
     failed = Signal(str)
 
@@ -99,15 +106,17 @@ class ImportWorker(QObject):
     @Slot()
     def run(self) -> None:
         try:
+            LOGGER.info("Background import worker started")
             imported = import_media(
                 self.project.path,
                 self.project.settings,
                 self.paths,
-                lambda done, total, name: self.progress.emit(done, total, name),
+                lambda done, total, name: self.progress.emit(done / max(total, 1) * 100, name),
                 self.cancellation,
             )
             self.finished.emit(imported)
         except Exception as exc:
+            LOGGER.exception("Background import worker failed")
             self.failed.emit(str(exc))
 
 
@@ -125,12 +134,65 @@ class RenderWorker(QObject):
     @Slot()
     def run(self) -> None:
         try:
+            LOGGER.info("Background render worker started")
             self.progress.emit(ProgressEvent("planning", "Validating media and selecting an encoder", percent=0))
             plan = create_render_plan(self.project, self.request)
             result = render(plan, self.progress.emit, self.cancellation)
             self.finished.emit(result)
         except Exception as exc:
+            LOGGER.exception("Background render worker failed")
             self.failed.emit(str(exc))
+
+
+class BackendLogWidget(QWidget):
+    def __init__(self) -> None:
+        super().__init__()
+        self.path = log_file_path()
+        self.offset = 0
+        self.output = QPlainTextEdit()
+        self.output.setReadOnly(True)
+        self.output.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self.output.setObjectName("backendLog")
+        open_folder = QPushButton("Open Log Folder")
+        open_folder.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.path.parent))))
+        clear_view = QPushButton("Clear View")
+        clear_view.clicked.connect(self.clear_view)
+        toolbar = QHBoxLayout()
+        toolbar.addWidget(QLabel(str(self.path)), 1)
+        toolbar.addWidget(open_folder)
+        toolbar.addWidget(clear_view)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.addLayout(toolbar)
+        layout.addWidget(self.output)
+        self.timer = QTimer(self)
+        self.timer.setInterval(500)
+        self.timer.timeout.connect(self.refresh)
+        self.timer.start()
+        self.refresh()
+
+    def refresh(self) -> None:
+        if not self.path.exists():
+            return
+        try:
+            size = self.path.stat().st_size
+            if size < self.offset:
+                self.offset = 0
+                self.output.clear()
+            with self.path.open("r", encoding="utf-8", errors="replace") as handle:
+                handle.seek(self.offset)
+                text = handle.read()
+                self.offset = handle.tell()
+            if text:
+                self.output.moveCursor(self.output.textCursor().MoveOperation.End)
+                self.output.insertPlainText(text)
+                self.output.moveCursor(self.output.textCursor().MoveOperation.End)
+        except OSError:
+            return
+
+    def clear_view(self) -> None:
+        self.output.clear()
+        self.offset = self.path.stat().st_size if self.path.exists() else 0
 
 
 class HomePage(QWidget):
@@ -182,6 +244,7 @@ class WorkspacePage(QWidget):
         self.project: Project | None = None
         self.songs = []
         self.thread: QThread | None = None
+        self.worker: QObject | None = None
         self.cancellation: CancellationToken | None = None
         self.entitlement = AlphaEntitlementProvider()
         self._build_ui()
@@ -465,18 +528,21 @@ class WorkspacePage(QWidget):
         worker.failed.connect(worker.deleteLater)
         thread.finished.connect(self.thread_finished)
         self.thread = thread
+        self.worker = worker
         self._set_busy(True)
         self.status_label.setText("Copying footage into the project")
+        LOGGER.info("UI started import for %d selected file(s)", len(paths))
         thread.start()
 
-    def import_progress(self, done: int, total: int, name: str) -> None:
-        self.progress_bar.setValue(round(done / max(total, 1) * 100))
+    def import_progress(self, percent: float, name: str) -> None:
+        self.progress_bar.setValue(round(percent))
         self.status_label.setText(f"Importing {name}")
 
     def import_finished(self, imported) -> None:
         self.refresh_media()
         self.status_label.setText(f"Imported {len(imported)} clip(s)")
         self.progress_bar.setValue(100)
+        LOGGER.info("UI import completed with %d file(s)", len(imported))
 
     def selected_media_row(self) -> int:
         return self.media_table.currentRow()
@@ -528,13 +594,21 @@ class WorkspacePage(QWidget):
         return exports
 
     def start_render(self) -> None:
+        LOGGER.info("Produce clicked")
+        try:
+            self._start_render()
+        except Exception as exc:
+            LOGGER.exception("Production could not start")
+            self.operation_failed(str(exc))
+
+    def _start_render(self) -> None:
         if not self.project or self.thread:
             return
         exports = self.selected_exports()
         if not exports:
             QMessageBox.warning(self, "Export size", "Choose at least one export size.")
             return
-        workflow = self.workflow_combo.currentData()
+        workflow = WorkflowMode(self.workflow_combo.currentData())
         song_id = self.project.settings.song_id
         if workflow == WorkflowMode.EPIC_MONTAGE and not song_id:
             QMessageBox.warning(self, "Epic song", "Choose an Epic song.")
@@ -558,8 +632,10 @@ class WorkspacePage(QWidget):
         worker.failed.connect(worker.deleteLater)
         thread.finished.connect(self.thread_finished)
         self.thread = thread
+        self.worker = worker
         self.results_list.clear()
         self._set_busy(True)
+        LOGGER.info("UI started production")
         thread.start()
 
     def render_progress(self, event: ProgressEvent) -> None:
@@ -585,6 +661,7 @@ class WorkspacePage(QWidget):
 
     def operation_failed(self, message: str) -> None:
         self.status_label.setText(message)
+        LOGGER.error("UI operation failed: %s", message)
         QMessageBox.critical(self, "Operation failed", message)
 
     def cancel_operation(self) -> None:
@@ -596,6 +673,7 @@ class WorkspacePage(QWidget):
         if self.thread:
             self.thread.deleteLater()
         self.thread = None
+        self.worker = None
         self.cancellation = None
         self._set_busy(False)
         self.operation_idle.emit()
@@ -630,10 +708,17 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.home)
         self.stack.addWidget(self.workspace)
         self.setCentralWidget(self.stack)
+        self.log_dock = QDockWidget("Backend Log", self)
+        self.log_dock.setObjectName("backendLogDock")
+        self.log_dock.setWidget(BackendLogWidget())
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.log_dock)
+        self.resizeDocks([self.log_dock], [190], Qt.Orientation.Vertical)
+        self.menuBar().addMenu("View").addAction(self.log_dock.toggleViewAction())
         self.home.new_requested.connect(self.new_project)
         self.home.open_requested.connect(self.open_project)
         self.home.recent_requested.connect(lambda path: self.load_project_path(Path(path)))
         self.workspace.home_requested.connect(self.show_home)
+        LOGGER.info("E2DM2 main window initialized")
         self.show_home()
 
     def show_home(self) -> None:
@@ -649,6 +734,7 @@ class MainWindow(QMainWindow):
             self.workspace.set_project(project)
             self.stack.setCurrentWidget(self.workspace)
         except OSError as exc:
+            LOGGER.exception("Could not create project")
             QMessageBox.critical(self, "Could not create project", str(exc))
 
     def open_project(self) -> None:
@@ -662,6 +748,7 @@ class MainWindow(QMainWindow):
             self.workspace.set_project(project)
             self.stack.setCurrentWidget(self.workspace)
         except (OSError, ValueError, KeyError) as exc:
+            LOGGER.exception("Could not open project: %s", path)
             QMessageBox.critical(self, "Could not open project", str(exc))
 
     def closeEvent(self, event: QCloseEvent) -> None:
@@ -696,6 +783,7 @@ QPushButton#primaryButton { background: #246447; color: white; border-color: #24
 QPushButton#primaryButton:hover { background: #1c543a; }
 QProgressBar { background: #e0e4e0; border: 0; border-radius: 4px; height: 16px; text-align: center; }
 QProgressBar::chunk { background: #d08a2f; border-radius: 4px; }
+QPlainTextEdit#backendLog { background: #171b18; color: #dce6df; border: 1px solid #39433c; font-family: Consolas; font-size: 9pt; }
 QTabWidget::pane { border: 1px solid #c8cec9; background: #ffffff; }
 QTabBar::tab { background: #e7ebe7; padding: 8px 16px; }
 QTabBar::tab:selected { background: #ffffff; color: #246447; }

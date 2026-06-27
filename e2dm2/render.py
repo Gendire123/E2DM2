@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import re
@@ -32,6 +33,7 @@ from .montage import build_montage_segment_plan, validate_forward_progression
 
 
 ProgressCallback = Callable[[ProgressEvent], None]
+LOGGER = logging.getLogger(__name__)
 
 
 def _notify(callback: ProgressCallback | None, event: ProgressEvent) -> None:
@@ -114,6 +116,10 @@ def create_render_plan(
         if not item.resolve(project.path).is_file():
             raise FileNotFoundError(f"Project source is missing: {item.relative_path}")
     encoder = encoder or select_encoder()
+    LOGGER.info(
+        "Creating render plan | project=%s | workflow=%s | exports=%s | encoder=%s",
+        project.settings.name, request.workflow.value, [value.value for value in request.exports], encoder.codec,
+    )
     song_data: dict | None = None
     song: SongManifest | None = None
     if request.workflow == WorkflowMode.EPIC_MONTAGE:
@@ -181,6 +187,7 @@ def create_render_plan(
     temporary = plan_path.with_suffix(".json.partial")
     temporary.write_text(json.dumps(plan.to_dict(), indent=2), encoding="utf-8")
     temporary.replace(plan_path)
+    LOGGER.info("Saved render plan with %d output(s): %s", len(outputs), plan_path)
     return plan
 
 
@@ -326,6 +333,8 @@ def _run_ffmpeg(
     command: list[str], output: RenderOutputPlan, cancellation: CancellationToken, progress: ProgressCallback | None,
 ) -> tuple[bool, str | None]:
     creation_flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    LOGGER.info("Starting FFmpeg for %s", output.output_id)
+    LOGGER.debug("FFmpeg command: %s", subprocess.list2cmdline(command))
     process = subprocess.Popen(
         command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
         creationflags=creation_flags,
@@ -338,6 +347,7 @@ def _run_ffmpeg(
             line = line.strip()
             log_lines.append(line)
             log_lines = log_lines[-30:]
+            LOGGER.debug("ffmpeg[%s] %s", output.output_id, line)
             if line.startswith(("out_time_us=", "out_time_ms=")):
                 try:
                     elapsed = int(line.split("=", 1)[1]) / 1_000_000
@@ -354,9 +364,12 @@ def _run_ffmpeg(
         if process.poll() is not None and not line:
             break
     if cancellation.cancelled:
+        LOGGER.warning("FFmpeg cancelled for %s", output.output_id)
         return False, "Cancelled"
     if process.returncode != 0:
+        LOGGER.error("FFmpeg failed for %s with exit code %s", output.output_id, process.returncode)
         return False, "\n".join(log_lines[-12:]) or f"FFmpeg exited with code {process.returncode}"
+    LOGGER.info("FFmpeg completed for %s", output.output_id)
     return True, None
 
 
@@ -398,6 +411,7 @@ def render(
                         destination = destination.with_name(f"{stem}_{counter}{suffix}")
                         counter += 1
                 temporary.replace(destination)
+                LOGGER.info("Created render: %s", destination)
                 _notify(progress_callback, ProgressEvent("complete", f"Created {destination.name}", output.output_id, 100))
                 results.append(OutputResult(output.output_id, str(destination), True))
             else:
@@ -405,6 +419,7 @@ def render(
                 results.append(OutputResult(output.output_id, str(destination), False, error))
         except Exception as exc:
             temporary.unlink(missing_ok=True)
+            LOGGER.exception("Render output failed: %s", output.output_id)
             results.append(OutputResult(output.output_id, str(destination), False, str(exc)))
         finally:
             concat.unlink(missing_ok=True)

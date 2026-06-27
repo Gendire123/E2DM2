@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -10,6 +11,9 @@ from pathlib import Path
 from typing import Iterable
 
 from .models import SongManifest
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -137,6 +141,7 @@ def load_song_catalog(custom_root: Path | None = None) -> list[SongManifest]:
             raise ValueError(f"Duplicate song ID in catalog: {song.song_id}")
         seen.add(song.song_id)
         songs.append(song)
+    LOGGER.info("Loaded %d Epic song preset(s)", len(songs))
     return songs
 
 
@@ -209,6 +214,7 @@ def save_custom_song(song: SongManifest, audio_source: Path, library_root: Path 
     temporary = song.manifest_path.with_suffix(".json.partial")
     temporary.write_text(json.dumps(song.to_dict(), indent=2), encoding="utf-8")
     temporary.replace(song.manifest_path)
+    LOGGER.info("Saved custom song preset %s to %s", song.song_id, song.manifest_path)
     return song
 
 

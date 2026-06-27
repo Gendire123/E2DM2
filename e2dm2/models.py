@@ -157,8 +157,8 @@ class ProjectSettings:
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
-        data["workflow"] = self.workflow.value
-        data["exports"] = [value.value for value in self.exports]
+        data["workflow"] = WorkflowMode(self.workflow).value
+        data["exports"] = [ExportSize(value).value for value in self.exports]
         return data
 
     @classmethod

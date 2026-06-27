@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import re
+import logging
 import subprocess
 from dataclasses import dataclass
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,8 +44,11 @@ def probe_encoder(encoder: EncoderInfo, timeout: float = 12.0) -> bool:
         "-frames:v", "3", "-f", "null", "-",
     ]
     try:
-        return subprocess.run(command, capture_output=True, timeout=timeout).returncode == 0
+        success = subprocess.run(command, capture_output=True, timeout=timeout).returncode == 0
+        LOGGER.info("Encoder probe %s: %s", encoder.display_name, "available" if success else "unavailable")
+        return success
     except (OSError, subprocess.TimeoutExpired):
+        LOGGER.exception("Encoder probe failed for %s", encoder.display_name)
         return False
 
 
@@ -49,8 +56,10 @@ def select_encoder(test_hardware: bool = True) -> EncoderInfo:
     available = listed_encoders()
     for encoder in ENCODER_CANDIDATES:
         if encoder.codec not in available:
+            LOGGER.debug("Encoder is not listed by FFmpeg: %s", encoder.codec)
             continue
         if not test_hardware or probe_encoder(encoder):
+            LOGGER.info("Selected encoder: %s (%s)", encoder.display_name, encoder.codec)
             return encoder
     raise RuntimeError("No usable H.264 encoder was found in this FFmpeg installation.")
 

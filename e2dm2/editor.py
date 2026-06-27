@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from PySide6.QtCore import QSignalBlocker, Qt, QUrl, Signal
+from PySide6.QtCore import QSignalBlocker, QThreadPool, Qt, QUrl, Signal
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -41,6 +41,7 @@ from .models import (
     SourceProgressionSettings,
     TransitionSettings,
 )
+from .waveform import WaveformData, WaveformTask, WaveformWidget
 
 
 def _seconds_text(milliseconds: int) -> str:
@@ -58,12 +59,15 @@ def _spin(maximum: float = 100000.0, decimals: int = 3) -> QDoubleSpinBox:
 
 
 class MarkerTable(QWidget):
+    values_changed = Signal(object)
+
     def __init__(self, label: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.table = QTableWidget(0, 1)
         self.table.setHorizontalHeaderLabels([label])
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.itemChanged.connect(self._emit_values)
         add_button = QPushButton("Add")
         paste_button = QPushButton("Paste list")
         remove_button = QPushButton("Remove")
@@ -98,13 +102,18 @@ class MarkerTable(QWidget):
         return values
 
     def set_values(self, values: list[float]) -> None:
-        self.table.setRowCount(0)
-        for value in values:
-            self.add_value(value)
+        with QSignalBlocker(self.table):
+            self.table.setRowCount(0)
+            for value in values:
+                row = self.table.rowCount()
+                self.table.insertRow(row)
+                self.table.setItem(row, 0, QTableWidgetItem(f"{value:.6f}"))
+        self.values_changed.emit(self.values())
 
     def remove_selected(self) -> None:
         for row in sorted({index.row() for index in self.table.selectedIndexes()}, reverse=True):
             self.table.removeRow(row)
+        self._emit_values()
 
     def paste_values(self) -> None:
         text, accepted = QInputDialog.getMultiLineText(self, "Paste timestamps", "One timestamp per line")
@@ -116,6 +125,12 @@ class MarkerTable(QWidget):
             QMessageBox.warning(self, "Invalid timestamps", "Every timestamp must be a number of seconds.")
             return
         self.set_values(sorted(set(values)))
+
+    def _emit_values(self) -> None:
+        try:
+            self.values_changed.emit(self.values())
+        except ValueError:
+            return
 
 
 class SongEditorDialog(QDialog):
@@ -129,6 +144,9 @@ class SongEditorDialog(QDialog):
         self.songs: list[SongManifest] = []
         self.current: SongManifest | None = None
         self.audio_source: Path | None = None
+        self.waveform_source = ""
+        self.waveform_tasks: dict[str, WaveformTask] = {}
+        self.waveform_pool = QThreadPool.globalInstance()
         self.player = QMediaPlayer(self)
         self.audio_output = QAudioOutput(self)
         self.player.setAudioOutput(self.audio_output)
@@ -242,14 +260,29 @@ class SongEditorDialog(QDialog):
         self.position_slider = QSlider(Qt.Orientation.Horizontal)
         self.position_slider.setRange(0, 0)
         self.position_slider.sliderMoved.connect(self.player.setPosition)
-        add_playhead = QPushButton("Add cut at playhead")
-        add_playhead.clicked.connect(lambda: self.cut_markers.add_value(self.player.position() / 1000))
+        self.waveform_zoom = QComboBox()
+        self.waveform_zoom.setToolTip("Visible waveform duration")
+        self.waveform_zoom.addItem("20 sec", 20.0)
+        self.waveform_zoom.addItem("40 sec", 40.0)
+        self.waveform_zoom.addItem("60 sec", 60.0)
+        self.waveform_zoom.addItem("Full song", None)
+        self.waveform_zoom.setCurrentIndex(1)
+        self.add_playhead_button = QPushButton("Add cut at playhead")
+        self.add_playhead_button.clicked.connect(lambda: self.add_cut_timestamp(self.player.position() / 1000))
         controls.addWidget(self.play_button)
         controls.addWidget(self.position_label)
         controls.addWidget(self.position_slider, 1)
-        controls.addWidget(add_playhead)
+        controls.addWidget(self.waveform_zoom)
+        controls.addWidget(self.add_playhead_button)
+        self.waveform = WaveformWidget()
+        self.waveform.timestamp_clicked.connect(self.add_cut_timestamp)
+        self.waveform_zoom.currentIndexChanged.connect(
+            lambda: self.waveform.set_window_seconds(self.waveform_zoom.currentData())
+        )
         self.cut_markers = MarkerTable("Cut timestamp (seconds)")
+        self.cut_markers.values_changed.connect(self.waveform.set_markers)
         layout.addLayout(controls)
+        layout.addWidget(self.waveform)
         layout.addWidget(self.cut_markers)
         return widget
 
@@ -293,12 +326,14 @@ class SongEditorDialog(QDialog):
     def _connect_player(self) -> None:
         self.player.positionChanged.connect(self._position_changed)
         self.player.durationChanged.connect(self.position_slider.setMaximum)
+        self.player.durationChanged.connect(self.waveform.set_duration)
         self.player.playbackStateChanged.connect(
             lambda state: self.play_button.setText("Pause" if state == QMediaPlayer.PlaybackState.PlayingState else "Play")
         )
 
     def _position_changed(self, position: int) -> None:
         self.position_label.setText(_seconds_text(position))
+        self.waveform.set_position(position / 1000)
         if not self.position_slider.isSliderDown():
             self.position_slider.setValue(position)
 
@@ -358,6 +393,7 @@ class SongEditorDialog(QDialog):
             self.flash_fade.setValue(song.flash_cue.fade_in_seconds)
             self.flash_opacity.setValue(song.flash_cue.opacity)
         self.player.setSource(QUrl.fromLocalFile(str(song.audio_path)))
+        self.load_waveform(song.audio_path)
         can_edit = not song.readonly and self.entitlement.has_feature(PRESET_EDITOR_FEATURE)
         self._set_editable(can_edit)
         self.status_label.setText("Built-in preset. Duplicate it to make changes." if song.readonly else "Custom preset")
@@ -377,6 +413,9 @@ class SongEditorDialog(QDialog):
         self.id_edit.setEnabled(editable and bool(self.current and self.current.manifest_path is None))
         self.play_button.setEnabled(True)
         self.position_slider.setEnabled(True)
+        self.waveform_zoom.setEnabled(True)
+        self.waveform.set_marker_editable(editable)
+        self.add_playhead_button.setEnabled(editable)
         self.save_button.setEnabled(editable)
 
     def choose_audio(self) -> None:
@@ -385,6 +424,7 @@ class SongEditorDialog(QDialog):
             self.audio_source = Path(path)
             self.audio_edit.setText(path)
             self.player.setSource(QUrl.fromLocalFile(path))
+            self.load_waveform(Path(path))
 
     def toggle_playback(self) -> None:
         if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
@@ -411,6 +451,7 @@ class SongEditorDialog(QDialog):
         self.audio_source = Path(path)
         self.audio_edit.setText(path)
         self.player.setSource(QUrl.fromLocalFile(path))
+        self.load_waveform(Path(path))
         try:
             audio_duration = probe_audio_duration(Path(path))
             self.total_spin.setValue(audio_duration)
@@ -420,6 +461,37 @@ class SongEditorDialog(QDialog):
             pass
         self._set_editable(True)
         self.status_label.setText("New custom preset")
+
+    def add_cut_timestamp(self, timestamp: float) -> None:
+        if not self.current or self.current.readonly:
+            return
+        timestamp = max(0.0, min(float(timestamp), self.total_spin.value()))
+        values = self.cut_markers.values()
+        if any(abs(value - timestamp) < 0.0005 for value in values):
+            return
+        values.append(round(timestamp, 6))
+        self.cut_markers.set_values(sorted(values))
+
+    def load_waveform(self, audio_path: Path) -> None:
+        source = str(audio_path.resolve())
+        self.waveform_source = source
+        self.waveform.set_loading()
+        task = WaveformTask(audio_path)
+        self.waveform_tasks[source] = task
+        task.signals.finished.connect(self._waveform_ready)
+        task.signals.failed.connect(self._waveform_failed)
+        self.waveform_pool.start(task)
+
+    def _waveform_ready(self, source: str, data: WaveformData) -> None:
+        self.waveform_tasks.pop(source, None)
+        if source == self.waveform_source:
+            self.waveform.set_waveform(data)
+            self.waveform.set_markers(self.cut_markers.values())
+
+    def _waveform_failed(self, source: str, message: str) -> None:
+        self.waveform_tasks.pop(source, None)
+        if source == self.waveform_source:
+            self.waveform.set_error(message)
 
     def duplicate_current(self) -> None:
         if not self.current:
