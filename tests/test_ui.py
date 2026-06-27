@@ -187,6 +187,19 @@ def test_preview_draft_only_commits_on_save(qtbot, tmp_path):
     assert media.selections == [ClipSelection(SelectionType.REQUIRED, 3000, 23_000)]
 
 
+def test_selected_range_can_be_deleted_without_inspector_controls(qtbot, tmp_path):
+    media = MediaItem(
+        "source/test.mp4", "test.mp4", 320, 180, 30, 30, "h264", 1,
+        [ClipSelection(SelectionType.EXCLUDE, 1000, 2000)],
+    )
+    dialog = ClipPreviewDialog(media, str(tmp_path / "missing.mp4"))
+    qtbot.addWidget(dialog)
+    dialog.show()
+    dialog.select_selection(0)
+    qtbot.keyClick(dialog.selection_table, Qt.Key.Key_Delete)
+    assert dialog.draft == []
+
+
 def test_footage_table_displays_mark_counts(qtbot, tmp_path):
     page = WorkspacePage()
     qtbot.addWidget(page)
@@ -225,9 +238,39 @@ def test_preview_dialog_uses_timeline_as_its_scrubber(qtbot, tmp_path):
     media = MediaItem("source/test.mp4", "test.mp4", 320, 180, 30, 30, "h264", 1)
     dialog = ClipPreviewDialog(media, str(tmp_path / "missing.mp4"))
     qtbot.addWidget(dialog)
+    assert dialog.height() == 620
+    assert dialog.minimumSizeHint().height() < 600
+    assert dialog.selection_table.maximumHeight() == 150
     assert not hasattr(dialog, "scrubber")
     dialog.timeline.positionPreviewed.emit(1500)
     assert dialog.timeline.playhead_ms == 1500
+
+
+def test_fullscreen_keeps_only_video_controls_and_timeline(qtbot, tmp_path):
+    media = MediaItem("source/test.mp4", "test.mp4", 320, 180, 30, 30, "h264", 1)
+    dialog = ClipPreviewDialog(media, str(tmp_path / "missing.mp4"))
+    qtbot.addWidget(dialog)
+    dialog.show()
+    original_geometry = dialog.geometry()
+
+    dialog.toggle_fullscreen()
+    qtbot.waitUntil(dialog.isFullScreen)
+    assert dialog.video.isVisible()
+    assert dialog.timeline.isVisible()
+    assert dialog.exclude_tool.isVisible()
+    assert dialog.required_tool.isVisible()
+    assert dialog.selection_table.isHidden()
+    assert dialog.button_box.isHidden()
+    assert dialog.fullscreen_button.text() == "Exit Full Screen"
+    dialog.create_selection(SelectionType.EXCLUDE, 1000, 2000)
+    assert len(dialog.draft) == 1
+
+    dialog.exit_fullscreen()
+    qtbot.waitUntil(lambda: not dialog.isFullScreen())
+    assert not dialog.selection_table.isHidden()
+    assert not dialog.button_box.isHidden()
+    assert dialog.fullscreen_button.text() == "Full Screen"
+    assert dialog.geometry() == original_geometry
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg is required")

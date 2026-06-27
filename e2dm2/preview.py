@@ -3,20 +3,17 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QProcess, QRectF, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QEvent, QProcess, QRectF, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QKeySequence, QMouseEvent, QPainter, QPen, QShortcut
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
     QButtonGroup,
-    QComboBox,
     QDialog,
     QDialogButtonBox,
-    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QLineEdit,
     QMessageBox,
     QProgressBar,
     QPushButton,
@@ -82,7 +79,7 @@ class SelectionTimeline(QWidget):
         self._preview_end: int | None = None
         self.playhead_ms = 0
         self.hover_ms: int | None = None
-        self.setMinimumHeight(96)
+        self.setMinimumHeight(78)
         self.setMouseTracking(True)
 
     def set_selections(self, selections: list[ClipSelection], selected_index: int = -1) -> None:
@@ -98,7 +95,7 @@ class SelectionTimeline(QWidget):
         self.update()
 
     def _track_rect(self) -> QRectF:
-        return QRectF(10, 24, max(1, self.width() - 20), 42)
+        return QRectF(10, 20, max(1, self.width() - 20), 34)
 
     def _x_for_ms(self, value: int) -> float:
         rect = self._track_rect()
@@ -158,7 +155,7 @@ class SelectionTimeline(QWidget):
             label_width = painter.fontMetrics().horizontalAdvance(hover_label)
             label_x = max(10, min(self.width() - label_width - 10, round(hover_x - label_width / 2)))
             painter.setPen(QColor("#354039"))
-            painter.drawText(label_x, round(rect.bottom() + 23), hover_label)
+            painter.drawText(label_x, round(rect.bottom() + 20), hover_label)
         painter.setPen(QColor("#354039"))
         painter.drawText(10, 16, format_timecode(0))
         end_label = format_timecode(self.duration_ms)
@@ -277,15 +274,16 @@ class ClipPreviewDialog(QDialog):
         self._preview_ready = False
         self._hover_warming = False
         self._pending_hover_position: int | None = None
+        self._normal_geometry = None
         self.hover_seek_timer = QTimer(self)
         self.hover_seek_timer.setSingleShot(True)
         self.hover_seek_timer.setInterval(25)
         self.hover_seek_timer.timeout.connect(self.perform_hover_seek)
         self.setWindowTitle(f"Preview / Edit - {media.original_name}")
-        self.resize(1080, 760)
+        self.resize(1000, 620)
 
         self.video = PreviewVideoWidget()
-        self.video.setMinimumHeight(330)
+        self.video.setMinimumHeight(220)
         self.audio = QAudioOutput(self)
         self.audio.setVolume(0.75)
         self.player = QMediaPlayer(self)
@@ -296,7 +294,7 @@ class ClipPreviewDialog(QDialog):
         self.play_button.clicked.connect(self.toggle_playback)
         self.time_label = QLabel()
         self.fullscreen_button = QPushButton("Full Screen")
-        self.fullscreen_button.clicked.connect(lambda: self.video.setFullScreen(True))
+        self.fullscreen_button.clicked.connect(self.toggle_fullscreen)
         controls = QHBoxLayout()
         controls.addWidget(self.play_button)
         controls.addStretch(1)
@@ -313,6 +311,7 @@ class ClipPreviewDialog(QDialog):
         tools.addButton(self.exclude_tool)
         tools.addButton(self.required_tool)
         self.timeline = SelectionTimeline(self.duration_ms)
+        self.timeline.setToolTip("Hover to preview a frame. Choose Red or Green, then drag to mark a range.")
         self.exclude_tool.clicked.connect(lambda: self.timeline.set_tool(SelectionType.EXCLUDE))
         self.required_tool.clicked.connect(lambda: self.timeline.set_tool(SelectionType.REQUIRED))
         self.timeline.selectionChanged.connect(self.select_selection)
@@ -320,76 +319,51 @@ class ClipPreviewDialog(QDialog):
         self.timeline.rangeEdited.connect(self.edit_range)
         self.timeline.positionPreviewed.connect(self.preview_position)
         tool_row = QHBoxLayout()
+        tool_row.setSpacing(6)
         tool_row.addWidget(self.exclude_tool)
         tool_row.addWidget(self.required_tool)
-        tool_row.addWidget(QLabel("Hover to preview. Choose a tool, then drag to mark a range."))
+        tool_row.addWidget(QLabel("Hover to preview • Drag to mark"))
         tool_row.addStretch()
-
         self.selection_table = QTableWidget(0, 4)
         self.selection_table.setHorizontalHeaderLabels(["Type", "Start", "End", "Duration"])
         self.selection_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.selection_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.selection_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.selection_table.setMinimumHeight(110)
+        self.selection_table.setMaximumHeight(150)
         self.selection_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.selection_table.itemSelectionChanged.connect(self.table_selection_changed)
-
-        self.type_combo = QComboBox()
-        self.type_combo.addItem("Exclude", SelectionType.EXCLUDE)
-        self.type_combo.addItem("Required", SelectionType.REQUIRED)
-        self.start_edit = QLineEdit()
-        self.end_edit = QLineEdit()
-        self.start_edit.setPlaceholderText("HH:MM:SS.mmm")
-        self.end_edit.setPlaceholderText("HH:MM:SS.mmm")
-        self.type_combo.currentIndexChanged.connect(self.apply_inspector)
-        self.start_edit.editingFinished.connect(self.apply_inspector)
-        self.end_edit.editingFinished.connect(self.apply_inspector)
-        set_start = QPushButton("Start = Playhead")
-        set_end = QPushButton("End = Playhead")
-        set_start.clicked.connect(lambda: self.set_boundary_from_playhead(True))
-        set_end.clicked.connect(lambda: self.set_boundary_from_playhead(False))
-        delete_button = QPushButton("Delete Selection")
-        delete_button.clicked.connect(self.delete_selection)
-        inspector = QGridLayout()
-        inspector.addWidget(QLabel("Type"), 0, 0)
-        inspector.addWidget(self.type_combo, 0, 1)
-        inspector.addWidget(QLabel("Start"), 1, 0)
-        inspector.addWidget(self.start_edit, 1, 1)
-        inspector.addWidget(set_start, 1, 2)
-        inspector.addWidget(QLabel("End"), 2, 0)
-        inspector.addWidget(self.end_edit, 2, 1)
-        inspector.addWidget(set_end, 2, 2)
-        inspector.addWidget(delete_button, 3, 1, 1, 2)
-        lower = QHBoxLayout()
-        lower.addWidget(self.selection_table, 2)
-        inspector_widget = QWidget()
-        inspector_widget.setLayout(inspector)
-        lower.addWidget(inspector_widget, 1)
+        self.selection_table.installEventFilter(self)
 
         self.warning = QLabel()
         self.warning.setStyleSheet("color: #b3261e;")
         self.warning.setWordWrap(True)
         self.proxy_status = QLabel()
         self.proxy_status.setStyleSheet("color: #68716b;")
-        self.proxy_status.setWordWrap(True)
+        self.proxy_status.setWordWrap(False)
+        self.proxy_status.setMaximumHeight(22)
         self.proxy_progress = QProgressBar()
         self.proxy_progress.setRange(0, 100)
         self.proxy_progress.setValue(0)
         self.proxy_progress.setFormat("Preparing fast preview… %p%")
+        self.proxy_progress.setMaximumHeight(18)
         self.proxy_progress.setVisible(False)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self.save_and_accept)
-        buttons.rejected.connect(self.reject)
+        self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        self.button_box.accepted.connect(self.save_and_accept)
+        self.button_box.rejected.connect(self.reject)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(6)
         layout.addWidget(self.video, 1)
         layout.addLayout(controls)
         layout.addLayout(tool_row)
         layout.addWidget(self.timeline)
-        layout.addLayout(lower, 1)
+        layout.addWidget(self.selection_table, 1)
         layout.addWidget(self.proxy_status)
         layout.addWidget(self.proxy_progress)
         layout.addWidget(self.warning)
-        layout.addWidget(buttons)
+        layout.addWidget(self.button_box)
 
         self.player.positionChanged.connect(self.position_changed)
         self.player.playbackStateChanged.connect(self.playback_state_changed)
@@ -407,12 +381,47 @@ class ClipPreviewDialog(QDialog):
             self.start_proxy_build()
         self.escape_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
         self.escape_shortcut.activated.connect(self.exit_fullscreen)
+        self.delete_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Delete), self)
+        self.delete_shortcut.activated.connect(self.delete_selection)
+        self.backspace_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Backspace), self)
+        self.backspace_shortcut.activated.connect(self.delete_selection)
         self.refresh_selections()
         self.position_changed(0)
 
     def exit_fullscreen(self) -> None:
-        if self.video.isFullScreen():
-            self.video.setFullScreen(False)
+        if not self.isFullScreen():
+            return
+        self.showNormal()
+        if self._normal_geometry is not None:
+            self.setGeometry(self._normal_geometry)
+        self.selection_table.setVisible(True)
+        self.button_box.setVisible(True)
+        self.proxy_status.setVisible(bool(self.proxy_status.text()))
+        self.proxy_progress.setVisible(self.proxy_process is not None)
+        self.warning.setVisible(bool(self.warning.text()))
+        self.fullscreen_button.setText("Full Screen")
+
+    def toggle_fullscreen(self) -> None:
+        if self.isFullScreen():
+            self.exit_fullscreen()
+            return
+        self._normal_geometry = self.geometry()
+        for widget in (
+            self.selection_table, self.proxy_status, self.proxy_progress, self.warning, self.button_box,
+        ):
+            widget.setVisible(False)
+        self.fullscreen_button.setText("Exit Full Screen")
+        self.showFullScreen()
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt API
+        if (
+            watched is self.selection_table
+            and event.type() == QEvent.Type.KeyPress
+            and event.key() in {Qt.Key.Key_Delete, Qt.Key.Key_Backspace}
+        ):
+            self.delete_selection()
+            return True
+        return super().eventFilter(watched, event)
 
     def toggle_playback(self) -> None:
         self.hover_seek_timer.stop()
@@ -639,7 +648,6 @@ class ClipPreviewDialog(QDialog):
             self.selection_table.selectRow(self.selected_index)
         self.selection_table.blockSignals(False)
         self.timeline.set_selections(self.draft, self.selected_index)
-        self.update_inspector()
 
     def table_selection_changed(self) -> None:
         self.select_selection(self.selection_table.currentRow())
@@ -653,54 +661,6 @@ class ClipPreviewDialog(QDialog):
         else:
             self.selection_table.clearSelection()
         self.selection_table.blockSignals(False)
-        self.update_inspector()
-
-    def update_inspector(self) -> None:
-        enabled = 0 <= self.selected_index < len(self.draft)
-        for widget in (self.type_combo, self.start_edit, self.end_edit):
-            widget.setEnabled(enabled)
-        if not enabled:
-            self.start_edit.clear()
-            self.end_edit.clear()
-            return
-        selection = self.draft[self.selected_index]
-        self.type_combo.blockSignals(True)
-        self.type_combo.setCurrentIndex(self.type_combo.findData(selection.type))
-        self.type_combo.blockSignals(False)
-        self.start_edit.setText(format_timecode(selection.start_ms))
-        self.end_edit.setText(format_timecode(selection.end_ms))
-
-    def apply_inspector(self) -> None:
-        if not 0 <= self.selected_index < len(self.draft):
-            return
-        try:
-            start_ms = parse_timecode(self.start_edit.text())
-            end_ms = parse_timecode(self.end_edit.text())
-        except ValueError as exc:
-            self.show_warning(str(exc))
-            self.update_inspector()
-            return
-        candidate = [replace(selection) for selection in self.draft]
-        candidate[self.selected_index] = ClipSelection(self.type_combo.currentData(), start_ms, end_ms)
-        edited = candidate[self.selected_index]
-        validated = self._validated(candidate)
-        if validated is None:
-            self.update_inspector()
-            return
-        self.draft = validated
-        self.selected_index = self.draft.index(edited)
-        self.show_warning("")
-        self.refresh_selections()
-
-    def set_boundary_from_playhead(self, start: bool) -> None:
-        if not 0 <= self.selected_index < len(self.draft):
-            return
-        value = self.player.position()
-        if start:
-            self.start_edit.setText(format_timecode(value))
-        else:
-            self.end_edit.setText(format_timecode(value))
-        self.apply_inspector()
 
     def delete_selection(self) -> None:
         if not 0 <= self.selected_index < len(self.draft):
