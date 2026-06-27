@@ -11,7 +11,16 @@ from e2dm2.models import (
     WorkflowMode,
     validate_clip_selections,
 )
-from e2dm2.project import create_project, import_media, load_project, move_media, save_project
+from e2dm2.project import (
+    create_project,
+    delete_project,
+    import_media,
+    load_project,
+    move_media,
+    recent_projects,
+    remember_project,
+    save_project,
+)
 
 
 def make_video(path: Path, color: str = "blue", duration: float = 0.25) -> None:
@@ -108,3 +117,23 @@ def test_selection_validation_limits_and_overlap_rules():
         ], 30)
     with pytest.raises(ValueError, match="within"):
         validate_clip_selections([ClipSelection(SelectionType.EXCLUDE, 0, 30_001)], 30)
+
+
+def test_delete_project_removes_folder_and_recent_entry(tmp_path):
+    project = create_project("Disposable", tmp_path / "projects")
+    recent_root = tmp_path / "state"
+    remember_project(project.path, recent_root)
+    assert recent_projects(recent_root) == [project.path]
+
+    delete_project(project.path, recent_root)
+    assert not project.path.exists()
+    assert recent_projects(recent_root) == []
+
+
+def test_delete_project_rejects_non_project_folder(tmp_path):
+    ordinary_folder = tmp_path / "ordinary"
+    ordinary_folder.mkdir()
+    (ordinary_folder / "keep.txt").write_text("keep", encoding="utf-8")
+    with pytest.raises(ValueError, match="not a valid"):
+        delete_project(ordinary_folder, tmp_path / "state")
+    assert (ordinary_folder / "keep.txt").is_file()

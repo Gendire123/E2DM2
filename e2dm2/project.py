@@ -155,3 +155,32 @@ def recent_projects(root: Path | None = None) -> list[Path]:
         return [Path(item) for item in json.loads(state_path.read_text(encoding="utf-8")) if Path(item).exists()]
     except (OSError, ValueError, TypeError):
         return []
+
+
+def forget_project(project_path: Path, root: Path | None = None) -> None:
+    state_path = (root or default_project_root()) / "recent.json"
+    if not state_path.exists():
+        return
+    try:
+        removed = project_path.resolve()
+        recent = [
+            item for item in json.loads(state_path.read_text(encoding="utf-8"))
+            if Path(item).resolve() != removed and Path(item).exists()
+        ]
+    except (OSError, ValueError, TypeError):
+        recent = []
+    temporary = state_path.with_suffix(".json.partial")
+    temporary.write_text(json.dumps(recent, indent=2), encoding="utf-8")
+    temporary.replace(state_path)
+
+
+def delete_project(project_path: Path, recent_root: Path | None = None) -> None:
+    path = project_path.parent if project_path.is_file() and project_path.name == "project.json" else project_path
+    resolved = path.resolve()
+    if resolved.parent == resolved or resolved == Path.home().resolve():
+        raise ValueError("Refusing to delete an unsafe project path.")
+    if not (resolved / "project.json").is_file():
+        raise ValueError("The selected folder is not a valid E2DM2 project.")
+    shutil.rmtree(resolved)
+    forget_project(resolved, recent_root)
+    LOGGER.info("Deleted project folder: %s", resolved)

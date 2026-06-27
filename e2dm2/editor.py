@@ -221,7 +221,7 @@ class MarkerTable(QWidget):
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setStyleSheet(
                 "QLabel { font-weight: bold; font-size: 16px; border-radius: 12px; "
-                "border: 1px solid #a0a0a0; background-color: #ffffff; color: #333333; padding: 0px 0px 3px 0px; } "
+                "border: 1px solid #a0a0a0; background-color: #fcfcfc; color: #333333; padding: 0px 0px 3px 0px; } "
                 "QLabel:hover { background-color: #f5f5f5; border-color: #666666; }"
             )
             btn.mousePressEvent = lambda event: self._on_plus_clicked(wrapper)

@@ -134,8 +134,8 @@ class SelectionTimeline(QWidget):
             if index == self.selected_index:
                 painter.setPen(QPen(QColor("#17231d"), 2))
                 painter.drawRect(selection_rect)
-                painter.fillRect(QRectF(selection_rect.left() - 2, rect.top(), 5, rect.height()), QColor("#ffffff"))
-                painter.fillRect(QRectF(selection_rect.right() - 2, rect.top(), 5, rect.height()), QColor("#ffffff"))
+                painter.fillRect(QRectF(selection_rect.left() - 2, rect.top(), 5, rect.height()), QColor("#fcfcfc"))
+                painter.fillRect(QRectF(selection_rect.right() - 2, rect.top(), 5, rect.height()), QColor("#fcfcfc"))
         if self._preview_start is not None and self._preview_end is not None:
             start, end = sorted((self._preview_start, self._preview_end))
             color = QColor("#2fa55d") if self.tool is SelectionType.REQUIRED else QColor("#d84a4a")
@@ -283,7 +283,7 @@ class ClipPreviewDialog(QDialog):
         self.resize(1000, 620)
 
         self.video = PreviewVideoWidget()
-        self.video.setMinimumHeight(220)
+        self.video.setMinimumHeight(200)
         self.audio = QAudioOutput(self)
         self.audio.setVolume(0.75)
         self.player = QMediaPlayer(self)
@@ -329,9 +329,15 @@ class ClipPreviewDialog(QDialog):
         self.selection_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.selection_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.selection_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.selection_table.setMinimumHeight(110)
-        self.selection_table.setMaximumHeight(150)
         self.selection_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        selection_table_height = (
+            self.selection_table.horizontalHeader().sizeHint().height()
+            + self.selection_table.verticalHeader().defaultSectionSize() * 5
+            + self.selection_table.frameWidth() * 2
+            + 4
+        )
+        self.selection_table.setMinimumHeight(selection_table_height)
+        self.selection_table.setMaximumHeight(selection_table_height)
         self.selection_table.itemSelectionChanged.connect(self.table_selection_changed)
         self.selection_table.installEventFilter(self)
 

@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QSize, QThread, QTimer, Qt, QUrl, Signal, Slot
-from PySide6.QtGui import QCloseEvent, QCursor, QDesktopServices, QGuiApplication, QShowEvent
+from PySide6.QtGui import QCloseEvent, QCursor, QDesktopServices, QGuiApplication, QPixmap, QShowEvent
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -44,7 +44,16 @@ from .entitlements import AlphaEntitlementProvider
 from .media import VIDEO_EXTENSIONS, preview_proxy_path
 from .models import CancellationToken, ExportSize, ProgressEvent, Project, RenderRequest, WorkflowMode
 from .preview import ClipPreviewDialog
-from .project import create_project, import_media, load_project, move_media, recent_projects, remove_media, save_project
+from .project import (
+    create_project,
+    delete_project,
+    import_media,
+    load_project,
+    move_media,
+    recent_projects,
+    remove_media,
+    save_project,
+)
 from .render import create_render_plan, render
 from .logging_setup import log_file_path
 
@@ -218,11 +227,29 @@ class HomePage(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
-        title = QLabel("Easy Epic Drone Movie Maker")
+        brand_card = QFrame()
+        brand_card.setObjectName("brandCard")
+        self.logo_label = QLabel()
+        self.logo_label.setObjectName("brandLogo")
+        self.logo_label.setFixedSize(250, 165)
+        self.logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        logo = QPixmap(str(Path(__file__).parent / "assets" / "logo.jpg"))
+        if logo.isNull():
+            self.logo_label.setText("E2DM2")
+        else:
+            self.logo_label.setPixmap(logo.scaled(
+                self.logo_label.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation,
+            ))
+
+        title = QLabel("Create cinematic drone films")
         title.setObjectName("appTitle")
-        short_name = QLabel("E2DM2")
-        short_name.setObjectName("shortName")
+        subtitle = QLabel(
+            "Import your footage, guide the edit, and produce a polished music-driven movie, all in one project."
+        )
+        subtitle.setObjectName("homeSubtitle")
+        subtitle.setWordWrap(True)
         new_button = QPushButton("New Project")
+        new_button.setObjectName("primaryButton")
         open_button = QPushButton("Open Project")
         new_button.clicked.connect(self.new_requested)
         open_button.clicked.connect(self.open_requested)
@@ -230,16 +257,41 @@ class HomePage(QWidget):
         actions.addWidget(new_button)
         actions.addWidget(open_button)
         actions.addStretch()
+
+        brand_copy = QVBoxLayout()
+        brand_copy.setSpacing(10)
+        brand_copy.addStretch()
+        brand_copy.addWidget(title)
+        brand_copy.addWidget(subtitle)
+        brand_copy.addSpacing(8)
+        brand_copy.addLayout(actions)
+        brand_copy.addStretch()
+        brand_layout = QHBoxLayout(brand_card)
+        brand_layout.setContentsMargins(18, 14, 22, 14)
+        brand_layout.setSpacing(24)
+        brand_layout.addWidget(self.logo_label)
+        brand_layout.addLayout(brand_copy, 1)
+
         self.recent_list = QListWidget()
         self.recent_list.itemDoubleClicked.connect(lambda item: self.recent_requested.emit(item.data(Qt.ItemDataRole.UserRole)))
+        self.recent_list.itemSelectionChanged.connect(self.update_delete_button)
+        recent_title = QLabel("Recent projects")
+        recent_title.setObjectName("sectionTitle")
+        self.delete_button = QPushButton("Delete Selected")
+        self.delete_button.setObjectName("destructiveButton")
+        self.delete_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon))
+        self.delete_button.setEnabled(False)
+        self.delete_button.clicked.connect(self.delete_selected_project)
+        recent_header = QHBoxLayout()
+        recent_header.addWidget(recent_title)
+        recent_header.addStretch()
+        recent_header.addWidget(self.delete_button)
+
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(28, 24, 28, 24)
-        layout.addWidget(title)
-        layout.addWidget(short_name)
-        layout.addSpacing(18)
-        layout.addLayout(actions)
-        layout.addSpacing(24)
-        layout.addWidget(QLabel("Recent projects"))
+        layout.setContentsMargins(24, 20, 24, 24)
+        layout.setSpacing(16)
+        layout.addWidget(brand_card)
+        layout.addLayout(recent_header)
         layout.addWidget(self.recent_list, 1)
 
     def refresh(self) -> None:
@@ -249,6 +301,31 @@ class HomePage(QWidget):
             list_item = self.recent_list.item(self.recent_list.count() - 1)
             list_item.setToolTip(str(path))
             list_item.setData(Qt.ItemDataRole.UserRole, str(path))
+        self.update_delete_button()
+
+    def update_delete_button(self) -> None:
+        self.delete_button.setEnabled(self.recent_list.currentItem() is not None)
+
+    def delete_selected_project(self) -> None:
+        item = self.recent_list.currentItem()
+        if item is None:
+            return
+        path = Path(item.data(Qt.ItemDataRole.UserRole))
+        answer = QMessageBox.warning(
+            self,
+            "Delete project permanently?",
+            f"Delete '{path.name}' and every file inside it?\n\n{path}\n\nThis cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            delete_project(path)
+            self.refresh()
+        except (OSError, ValueError) as exc:
+            LOGGER.exception("Could not delete project: %s", path)
+            QMessageBox.critical(self, "Could not delete project", str(exc))
 
 
 class WorkspacePage(QWidget):
@@ -1017,30 +1094,37 @@ QWidget { background: #f4f5f2; color: #202521; font-size: 10pt; }
 QMainWindow, QDialog { background: #f4f5f2; }
 QLabel#appTitle { font-size: 25pt; font-weight: 650; color: #18342a; }
 QLabel#shortName { font-size: 13pt; color: #9a5b16; }
+QFrame#brandCard { background: #fcfcfc; border: 1px solid #d8ded9; border-radius: 10px; }
+QFrame#brandCard QLabel { background: transparent; border: 0; }
+QLabel#brandLogo { background: #fcfcfc; border: 0; }
+QLabel#homeSubtitle { color: #5e6962; font-size: 10.5pt; }
+QLabel#sectionTitle { color: #18342a; font-size: 12pt; font-weight: 650; }
 QLabel#projectTitle { font-size: 17pt; font-weight: 650; color: #18342a; }
 QLabel#mutedLabel { color: #68716b; }
 QLineEdit, QComboBox, QTableWidget, QListWidget, QDoubleSpinBox {
-    background: #ffffff; border: 1px solid #c8cec9; border-radius: 4px; padding: 5px;
+    background: #fcfcfc; border: 1px solid #c8cec9; border-radius: 4px; padding: 5px;
 }
-QAbstractItemView { background-color: #ffffff; alternate-background-color: #f7f8f6; }
+QAbstractItemView { background-color: #fcfcfc; alternate-background-color: #f7f8f6; }
 QTableWidget { gridline-color: #e0e4e0; }
 QHeaderView::section { background: #e7ebe7; color: #354039; border: 0; border-bottom: 1px solid #c8cec9; padding: 7px; }
-QPushButton, QToolButton { background: #ffffff; border: 1px solid #b8c0ba; border-radius: 5px; padding: 7px 12px; }
+QPushButton, QToolButton { background: #fcfcfc; border: 1px solid #b8c0ba; border-radius: 5px; padding: 7px 12px; }
 QPushButton:hover, QToolButton:hover { background: #edf1ed; border-color: #789080; }
 QPushButton:disabled, QToolButton:disabled { color: #99a19b; background: #eceeec; }
 QPushButton#primaryButton { background: #246447; color: white; border-color: #246447; font-weight: 600; }
 QPushButton#primaryButton:hover { background: #1c543a; }
+QPushButton#destructiveButton { color: #a33131; border-color: #d4aaaa; }
+QPushButton#destructiveButton:hover { color: #ffffff; background: #b33a3a; border-color: #b33a3a; }
 QProgressBar { background: #e0e4e0; border: 0; border-radius: 4px; height: 16px; text-align: center; }
 QProgressBar::chunk { background: #d08a2f; border-radius: 4px; }
 QPlainTextEdit#backendLog { background: #171b18; color: #dce6df; border: 1px solid #39433c; font-family: Consolas; font-size: 9pt; }
-QTabWidget::pane { border: 1px solid #c8cec9; background: #ffffff; }
+QTabWidget::pane { border: 1px solid #c8cec9; background: #fcfcfc; }
 QTabBar::tab { background: #e7ebe7; padding: 8px 16px; }
-QTabBar::tab:selected { background: #ffffff; color: #246447; }
+QTabBar::tab:selected { background: #fcfcfc; color: #246447; }
 QSplitter::handle { background: #d7dcd8; width: 1px; }
 
 /* Produce Tab Card Design */
 QFrame#produceCard {
-    background-color: #ffffff;
+    background-color: #fcfcfc;
     border: 1px solid #d3dad4;
     border-radius: 8px;
 }

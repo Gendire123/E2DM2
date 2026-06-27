@@ -9,12 +9,13 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QObject, QPoint, Qt, Signal, Slot
+from PySide6.QtWidgets import QMessageBox
 
 from e2dm2.models import ClipSelection, MediaItem, RenderResult, SelectionType, WorkflowMode
 from e2dm2.preview import ClipPreviewDialog, SelectionTimeline, format_timecode, parse_timecode
 from e2dm2.editor import SongEditorDialog
 from e2dm2.entitlements import AlphaEntitlementProvider
-from e2dm2.ui import MainWindow
+from e2dm2.ui import HomePage, MainWindow
 from e2dm2.project import create_project
 from e2dm2.ui import WorkspacePage
 
@@ -28,6 +29,9 @@ def test_main_window_smoke(qtbot):
     assert window.windowTitle().startswith("Easy Epic Drone Movie Maker")
     assert window.workspace.song_table.rowCount() >= 2
     assert window.home.recent_list is not None
+    assert window.home.logo_label.pixmap() is not None
+    assert not window.home.logo_label.pixmap().isNull()
+    assert not window.home.delete_button.isEnabled()
     assert window.log_dock.windowTitle() == "Backend Log"
     assert not window.log_dock.isVisible()
     window.center_on_active_screen()
@@ -50,6 +54,25 @@ def test_background_import_worker_is_retained(qtbot, tmp_path):
     qtbot.waitUntil(lambda: page.thread is None, timeout=5000)
     assert len(page.project.settings.media) == 1
     assert page.status_label.text() == "Imported 1 clip(s)"
+
+
+def test_home_page_deletes_selected_project_after_confirmation(qtbot, tmp_path, monkeypatch):
+    page = HomePage()
+    qtbot.addWidget(page)
+    project_path = tmp_path / "project"
+    project_path.mkdir()
+    (project_path / "project.json").write_text("{}", encoding="utf-8")
+    page.recent_list.addItem(project_path.name)
+    item = page.recent_list.item(0)
+    item.setData(Qt.ItemDataRole.UserRole, str(project_path))
+    page.recent_list.setCurrentItem(item)
+    assert page.delete_button.isEnabled()
+
+    deleted = []
+    monkeypatch.setattr("e2dm2.ui.QMessageBox.warning", lambda *_args, **_kwargs: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr("e2dm2.ui.delete_project", lambda path: deleted.append(path))
+    page.delete_selected_project()
+    assert deleted == [project_path]
 
 
 def test_produce_coerces_qt_combo_data_to_workflow_enum(qtbot, tmp_path, monkeypatch):
@@ -239,8 +262,13 @@ def test_preview_dialog_uses_timeline_as_its_scrubber(qtbot, tmp_path):
     dialog = ClipPreviewDialog(media, str(tmp_path / "missing.mp4"))
     qtbot.addWidget(dialog)
     assert dialog.height() == 620
-    assert dialog.minimumSizeHint().height() < 600
-    assert dialog.selection_table.maximumHeight() == 150
+    assert dialog.minimumSizeHint().height() <= 620
+    table_body_height = (
+        dialog.selection_table.maximumHeight()
+        - dialog.selection_table.horizontalHeader().sizeHint().height()
+        - dialog.selection_table.frameWidth() * 2
+    )
+    assert table_body_height >= dialog.selection_table.verticalHeader().defaultSectionSize() * 5
     assert not hasattr(dialog, "scrubber")
     dialog.timeline.positionPreviewed.emit(1500)
     assert dialog.timeline.playhead_ms == 1500
