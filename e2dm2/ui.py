@@ -4,8 +4,8 @@ import logging
 import shutil
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QThread, QTimer, Qt, QUrl, Signal, Slot
-from PySide6.QtGui import QCloseEvent, QDesktopServices
+from PySide6.QtCore import QObject, QSize, QThread, QTimer, Qt, QUrl, Signal, Slot
+from PySide6.QtGui import QCloseEvent, QCursor, QDesktopServices, QGuiApplication, QShowEvent
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -25,9 +25,11 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QSplitter,
     QStackedWidget,
     QStyle,
+    QTabWidget,
     QTableWidget,
     QTableWidgetItem,
     QToolButton,
@@ -51,6 +53,18 @@ LOGGER = logging.getLogger(__name__)
 def _duration(value: float) -> str:
     minutes = int(value // 60)
     return f"{minutes}:{value - minutes * 60:05.2f}"
+
+
+class CompactPageStack(QStackedWidget):
+    def sizeHint(self) -> QSize:
+        return QSize(820, 540)
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(640, 340)
+
+    def setCurrentWidget(self, widget: QWidget) -> None:
+        super().setCurrentWidget(widget)
+        self.updateGeometry()
 
 
 class NewProjectDialog(QDialog):
@@ -217,7 +231,7 @@ class HomePage(QWidget):
         self.recent_list = QListWidget()
         self.recent_list.itemDoubleClicked.connect(lambda item: self.recent_requested.emit(item.data(Qt.ItemDataRole.UserRole)))
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(48, 38, 48, 38)
+        layout.setContentsMargins(28, 24, 28, 24)
         layout.addWidget(title)
         layout.addWidget(short_name)
         layout.addSpacing(18)
@@ -357,15 +371,17 @@ class WorkspacePage(QWidget):
         right_layout.addWidget(self.mode_stack, 2)
         right_layout.addLayout(render_actions)
         right_layout.addWidget(status_panel, 1)
-        splitter = QSplitter()
-        splitter.addWidget(media_panel)
-        splitter.addWidget(right)
-        splitter.setSizes([700, 500])
+        production_scroll = QScrollArea()
+        production_scroll.setWidgetResizable(True)
+        production_scroll.setWidget(right)
+        self.workspace_tabs = QTabWidget()
+        self.workspace_tabs.addTab(media_panel, "Footage")
+        self.workspace_tabs.addTab(production_scroll, "Production")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 18, 24, 24)
         layout.addLayout(header)
-        layout.addWidget(splitter, 1)
+        layout.addWidget(self.workspace_tabs, 1)
 
     def _epic_panel(self) -> QWidget:
         panel = QWidget()
@@ -425,6 +441,7 @@ class WorkspacePage(QWidget):
         self.results_list.clear()
         self.status_label.setText("Ready")
         self.progress_bar.setValue(0)
+        self.workspace_tabs.setCurrentIndex(0)
 
     def refresh_media(self) -> None:
         if not self.project:
@@ -595,6 +612,7 @@ class WorkspacePage(QWidget):
 
     def start_render(self) -> None:
         LOGGER.info("Produce clicked")
+        self.workspace_tabs.setCurrentIndex(1)
         try:
             self._start_render()
         except Exception as exc:
@@ -701,8 +719,9 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Easy Epic Drone Movie Maker - E2DM2")
-        self.resize(1320, 820)
-        self.stack = QStackedWidget()
+        self.resize(820, 540)
+        self._centered_once = False
+        self.stack = CompactPageStack()
         self.home = HomePage()
         self.workspace = WorkspacePage()
         self.stack.addWidget(self.home)
@@ -712,7 +731,7 @@ class MainWindow(QMainWindow):
         self.log_dock.setObjectName("backendLogDock")
         self.log_dock.setWidget(BackendLogWidget())
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.log_dock)
-        self.resizeDocks([self.log_dock], [190], Qt.Orientation.Vertical)
+        self.resizeDocks([self.log_dock], [120], Qt.Orientation.Vertical)
         self.menuBar().addMenu("View").addAction(self.log_dock.toggleViewAction())
         self.home.new_requested.connect(self.new_project)
         self.home.open_requested.connect(self.open_project)
@@ -761,6 +780,20 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         event.accept()
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        if not self._centered_once:
+            self._centered_once = True
+            QTimer.singleShot(0, self.center_on_active_screen)
+
+    def center_on_active_screen(self) -> None:
+        screen = QGuiApplication.screenAt(QCursor.pos()) or self.screen() or QApplication.primaryScreen()
+        if not screen:
+            return
+        frame = self.frameGeometry()
+        frame.moveCenter(screen.availableGeometry().center())
+        self.move(frame.topLeft())
 
 
 STYLESHEET = """

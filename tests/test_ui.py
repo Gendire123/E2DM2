@@ -16,11 +16,18 @@ from e2dm2.ui import WorkspacePage
 def test_main_window_smoke(qtbot):
     window = MainWindow()
     qtbot.addWidget(window)
+    assert window.size().width() == 820
+    assert window.size().height() == 540
     window.show()
     assert window.windowTitle().startswith("Easy Epic Drone Movie Maker")
     assert window.workspace.song_table.rowCount() >= 2
     assert window.home.recent_list is not None
     assert window.log_dock.windowTitle() == "Backend Log"
+    window.center_on_active_screen()
+    screen_center = window.screen().availableGeometry().center()
+    frame_center = window.frameGeometry().center()
+    assert abs(frame_center.x() - screen_center.x()) <= 2
+    assert abs(frame_center.y() - screen_center.y()) <= 2
 
 
 def test_background_import_worker_is_retained(qtbot, tmp_path):

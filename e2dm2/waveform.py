@@ -107,10 +107,17 @@ class WaveformTask(QRunnable):
     @Slot()
     def run(self) -> None:
         try:
-            self.signals.finished.emit(str(self.audio_path), extract_waveform(self.audio_path))
+            data = extract_waveform(self.audio_path)
+            try:
+                self.signals.finished.emit(str(self.audio_path), data)
+            except RuntimeError:
+                return
         except Exception as exc:
             LOGGER.exception("Waveform analysis failed: %s", self.audio_path)
-            self.signals.failed.emit(str(self.audio_path), str(exc))
+            try:
+                self.signals.failed.emit(str(self.audio_path), str(exc))
+            except RuntimeError:
+                return
         finally:
             _ACTIVE_WAVEFORM_TASKS.discard(self)
 
