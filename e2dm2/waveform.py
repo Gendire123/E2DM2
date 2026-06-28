@@ -61,7 +61,9 @@ def extract_waveform(audio_path: Path) -> WaveformData:
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-i", str(audio_path),
         "-vn", "-ac", "1", "-ar", str(SAMPLE_RATE), "-f", "s16le", "-acodec", "pcm_s16le", "pipe:1",
     ]
-    result = subprocess.run(command, capture_output=True)
+    import os
+    creationflags = 0x08000000 if os.name == "nt" else 0
+    result = subprocess.run(command, capture_output=True, creationflags=creationflags)
     if result.returncode != 0:
         error = result.stderr.decode("utf-8", errors="replace").strip()
         raise ValueError(f"Could not analyze waveform: {error or 'FFmpeg failed'}")

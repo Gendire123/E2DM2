@@ -25,12 +25,15 @@ ENCODER_CANDIDATES = (
 
 
 def listed_encoders() -> set[str]:
+    import os
+    creationflags = 0x08000000 if os.name == "nt" else 0
     result = subprocess.run(
         ["ffmpeg", "-hide_banner", "-encoders"],
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
+        creationflags=creationflags,
     )
     if result.returncode != 0:
         raise RuntimeError("FFmpeg is unavailable or could not list encoders.")
@@ -44,7 +47,9 @@ def probe_encoder(encoder: EncoderInfo, timeout: float = 12.0) -> bool:
         "-frames:v", "3", "-f", "null", "-",
     ]
     try:
-        success = subprocess.run(command, capture_output=True, timeout=timeout).returncode == 0
+        import os
+        creationflags = 0x08000000 if os.name == "nt" else 0
+        success = subprocess.run(command, capture_output=True, timeout=timeout, creationflags=creationflags).returncode == 0
         LOGGER.info("Encoder probe %s: %s", encoder.display_name, "available" if success else "unavailable")
         return success
     except (OSError, subprocess.TimeoutExpired):

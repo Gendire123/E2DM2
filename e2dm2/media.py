@@ -27,7 +27,9 @@ def probe_media(path: Path, relative_path: str | None = None) -> MediaItem:
         "-show_entries", "stream=width,height,codec_name,avg_frame_rate,r_frame_rate",
         "-show_entries", "format=duration,size", "-of", "json", str(path),
     ]
-    result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    import os
+    creationflags = 0x08000000 if os.name == "nt" else 0
+    result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", creationflags=creationflags)
     if result.returncode != 0:
         raise ValueError(f"FFprobe could not read {path.name}: {result.stderr.strip()}")
     try:

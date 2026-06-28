@@ -98,12 +98,15 @@ def validate_song_manifest(song: SongManifest, require_audio: bool = True) -> li
 
 
 def probe_audio_duration(path: Path) -> float:
+    import os
+    creationflags = 0x08000000 if os.name == "nt" else 0
     result = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", str(path)],
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
+        creationflags=creationflags,
     )
     if result.returncode != 0:
         raise ValueError(f"FFprobe could not read the audio file: {path}")
