@@ -213,10 +213,35 @@ def test_new_song_workflow_dialog(monkeypatch, tmp_path, qtbot):
     
     dialog = SongEditorDialog(AlphaEntitlementProvider())
     qtbot.addWidget(dialog)
+    monkeypatch.setattr(dialog, "load_waveform", lambda *_args: None)
     
     test_audio = tmp_path / "test_track.m4a"
     test_audio.write_bytes(b"mock audio data")
     monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *args: (str(test_audio), "Audio"))
+    
+    # Mock save_custom_song to redirect BUILTIN_SONG_ROOT to library_dir
+    library_dir = tmp_path / "library"
+    library_dir.mkdir(exist_ok=True)
+    from e2dm2.catalog import save_custom_song, BUILTIN_SONG_ROOT
+    monkeypatch.setattr(
+        "e2dm2.editor.save_custom_song",
+        lambda song, audio, library_root=None: save_custom_song(
+            song, audio, library_dir if library_root == BUILTIN_SONG_ROOT else library_root
+        )
+    )
+    # Mock load_song_catalog to merge real catalog with saved temp built-ins
+    from e2dm2.catalog import load_song_catalog, load_song_manifest
+    def mocked_load_song_catalog():
+        songs = load_song_catalog()
+        for path in library_dir.glob("*/preset.json"):
+            song = load_song_manifest(path, readonly=True)
+            if song.song_id not in {s.song_id for s in songs}:
+                songs.append(song)
+        return songs
+    monkeypatch.setattr("e2dm2.editor.load_song_catalog", mocked_load_song_catalog)
+    
+    monkeypatch.setattr("e2dm2.catalog.probe_audio_duration", lambda path: 10.0)
+    monkeypatch.setattr("e2dm2.editor.probe_audio_duration", lambda path: 10.0)
     
     def accept_epic_workflow(workflow_dialog):
         workflow_dialog.choose_audio()
@@ -245,8 +270,7 @@ def test_new_song_workflow_dialog(monkeypatch, tmp_path, qtbot):
     assert dialog.current.song_id == "test-track"
     assert dialog.current.audio_file == f"EpicMusic{next_idx}.m4a"
     assert dialog.current.artist == "User"
-    from e2dm2.catalog import BUILTIN_SONG_ROOT
-    expected_path = BUILTIN_SONG_ROOT / "test-track" / f"EpicMusic{next_idx}.m4a"
+    expected_path = library_dir / "test-track" / f"EpicMusic{next_idx}.m4a"
     assert dialog.audio_edit.text() == str(expected_path)
 
 
@@ -258,12 +282,26 @@ def test_real_estate_song_dialog_workflow(monkeypatch, tmp_path, qtbot):
     
     dialog = SongEditorDialog(AlphaEntitlementProvider(), workflow_filter=WorkflowMode.REAL_ESTATE)
     qtbot.addWidget(dialog)
+    monkeypatch.setattr(dialog, "load_waveform", lambda *_args: None)
     
     assert dialog.workflow_filter == WorkflowMode.REAL_ESTATE
     
     test_audio = tmp_path / "real_estate_music.mp3"
     test_audio.write_bytes(b"mock audio data")
     monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *args: (str(test_audio), "Audio"))
+    
+    # Mock save_custom_song to redirect BUILTIN_SONG_ROOT to library_dir
+    library_dir = tmp_path / "library"
+    library_dir.mkdir(exist_ok=True)
+    from e2dm2.catalog import save_custom_song, BUILTIN_SONG_ROOT
+    monkeypatch.setattr(
+        "e2dm2.editor.save_custom_song",
+        lambda song, audio, library_root=None: save_custom_song(
+            song, audio, library_dir if library_root == BUILTIN_SONG_ROOT else library_root
+        )
+    )
+    monkeypatch.setattr("e2dm2.catalog.probe_audio_duration", lambda path: 10.0)
+    monkeypatch.setattr("e2dm2.editor.probe_audio_duration", lambda path: 10.0)
     
     def accept_real_estate_workflow(workflow_dialog):
         workflow_dialog.choose_audio()
@@ -299,10 +337,29 @@ def test_filtered_library_locks_new_song_to_full_length(monkeypatch, tmp_path, q
     from e2dm2.models import WorkflowMode
     from PySide6.QtWidgets import QDialog, QFileDialog
 
+    # Mock save_custom_song to redirect BUILTIN_SONG_ROOT to library_dir
+    library_dir = tmp_path / "library"
+    library_dir.mkdir(exist_ok=True)
+    from e2dm2.catalog import save_custom_song, BUILTIN_SONG_ROOT
     monkeypatch.setattr(
-        "e2dm2.editor.load_song_catalog",
-        lambda: load_song_catalog(custom_root=tmp_path / "missing-library"),
+        "e2dm2.editor.save_custom_song",
+        lambda song, audio, library_root=None: save_custom_song(
+            song, audio, library_dir if library_root == BUILTIN_SONG_ROOT else library_root
+        )
     )
+    monkeypatch.setattr("e2dm2.catalog.probe_audio_duration", lambda path: 10.0)
+    monkeypatch.setattr("e2dm2.editor.probe_audio_duration", lambda path: 10.0)
+
+    # Mock load_song_catalog to merge real catalog with saved temp built-ins
+    from e2dm2.catalog import load_song_catalog, load_song_manifest
+    def mocked_load_song_catalog():
+        songs = load_song_catalog(custom_root=tmp_path / "missing-library")
+        for path in library_dir.glob("*/preset.json"):
+            song = load_song_manifest(path, readonly=True)
+            if song.song_id not in {s.song_id for s in songs}:
+                songs.append(song)
+        return songs
+    monkeypatch.setattr("e2dm2.editor.load_song_catalog", mocked_load_song_catalog)
     dialog = SongEditorDialog(AlphaEntitlementProvider(), workflow_filter=WorkflowMode.FULL_LENGTH)
     qtbot.addWidget(dialog)
     assert dialog.song_list.count() == 5
