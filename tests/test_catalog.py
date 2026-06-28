@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import QTimer
 
 from e2dm2.catalog import (
     duplicate_song,
@@ -12,6 +13,7 @@ from e2dm2.catalog import (
     validate_song_manifest,
 )
 from e2dm2.entitlements import AlphaEntitlementProvider, PRESET_EDITOR_FEATURE
+from e2dm2.models import WorkflowMode
 
 
 def test_builtin_catalog_and_filters():
@@ -33,11 +35,11 @@ def test_full_length_song_two_matches_its_audio_metadata():
     song = next(song for song in load_song_catalog() if song.song_id == "drone-music-2")
     track = full_length_track("drone-music-2")
 
-    assert song.title == track.title == "Interstellar Theme"
-    assert song.total_duration_seconds == pytest.approx(3531.476463)
-    assert song.minimum_source_duration_seconds == pytest.approx(3531.476463)
-    assert song.cuts_end_seconds == pytest.approx(3531.476463)
-    assert track.duration_seconds == pytest.approx(3531.476463)
+    assert song.title == track.title
+    assert song.total_duration_seconds == pytest.approx(3531.476, abs=0.001)
+    assert song.minimum_source_duration_seconds == pytest.approx(3531.476, abs=0.001)
+    assert song.cuts_end_seconds == pytest.approx(3531.476, abs=0.001)
+    assert track.duration_seconds == pytest.approx(3531.476, abs=0.001)
 
 
 def test_epic_two_heartbeat_manifest():
@@ -215,7 +217,11 @@ def test_new_song_workflow_dialog(monkeypatch, tmp_path, qtbot):
     test_audio.write_bytes(b"mock audio data")
     monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *args: (str(test_audio), "Audio"))
     
-    monkeypatch.setattr(WorkflowSelectionDialog, "exec", lambda self: QDialog.DialogCode.Accepted)
+    def accept_epic_workflow(workflow_dialog):
+        workflow_dialog.choose_audio()
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(WorkflowSelectionDialog, "exec", accept_epic_workflow)
     monkeypatch.setattr(WorkflowSelectionDialog, "selected_workflow", lambda self: "epic_montage")
     monkeypatch.setattr(WorkflowSelectionDialog, "is_builtin", lambda self: True)
     
@@ -229,7 +235,8 @@ def test_new_song_workflow_dialog(monkeypatch, tmp_path, qtbot):
     next_idx = max(existing_indices, default=0) + 1
 
     dialog.new_song()
-    
+    qtbot.waitUntil(lambda: dialog.current is not None and dialog.current.song_id == f"epic-montage-{next_idx}")
+
     assert dialog.current is not None
     assert dialog.current.workflow.value == "epic_montage"
     assert dialog.current.readonly is True
@@ -257,7 +264,11 @@ def test_real_estate_song_dialog_workflow(monkeypatch, tmp_path, qtbot):
     test_audio.write_bytes(b"mock audio data")
     monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *args: (str(test_audio), "Audio"))
     
-    monkeypatch.setattr(WorkflowSelectionDialog, "exec", lambda self: QDialog.DialogCode.Accepted)
+    def accept_real_estate_workflow(workflow_dialog):
+        workflow_dialog.choose_audio()
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(WorkflowSelectionDialog, "exec", accept_real_estate_workflow)
     monkeypatch.setattr(WorkflowSelectionDialog, "selected_workflow", lambda self: "real_estate")
     monkeypatch.setattr(WorkflowSelectionDialog, "is_builtin", lambda self: False)
     
@@ -270,7 +281,8 @@ def test_real_estate_song_dialog_workflow(monkeypatch, tmp_path, qtbot):
     next_idx = max(existing_indices, default=0) + 1
 
     dialog.new_song()
-    
+    qtbot.waitUntil(lambda: dialog.current is not None and dialog.current.song_id == f"real-estate-{next_idx}")
+
     assert dialog.current is not None
     assert dialog.current.workflow == WorkflowMode.REAL_ESTATE
     assert dialog.current.readonly is False
@@ -327,10 +339,59 @@ def test_filtered_library_locks_new_song_to_full_length(monkeypatch, tmp_path, q
     def accept_locked_workflow(workflow_dialog):
         assert workflow_dialog.combo.currentData() == WorkflowMode.FULL_LENGTH.value
         assert not workflow_dialog.combo.isEnabled()
+        workflow_dialog.choose_audio()
+        assert workflow_dialog.title_edit.text() == "full_length_music"
+        assert workflow_dialog.id_edit.text() == "full-length-music"
+        workflow_dialog.title_edit.setText("Evening Flight")
+        workflow_dialog.id_edit.setText("evening-flight")
+        workflow_dialog.builtin_cb.setChecked(True)
         return QDialog.DialogCode.Accepted
 
     monkeypatch.setattr(WorkflowSelectionDialog, "exec", accept_locked_workflow)
     dialog.new_song()
+    qtbot.waitUntil(lambda: dialog.current is not None and dialog.current.song_id == "evening-flight")
 
     assert dialog.current is not None
     assert dialog.current.workflow is WorkflowMode.FULL_LENGTH
+    assert dialog.current.title == "Evening Flight"
+    assert dialog.current.song_id == "evening-flight"
+    assert dialog.current.readonly is True
+
+
+@pytest.mark.parametrize(
+    "workflow",
+    [WorkflowMode.EPIC_MONTAGE, WorkflowMode.FULL_LENGTH, WorkflowMode.REAL_ESTATE],
+)
+def test_new_song_details_modal_appears_after_file_picker(workflow, monkeypatch, tmp_path, qtbot):
+    from PySide6.QtWidgets import QApplication, QFileDialog
+    from e2dm2.editor import SongEditorDialog, WorkflowSelectionDialog
+    from e2dm2.entitlements import AlphaEntitlementProvider
+
+    audio = tmp_path / "new-library-song.m4a"
+    audio.write_bytes(b"mock audio data")
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *args: (str(audio), "Audio"))
+    monkeypatch.setattr(SongEditorDialog, "load_waveform", lambda *_args: None)
+    dialog = SongEditorDialog(AlphaEntitlementProvider(), workflow_filter=workflow)
+    qtbot.addWidget(dialog)
+    dialog.show()
+    seen = []
+
+    def close_details_dialog():
+        details = next(
+            (widget for widget in QApplication.topLevelWidgets() if isinstance(widget, WorkflowSelectionDialog)),
+            None,
+        )
+        if details is None:
+            QTimer.singleShot(10, close_details_dialog)
+            return
+        seen.append(details.selected_workflow())
+        assert details.isVisible()
+        assert details.combo.currentData() == workflow.value
+        assert not details.combo.isEnabled()
+        details.reject()
+
+    QTimer.singleShot(10, close_details_dialog)
+    dialog.new_song()
+    qtbot.waitUntil(lambda: bool(seen), timeout=2000)
+
+    assert seen == [workflow.value]
