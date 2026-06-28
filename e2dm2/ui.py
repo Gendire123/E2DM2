@@ -28,6 +28,7 @@ from PySide6.QtGui import (
     QDesktopServices,
     QGuiApplication,
     QIcon,
+    QKeyEvent,
     QMouseEvent,
     QPainter,
     QPen,
@@ -66,6 +67,8 @@ from PySide6.QtWidgets import (
     QStyle,
     QStyleOptionButton,
     QStyleOptionSlider,
+    QStyleOptionViewItem,
+    QStyledItemDelegate,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -189,6 +192,17 @@ class SoundtrackComboBox(QComboBox):
                 if geometry.bottom() > available.bottom():
                     geometry.moveBottom(available.bottom())
                 popup.setGeometry(geometry)
+
+
+class InlineTitleEdit(QLineEdit):
+    cancelled = Signal()
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() == Qt.Key.Key_Escape:
+            self.cancelled.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
 
 class SongPreviewCell(QWidget):
@@ -652,6 +666,15 @@ class ProjectTableItem(QTableWidgetItem):
         return super().__lt__(other)
 
 
+class FullRowSelectionDelegate(QStyledItemDelegate):
+    """Paint selected rows without Qt's extra current-cell focus box."""
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
+        row_option = QStyleOptionViewItem(option)
+        row_option.state &= ~QStyle.StateFlag.State_HasFocus
+        super().paint(painter, row_option, index)
+
+
 class HomePage(QWidget):
     new_requested = Signal()
     open_requested = Signal()
@@ -1025,7 +1048,34 @@ class WorkspacePage(QWidget):
 
         self.project_title = QLabel("Project Name")
         self.project_title.setObjectName("heroTitle")
-        left_layout.addWidget(self.project_title)
+        self.project_title_edit = InlineTitleEdit()
+        self.project_title_edit.setObjectName("heroTitleEdit")
+        self.project_title_edit.setMinimumWidth(440)
+        self.project_title_edit.hide()
+        self.project_title_edit.editingFinished.connect(self._save_project_title_edit)
+        self.project_title_edit.cancelled.connect(self._cancel_project_title_edit)
+        self._title_edit_active = False
+
+        self.project_title_edit_button = QToolButton()
+        self.project_title_edit_button.setObjectName("heroTitleEditButton")
+        self.project_title_edit_button.setIcon(QIcon(str(
+            Path(__file__).parent / "assets" / "icons" / "hero-edit.svg"
+        )))
+        self.project_title_edit_button.setIconSize(QSize(19, 19))
+        self.project_title_edit_button.setFixedSize(32, 32)
+        self.project_title_edit_button.setToolTip("Edit project title")
+        self.project_title_edit_button.setAccessibleName("Edit project title")
+        self.project_title_edit_button.setEnabled(False)
+        self.project_title_edit_button.clicked.connect(self._begin_project_title_edit)
+
+        title_layout = QHBoxLayout()
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(8)
+        title_layout.addWidget(self.project_title)
+        title_layout.addWidget(self.project_title_edit)
+        title_layout.addWidget(self.project_title_edit_button)
+        title_layout.addStretch(1)
+        left_layout.addLayout(title_layout)
 
         metrics_layout = QHBoxLayout()
         metrics_layout.setSpacing(24)
@@ -1154,6 +1204,7 @@ class WorkspacePage(QWidget):
         self.media_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.media_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.media_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.media_table.setItemDelegate(FullRowSelectionDelegate(self.media_table))
         self.media_table.cellDoubleClicked.connect(lambda *_: self.open_preview())
 
         header = self.media_table.horizontalHeader()
@@ -1420,6 +1471,7 @@ class WorkspacePage(QWidget):
         self.song_table.setHorizontalHeaderLabels(["Song", "Mood", "Cuts", "Length"])
         self.song_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.song_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.song_table.setItemDelegate(FullRowSelectionDelegate(self.song_table))
         self.song_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.song_table.verticalHeader().setDefaultSectionSize(42)
         self.song_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
@@ -1453,6 +1505,7 @@ class WorkspacePage(QWidget):
         self.full_song_table.setHorizontalHeaderLabels(["Song", "Mood", "Cuts", "Length"])
         self.full_song_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.full_song_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.full_song_table.setItemDelegate(FullRowSelectionDelegate(self.full_song_table))
         self.full_song_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.full_song_table.verticalHeader().setDefaultSectionSize(42)
         self.full_song_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
@@ -1486,6 +1539,7 @@ class WorkspacePage(QWidget):
         self.re_song_table.setHorizontalHeaderLabels(["Song", "Mood", "Cuts", "Length"])
         self.re_song_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.re_song_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.re_song_table.setItemDelegate(FullRowSelectionDelegate(self.re_song_table))
         self.re_song_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.re_song_table.verticalHeader().setDefaultSectionSize(42)
         self.re_song_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
@@ -1519,6 +1573,7 @@ class WorkspacePage(QWidget):
         self.custom_song_table.setHorizontalHeaderLabels(["Song", "Mood", "Cuts", "Length"])
         self.custom_song_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.custom_song_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.custom_song_table.setItemDelegate(FullRowSelectionDelegate(self.custom_song_table))
         self.custom_song_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.custom_song_table.verticalHeader().setDefaultSectionSize(42)
         self.custom_song_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
@@ -1615,9 +1670,54 @@ class WorkspacePage(QWidget):
         )
         self.hero_soundtrack_title.setText(music_str)
 
+    def _begin_project_title_edit(self) -> None:
+        if not self.project:
+            return
+        self._title_edit_active = True
+        self.project_title_edit.setText(self.project.settings.name)
+        self.project_title.hide()
+        self.project_title_edit_button.hide()
+        self.project_title_edit.show()
+        QTimer.singleShot(0, self._focus_project_title_edit)
+
+    def _focus_project_title_edit(self) -> None:
+        if self._title_edit_active:
+            self.project_title_edit.setFocus(Qt.FocusReason.ShortcutFocusReason)
+            self.project_title_edit.selectAll()
+
+    def _finish_project_title_edit(self) -> None:
+        self._title_edit_active = False
+        self.project_title_edit.hide()
+        self.project_title.show()
+        self.project_title_edit_button.show()
+
+    def _cancel_project_title_edit(self) -> None:
+        if self._title_edit_active:
+            self._finish_project_title_edit()
+
+    def _save_project_title_edit(self) -> None:
+        if not self._title_edit_active or not self.project:
+            return
+        title = self.project_title_edit.text().strip()
+        if not title:
+            self._finish_project_title_edit()
+            return
+
+        previous_title = self.project.settings.name
+        self.project.settings.name = title
+        try:
+            save_project(self.project.path, self.project.settings)
+        except OSError as exc:
+            self.project.settings.name = previous_title
+            QMessageBox.critical(self, "Could not rename project", str(exc))
+        else:
+            self.project_title.setText(title)
+        self._finish_project_title_edit()
+
     def set_project(self, project: Project) -> None:
         self.project = project
         self.project_title.setText(project.settings.name)
+        self.project_title_edit_button.setEnabled(True)
         self.project_path.setText(str(project.path))
         workflow_index = self.workflow_combo.findData(project.settings.workflow)
         self.workflow_combo.blockSignals(True)
@@ -2156,7 +2256,7 @@ class WorkspacePage(QWidget):
         self.progress_bar.setValue(val)
         self.status_label.setText(f"Importing {name}")
         if hasattr(self, "import_dialog") and self.import_dialog:
-            self.import_dialog.setLabelText(f"Importing {name} ({val}%)")
+            self.import_dialog.setLabelText(f"Importing {name}")
             self.import_dialog.setValue(val)
 
     def import_finished(self, imported) -> None:
@@ -2784,6 +2884,29 @@ QLabel#heroTitle {
     font-weight: 800;
 }
 
+QLineEdit#heroTitleEdit {
+    background: #FFFFFF;
+    color: #142033;
+    border: 2px solid #0E56AA;
+    border-radius: 8px;
+    padding: 3px 8px;
+    font-size: 22pt;
+    font-weight: 800;
+    selection-background-color: #0E56AA;
+    selection-color: #FFFFFF;
+}
+
+QToolButton#heroTitleEditButton {
+    background: transparent;
+    border: 0;
+    border-radius: 7px;
+    padding: 5px;
+}
+
+QToolButton#heroTitleEditButton:hover {
+    background: #EAF2FC;
+}
+
 QLabel#metricValue {
     background: transparent;
     color: #142033;
@@ -3077,10 +3200,12 @@ QToolButton#rowMenuButton:hover {
 
 QProgressBar {
     background: #E6ECEE;
+    color: #FFFFFF;
     border: 0;
     border-radius: 8px;
     height: 18px;
     text-align: center;
+    font-weight: 700;
 }
 
 QProgressBar::chunk {

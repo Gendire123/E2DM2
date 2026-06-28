@@ -10,14 +10,14 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QAbstractAnimation, QObject, QPoint, QSettings, QSize, Qt, Signal, Slot
 from PySide6.QtGui import QPalette
-from PySide6.QtWidgets import QLabel, QMessageBox, QTabWidget, QTableWidgetItem, QWidget
+from PySide6.QtWidgets import QLabel, QMessageBox, QProgressBar, QProgressDialog, QTabWidget, QTableWidget, QTableWidgetItem, QWidget
 
 from e2dm2.models import ClipSelection, MediaItem, RenderResult, SelectionType, WorkflowMode
 from e2dm2.preview import ClipPreviewDialog, SelectionTimeline, format_timecode, parse_timecode
 from e2dm2.editor import SongEditorDialog
 from e2dm2.entitlements import AlphaEntitlementProvider
-from e2dm2.ui import ClickSeekSlider, HomePage, MainWindow, OptionsDialog, STYLESHEET, SongPreviewCell, splash_screen_enabled
-from e2dm2.project import create_project
+from e2dm2.ui import ClickSeekSlider, FullRowSelectionDelegate, HomePage, MainWindow, OptionsDialog, STYLESHEET, SongPreviewCell, splash_screen_enabled
+from e2dm2.project import create_project, load_project
 from e2dm2.ui import WorkspacePage, _duration
 
 
@@ -68,6 +68,28 @@ def test_tab_strip_matches_window_background(qtbot):
     assert background.name() == "#f5f7f8"
 
 
+def test_progress_percentage_text_is_white(qtbot):
+    progress = QProgressBar()
+    qtbot.addWidget(progress)
+    progress.setStyleSheet(STYLESHEET)
+    progress.setValue(84)
+    progress.show()
+
+    text_color = progress.palette().color(QPalette.ColorRole.Text)
+    assert text_color.name() == "#ffffff"
+
+
+def test_import_status_does_not_repeat_progress_percentage(qtbot):
+    page = WorkspacePage()
+    qtbot.addWidget(page)
+    page.import_dialog = QProgressDialog("", "Cancel", 0, 100, page)
+
+    page.import_progress(94, "DJI_001.mp4")
+
+    assert page.import_dialog.labelText() == "Importing DJI_001.mp4"
+    assert page.import_dialog.value() == 94
+
+
 def test_footage_action_controls_have_matching_heights(qtbot):
     page = WorkspacePage()
     qtbot.addWidget(page)
@@ -90,6 +112,39 @@ def test_footage_action_controls_have_matching_heights(qtbot):
         for y in range(remove_icon.height())
     )
     assert has_red_pixel
+
+
+def test_footage_selection_is_painted_as_a_full_row(qtbot):
+    page = WorkspacePage()
+    qtbot.addWidget(page)
+    table = page.media_table
+    table.setRowCount(1)
+    for column in range(table.columnCount()):
+        table.setItem(0, column, QTableWidgetItem(str(column)))
+
+    table.setCurrentCell(0, 2)
+
+    assert table.selectionBehavior() == QTableWidget.SelectionBehavior.SelectRows
+    assert isinstance(table.itemDelegate(), FullRowSelectionDelegate)
+    assert {index.column() for index in table.selectionModel().selectedIndexes()} == set(range(table.columnCount()))
+
+
+def test_music_library_selection_is_painted_as_a_full_row(qtbot):
+    page = WorkspacePage()
+    qtbot.addWidget(page)
+    tables = (
+        page.song_table,
+        page.full_song_table,
+        page.re_song_table,
+        page.custom_song_table,
+    )
+
+    for table in tables:
+        assert table.selectionBehavior() == QTableWidget.SelectionBehavior.SelectRows
+        assert isinstance(table.itemDelegate(), FullRowSelectionDelegate)
+
+    page.song_table.setCurrentCell(0, 2)
+    assert {index.column() for index in page.song_table.selectionModel().selectedIndexes()} == {0, 1, 2, 3}
 
 
 def test_hero_shows_created_then_selected_soundtrack_target_duration(qtbot, tmp_path):
@@ -146,6 +201,34 @@ def test_sidebar_uses_full_brand_logo(qtbot):
     assert page.sidebar_logo_label.size() == logo.deviceIndependentSize().toSize()
     assert page.findChild(QLabel, "sidebarBrand") is None
     assert page.findChild(QLabel, "sidebarTagline") is None
+
+
+def test_project_title_can_be_edited_inline_and_persisted(qtbot, tmp_path):
+    page = WorkspacePage()
+    qtbot.addWidget(page)
+    project = create_project("Original Title", tmp_path / "projects")
+    page.set_project(project)
+    page.show()
+
+    page.project_title_edit_button.click()
+    assert page.project_title.isHidden()
+    assert page.project_title_edit.isVisible()
+    qtbot.waitUntil(page.project_title_edit.hasFocus)
+
+    page.project_title_edit.setText("New Project Title")
+    qtbot.keyClick(page.project_title_edit, Qt.Key.Key_Return)
+
+    assert page.project_title.text() == "New Project Title"
+    assert project.settings.name == "New Project Title"
+    assert load_project(project.path).settings.name == "New Project Title"
+    assert page.project_title_edit.isHidden()
+    assert page.project_title_edit_button.isVisible()
+
+    page.project_title_edit_button.click()
+    page.project_title_edit.setText("Discarded Title")
+    qtbot.keyClick(page.project_title_edit, Qt.Key.Key_Escape)
+    assert page.project_title.text() == "New Project Title"
+    assert project.settings.name == "New Project Title"
 
 
 def test_options_dialog_persists_splash_screen_preference(qtbot, tmp_path):
