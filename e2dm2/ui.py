@@ -40,6 +40,7 @@ from PySide6.QtGui import (
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
     QApplication,
+    QAbstractItemView,
     QGraphicsOpacityEffect,
     QCheckBox,
     QComboBox,
@@ -195,6 +196,30 @@ class SoundtrackComboBox(QComboBox):
                 popup.setGeometry(geometry)
 
 
+class SmoothTableWidget(QTableWidget):
+    """QTableWidget subclass with smooth pixel-based scrolling instead of line-based scrolling."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+
+
+class ClickableLabel(QLabel):
+    """QLabel subclass that acts as a clickable hyperlink."""
+
+    clicked = Signal()
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
+
+
 class InlineTitleEdit(QLineEdit):
     cancelled = Signal()
 
@@ -231,7 +256,7 @@ class SongPreviewCell(QWidget):
 
         self.progress_slider = ClickSeekSlider(Qt.Orientation.Horizontal)
         self.progress_slider.setRange(0, max(1, round(duration_seconds * 1000)))
-        self.progress_slider.setMinimumHeight(26)
+        self.progress_slider.setMinimumHeight(28)
         self.progress_slider.setToolTip("Song position")
         self.progress_slider.setVisible(False)
         self.progress_slider.setStyleSheet(
@@ -251,7 +276,7 @@ class SongPreviewCell(QWidget):
         self._progress_animation.valueChanged.connect(lambda _value: self.update())
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setContentsMargins(4, 0, 4, 0)
         layout.setSpacing(7)
         layout.addWidget(self.title_label)
         layout.addWidget(self.play_button)
@@ -730,7 +755,7 @@ class HomePage(QWidget):
         brand_layout.addWidget(self.logo_label)
         brand_layout.addLayout(brand_copy, 1)
 
-        self.recent_list = QTableWidget(0, 3)
+        self.recent_list = SmoothTableWidget(0, 3)
         self.recent_list.setObjectName("recentProjectsTable")
         self.recent_list.setHorizontalHeaderLabels(["Project title", "Created", "Last modified"])
         self.recent_list.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -1145,8 +1170,9 @@ class WorkspacePage(QWidget):
         music_icon.setObjectName("heroIcon")
         music_icon.setPixmap(QIcon(str(icon_root / "hero-music.svg")).pixmap(22, 22))
         
-        self.hero_soundtrack_title = QLabel("Epic Montage 1 by E2DM2")
+        self.hero_soundtrack_title = ClickableLabel("Epic Montage 1 by E2DM2")
         self.hero_soundtrack_title.setObjectName("heroSoundtrackTitle")
+        self.hero_soundtrack_title.clicked.connect(lambda: self.workspace_tabs.setCurrentIndex(1))
         
         soundtrack_layout.addWidget(music_icon)
         soundtrack_layout.addWidget(self.hero_soundtrack_title)
@@ -1224,7 +1250,7 @@ class WorkspacePage(QWidget):
 
         card_layout.addLayout(card_header)
 
-        self.media_table = QTableWidget(0, 9)
+        self.media_table = SmoothTableWidget(0, 9)
         self.media_table.setHorizontalHeaderLabels([
             "#",
             "Clip",
@@ -1368,6 +1394,7 @@ class WorkspacePage(QWidget):
         soundtrack_layout.addWidget(library_card, 1)
 
         soundtrack_scroll = QScrollArea()
+        soundtrack_scroll.setFrameShape(QFrame.Shape.NoFrame)
         soundtrack_scroll.setWidgetResizable(True)
         soundtrack_scroll.setWidget(soundtrack_panel)
         return soundtrack_scroll
@@ -1453,6 +1480,7 @@ class WorkspacePage(QWidget):
         produce_layout.addStretch(1)
 
         produce_scroll = QScrollArea()
+        produce_scroll.setFrameShape(QFrame.Shape.NoFrame)
         produce_scroll.setWidgetResizable(True)
         produce_scroll.setWidget(produce_panel)
         return produce_scroll
@@ -1515,23 +1543,6 @@ class WorkspacePage(QWidget):
             if w:
                 w.setGraphicsEffect(None)
 
-        widget = self.workspace_tabs.widget(index)
-        if not widget:
-            return
-
-        effect = QGraphicsOpacityEffect(widget)
-        widget.setGraphicsEffect(effect)
-        effect.setOpacity(0.0)
-
-        anim = QPropertyAnimation(effect, b"opacity")
-        anim.setDuration(200)
-        anim.setStartValue(0.0)
-        anim.setEndValue(1.0)
-        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        anim.finished.connect(lambda: widget.setGraphicsEffect(None))
-        anim.start(QPropertyAnimation.DeletionPolicy.KeepWhenStopped)
-        widget._fade_anim = anim
-
     def _epic_panel(self) -> QWidget:
         panel = QWidget()
         self.song_search = QLineEdit()
@@ -1549,13 +1560,13 @@ class WorkspacePage(QWidget):
         filters.addWidget(self.mood_filter)
         filters.addWidget(self.energy_filter)
         filters.addWidget(manage)
-        self.song_table = QTableWidget(0, 4)
+        self.song_table = SmoothTableWidget(0, 4)
         self.song_table.setHorizontalHeaderLabels(["Song", "Mood", "Cuts", "Length"])
         self.song_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.song_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.song_table.setItemDelegate(FullRowSelectionDelegate(self.song_table))
         self.song_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.song_table.verticalHeader().setDefaultSectionSize(42)
+        self.song_table.verticalHeader().setDefaultSectionSize(52)
         self.song_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         for column in range(1, 4):
             self.song_table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
@@ -1583,13 +1594,13 @@ class WorkspacePage(QWidget):
         filters.addWidget(self.full_mood_filter)
         filters.addWidget(self.full_energy_filter)
         filters.addWidget(manage)
-        self.full_song_table = QTableWidget(0, 4)
+        self.full_song_table = SmoothTableWidget(0, 4)
         self.full_song_table.setHorizontalHeaderLabels(["Song", "Mood", "Cuts", "Length"])
         self.full_song_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.full_song_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.full_song_table.setItemDelegate(FullRowSelectionDelegate(self.full_song_table))
         self.full_song_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.full_song_table.verticalHeader().setDefaultSectionSize(42)
+        self.full_song_table.verticalHeader().setDefaultSectionSize(52)
         self.full_song_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         for column in range(1, 4):
             self.full_song_table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
@@ -1617,13 +1628,13 @@ class WorkspacePage(QWidget):
         filters.addWidget(self.re_mood_filter)
         filters.addWidget(self.re_energy_filter)
         filters.addWidget(manage)
-        self.re_song_table = QTableWidget(0, 4)
+        self.re_song_table = SmoothTableWidget(0, 4)
         self.re_song_table.setHorizontalHeaderLabels(["Song", "Mood", "Cuts", "Length"])
         self.re_song_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.re_song_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.re_song_table.setItemDelegate(FullRowSelectionDelegate(self.re_song_table))
         self.re_song_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.re_song_table.verticalHeader().setDefaultSectionSize(42)
+        self.re_song_table.verticalHeader().setDefaultSectionSize(52)
         self.re_song_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         for column in range(1, 4):
             self.re_song_table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
@@ -1651,13 +1662,13 @@ class WorkspacePage(QWidget):
         filters.addWidget(self.custom_mood_filter)
         filters.addWidget(self.custom_energy_filter)
         filters.addWidget(manage)
-        self.custom_song_table = QTableWidget(0, 4)
+        self.custom_song_table = SmoothTableWidget(0, 4)
         self.custom_song_table.setHorizontalHeaderLabels(["Song", "Mood", "Cuts", "Length"])
         self.custom_song_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.custom_song_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.custom_song_table.setItemDelegate(FullRowSelectionDelegate(self.custom_song_table))
         self.custom_song_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.custom_song_table.verticalHeader().setDefaultSectionSize(42)
+        self.custom_song_table.verticalHeader().setDefaultSectionSize(52)
         self.custom_song_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         for column in range(1, 4):
             self.custom_song_table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
@@ -3140,6 +3151,11 @@ QLabel#heroSoundtrackTitle {
     color: #0E56AA;
     font-size: 12pt;
     font-weight: 700;
+}
+
+QLabel#heroSoundtrackTitle:hover {
+    color: #084481;
+    text-decoration: underline;
 }
 
 QFrame#mainCard {
