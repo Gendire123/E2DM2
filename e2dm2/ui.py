@@ -53,6 +53,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QProgressBar,
     QProgressDialog,
@@ -283,11 +284,11 @@ class SongPreviewCell(QWidget):
         self._apply_colors()
 
     def _apply_colors(self) -> None:
-        background = "#0e54a9" if self._selected else "#fcfcfc"
-        foreground = "#ffffff" if self._selected else "#18342a"
-        button = "#1870c8" if self._playing else "#0e54a9"
-        button_hover = "#0d5fae" if self._playing else "#083d7d"
-        border = "#f5faf7" if self._selected and not self._playing else "#b9c8c0"
+        background = "#E7F6F5" if self._selected else "#FFFFFF"
+        foreground = "#087D80" if self._selected else "#142033"
+        button = "#087D80" if self._playing else "#66758A"
+        button_hover = "#066B6E" if self._playing else "#526173"
+        border = "#087D80" if self._selected else "#CDD8DC"
         self.setStyleSheet(f"QWidget#songPreviewCell {{ background: {background}; }}")
         self.title_label.setStyleSheet(f"background: transparent; color: {foreground}; font-weight: 500;")
         self.play_button.setStyleSheet(
@@ -302,8 +303,154 @@ class SongPreviewCell(QWidget):
         if self._transport_visible:
             transport_left = max(0, self.play_button.geometry().left() - 5)
             painter = QPainter(self)
-            painter.fillRect(transport_left, 0, self.width() - transport_left, self.height(), QColor("#fcfcfc"))
+            painter.fillRect(transport_left, 0, self.width() - transport_left, self.height(), QColor("#ffffff"))
             painter.end()
+
+
+from PySide6.QtCore import QThreadPool, QRunnable
+from PySide6.QtGui import QPainterPath
+from PySide6.QtWidgets import QGraphicsDropShadowEffect
+
+def apply_card_shadow(widget: QWidget, blur: int = 30, y: int = 10, alpha: int = 28) -> None:
+    shadow = QGraphicsDropShadowEffect(widget)
+    shadow.setBlurRadius(blur)
+    shadow.setOffset(0, y)
+    shadow.setColor(QColor(15, 35, 45, alpha))
+    widget.setGraphicsEffect(shadow)
+
+
+class ThumbnailSignals(QObject):
+    done = Signal(str, str)
+
+
+class ThumbnailRunnable(QRunnable):
+    def __init__(self, clip_path: Path, thumb_path: Path, signals: ThumbnailSignals):
+        super().__init__()
+        self.clip_path = clip_path
+        self.thumb_path = thumb_path
+        self.signals = signals
+
+    def run(self):
+        try:
+            from .thumbnail import thumbnail_is_current, create_thumbnail
+            if not thumbnail_is_current(self.clip_path, self.thumb_path):
+                create_thumbnail(self.clip_path, self.thumb_path)
+            self.signals.done.emit(str(self.clip_path), str(self.thumb_path))
+        except Exception as e:
+            LOGGER.exception("Failed to generate thumbnail for %s: %s", self.clip_path, e)
+
+
+class HeroCard(QFrame):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.hero_pixmap = QPixmap(str(Path(__file__).parent / "assets" / "hero" / "drone-hero.jpg"))
+        
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self.hero_pixmap.isNull():
+            return
+            
+        from PySide6.QtGui import QPainter, QPainterPath, QImage, QLinearGradient, QBrush, QColor
+        from PySide6.QtCore import QRectF, QRect, QPointF, Qt
+        
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(self.rect()), 20, 20)
+        painter.setClipPath(path)
+        
+        # Scale the image to fit the height of the card while maintaining aspect ratio (prevents zoom/cropping)
+        img_h = self.height()
+        aspect = self.hero_pixmap.width() / self.hero_pixmap.height()
+        img_w = int(img_h * aspect)
+        
+        dest_rect = QRect(self.width() - img_w, 0, img_w, img_h)
+        
+        temp = QImage(self.size(), QImage.Format.Format_ARGB32)
+        temp.fill(Qt.GlobalColor.transparent)
+        
+        temp_painter = QPainter(temp)
+        temp_painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        temp_painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        temp_painter.drawPixmap(dest_rect, self.hero_pixmap)
+        
+        grad = QLinearGradient(QPointF(self.width() - 550, 0), QPointF(self.width() - 100, 0))
+        grad.setColorAt(0.0, QColor(0, 0, 0, 0))
+        grad.setColorAt(1.0, QColor(0, 0, 0, 185))
+        
+        temp_painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+        temp_painter.fillRect(self.rect(), QBrush(grad))
+        temp_painter.end()
+        
+        painter.drawImage(0, 0, temp)
+        painter.end()
+
+
+class ClipFileCell(QWidget):
+    def __init__(self, name: str, thumbnail_path_str: str | None = None, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setObjectName("clipFileCell")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+
+        self.thumb = QLabel()
+        self.thumb.setObjectName("clipThumbnail")
+        self.thumb.setFixedSize(126, 72)
+        self.thumb.setScaledContents(True)
+
+        if thumbnail_path_str:
+            pixmap = QPixmap(thumbnail_path_str)
+            if not pixmap.isNull():
+                rounded_pix = self.get_rounded_pixmap(pixmap, self.thumb.size(), 8)
+                self.thumb.setPixmap(rounded_pix)
+            else:
+                self.set_placeholder()
+        else:
+            self.set_placeholder()
+
+        self.title = QLabel(name)
+        self.title.setObjectName("clipFileName")
+        self.title.setWordWrap(True)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(14)
+        layout.addWidget(self.thumb)
+        layout.addWidget(self.title, 1)
+
+    def set_placeholder(self) -> None:
+        self.thumb.setText("Preview")
+        self.thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.thumb.setStyleSheet("background: #E6ECEE; border-radius: 8px; font-weight: bold; color: #66758A;")
+
+    def set_thumbnail(self, thumbnail_path_str: str) -> None:
+        pixmap = QPixmap(thumbnail_path_str)
+        if not pixmap.isNull():
+            rounded_pix = self.get_rounded_pixmap(pixmap, self.thumb.size(), 8)
+            self.thumb.setPixmap(rounded_pix)
+
+    def get_rounded_pixmap(self, pixmap: QPixmap, size: QSize, radius: int) -> QPixmap:
+        target = QPixmap(size)
+        target.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(target)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        
+        path = QPainterPath()
+        path.addRoundedRect(0, 0, size.width(), size.height(), radius, radius)
+        painter.setClipPath(path)
+        
+        scaled = pixmap.scaled(
+            size,
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        x = (size.width() - scaled.width()) // 2
+        y = (size.height() - scaled.height()) // 2
+        painter.drawPixmap(x, y, scaled)
+        painter.end()
+        return target
 
 
 class CompactPageStack(QStackedWidget):
@@ -505,6 +652,7 @@ class HomePage(QWidget):
         new_button = QPushButton("New Project")
         new_button.setObjectName("primaryButton")
         self.open_button = QPushButton("Open Project")
+        self.open_button.setObjectName("secondaryButton")
         new_button.clicked.connect(self.new_requested)
         self.open_button.clicked.connect(self.open_preferred_project)
         actions = QHBoxLayout()
@@ -678,8 +826,23 @@ class WorkspacePage(QWidget):
         self.active_song_preview_id: str | None = None
         self.active_song_preview_cell: SongPreviewCell | None = None
         self.home_requested.connect(self.stop_song_preview)
+        self.thumb_signals = ThumbnailSignals()
+        self.thumb_signals.done.connect(self._on_thumbnail_ready)
         self._build_ui()
         self.refresh_catalog()
+
+    @Slot(str, str)
+    def _on_thumbnail_ready(self, clip_path: str, thumb_path: str) -> None:
+        if not self.project:
+            return
+        for row in range(self.media_table.rowCount()):
+            item = self.project.settings.media[row]
+            resolved = str(item.resolve(self.project.path))
+            if resolved == clip_path:
+                cell = self.media_table.cellWidget(row, 1)
+                if isinstance(cell, ClipFileCell):
+                    cell.set_thumbnail(thumb_path)
+                break
 
     def _tool_button(self, icon: QStyle.StandardPixmap, tooltip: str, handler) -> QToolButton:
         button = QToolButton()
@@ -689,129 +852,358 @@ class WorkspacePage(QWidget):
         return button
 
     def _build_ui(self) -> None:
-        self.back_button = self._tool_button(QStyle.StandardPixmap.SP_ArrowBack, "Back to projects", self.home_requested.emit)
-        self.back_button.setVisible(False)
+        self.setObjectName("workspaceRoot")
+
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        sidebar = self._build_sidebar()
+        root.addWidget(sidebar)
+
+        content = QFrame()
+        content.setObjectName("workspaceContent")
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(28, 28, 28, 28)
+        content_layout.setSpacing(22)
+
+        hero = self._build_project_hero()
+        content_layout.addWidget(hero)
+
+        self.workspace_tabs = QStackedWidget()
+        self.workspace_tabs.setObjectName("workspaceStack")
+        self.workspace_tabs.addWidget(self._build_footage_page())
+        self.workspace_tabs.addWidget(self._build_soundtrack_page())
+        self.workspace_tabs.addWidget(self._build_produce_page())
+        self.workspace_tabs.currentChanged.connect(self._on_tab_changed)
+        self.workspace_tabs.currentChanged.connect(self._sync_sidebar_selection)
+
+        content_layout.addWidget(self.workspace_tabs, 1)
+
+        root.addWidget(content, 1)
+        self._sync_sidebar_selection(0)
+
+    def _metric_item(self, value_label: QLabel, caption: str, icon: QIcon | None = None) -> QWidget:
+        container = QWidget()
+        container.setObjectName("metricItem")
+
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        if icon and not icon.isNull():
+            icon_label = QLabel()
+            icon_label.setPixmap(icon.pixmap(22, 22))
+            layout.addWidget(icon_label)
+
+        value_label.setObjectName("metricValue")
+        caption_label = QLabel(caption)
+        caption_label.setObjectName("metricCaption")
+
+        text = QVBoxLayout()
+        text.setContentsMargins(0, 0, 0, 0)
+        text.setSpacing(2)
+        text.addWidget(value_label)
+        text.addWidget(caption_label)
+
+        layout.addLayout(text)
+        return container
+
+    def _build_sidebar(self) -> QWidget:
+        sidebar = QFrame()
+        sidebar.setObjectName("sidebar")
+        sidebar.setFixedWidth(252)
+
+        logo_label = QLabel()
+        logo_label.setObjectName("sidebarLogo")
+        logo_pix = QPixmap(str(APP_ICON_PATH))
+        if not logo_pix.isNull():
+            logo_label.setPixmap(logo_pix.scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        brand_label = QLabel("E2DM2")
+        brand_label.setObjectName("sidebarBrand")
+        brand_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        tagline_label = QLabel("Epic Drone. Epic Movies.")
+        tagline_label.setObjectName("sidebarTagline")
+        tagline_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.nav_footage = QPushButton("  Footage")
+        self.nav_soundtrack = QPushButton("  Soundtrack")
+        self.nav_produce = QPushButton("  Produce")
+
+        self.nav_footage.setIcon(QIcon(str(Path(__file__).parent / "assets" / "icons" / "footage.svg")))
+        self.nav_soundtrack.setIcon(QIcon(str(Path(__file__).parent / "assets" / "icons" / "soundtrack.svg")))
+        self.nav_produce.setIcon(QIcon(str(Path(__file__).parent / "assets" / "icons" / "produce.svg")))
+
+        self.nav_footage.setObjectName("navButton")
+        self.nav_soundtrack.setObjectName("navButton")
+        self.nav_produce.setObjectName("navButton")
+
+        self.nav_footage.clicked.connect(lambda: self.workspace_tabs.setCurrentIndex(0))
+        self.nav_soundtrack.clicked.connect(lambda: self.workspace_tabs.setCurrentIndex(1))
+        self.nav_produce.clicked.connect(lambda: self.workspace_tabs.setCurrentIndex(2))
+
+        settings_button = QPushButton("  Settings")
+        settings_button.setObjectName("sidebarSettings")
+        settings_button.setIcon(QIcon(str(Path(__file__).parent / "assets" / "icons" / "settings.svg")))
+        settings_button.clicked.connect(lambda: OptionsDialog(self).exec())
+
+        self.back_button = QPushButton("  Back to projects")
+        self.back_button.setObjectName("sidebarBack")
+        self.back_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowBack))
+        self.back_button.clicked.connect(self.home_requested.emit)
+
+        layout = QVBoxLayout(sidebar)
+        layout.setContentsMargins(20, 24, 20, 24)
+        layout.setSpacing(16)
+
+        brand_widget = QWidget()
+        brand_widget.setObjectName("sidebarBrandArea")
+        brand_layout = QVBoxLayout(brand_widget)
+        brand_layout.setContentsMargins(0, 0, 0, 0)
+        brand_layout.setSpacing(6)
+        brand_layout.addWidget(logo_label)
+        brand_layout.addWidget(brand_label)
+        brand_layout.addWidget(tagline_label)
+        layout.addWidget(brand_widget)
+        
+        layout.addSpacing(20)
+
+        layout.addWidget(self.nav_footage)
+        layout.addWidget(self.nav_soundtrack)
+        layout.addWidget(self.nav_produce)
+
+        layout.addStretch(1)
+
+        layout.addWidget(settings_button)
+        layout.addWidget(self.back_button)
+
+        return sidebar
+
+    def _build_project_hero(self) -> QWidget:
+        hero = HeroCard()
+        hero.setObjectName("heroCard")
+        apply_card_shadow(hero)
+
+        hero_layout = QHBoxLayout(hero)
+        hero_layout.setContentsMargins(24, 24, 24, 24)
+        hero_layout.setSpacing(24)
+
+        left_layout = QVBoxLayout()
+        left_layout.setSpacing(16)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+
         self.project_title = QLabel("Project Name")
-        self.project_title.setObjectName("projectTitle")
-        self.project_title.setStyleSheet("font-size: 16pt; font-weight: bold; color: #18342a;")
+        self.project_title.setObjectName("heroTitle")
+        left_layout.addWidget(self.project_title)
+
+        metrics_layout = QHBoxLayout()
+        metrics_layout.setSpacing(24)
+        metrics_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.metric_duration_value = QLabel("--")
+        self.metric_clips_value = QLabel("--")
+        self.metric_size_value = QLabel("--")
+        self.metric_created_value = QLabel("--")
+
+        metric_duration = self._metric_item(self.metric_duration_value, "Total Duration", self.style().standardIcon(QStyle.StandardPixmap.SP_DialogYesButton))
+        metric_clips = self._metric_item(self.metric_clips_value, "Clips", self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon))
+        metric_size = self._metric_item(self.metric_size_value, "Total Size", self.style().standardIcon(QStyle.StandardPixmap.SP_DriveHDIcon))
+        metric_created = self._metric_item(self.metric_created_value, "Created", self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogListView))
+
+        metrics_layout.addWidget(metric_duration)
+        metrics_layout.addWidget(metric_clips)
+        metrics_layout.addWidget(metric_size)
+        metrics_layout.addWidget(metric_created)
+        metrics_layout.addStretch(1)
+
+        left_layout.addLayout(metrics_layout)
+
+        soundtrack_layout = QHBoxLayout()
+        soundtrack_layout.setSpacing(10)
+        soundtrack_layout.setContentsMargins(0, 0, 0, 0)
+
+        music_icon = QLabel()
+        music_icon.setPixmap(QIcon(str(Path(__file__).parent / "assets" / "icons" / "soundtrack.svg")).pixmap(22, 22))
         
-        self.project_footage_label = QLabel("Combined Footage Duration: --")
-        self.project_footage_label.setStyleSheet("font-size: 10.5pt; color: #354039;")
+        self.hero_soundtrack_title = QLabel("Epic Montage 1 by E2DM2")
+        self.hero_soundtrack_title.setObjectName("heroSoundtrackTitle")
         
-        self.project_created_label = QLabel("Created: --")
-        self.project_created_label.setStyleSheet("font-size: 10.5pt; color: #68716b; font-style: italic;")
-        
-        self.project_music_label = QLabel("Soundtrack: --")
-        self.project_music_label.setStyleSheet("font-size: 10.5pt; color: #246447; font-weight: 500;")
-        
+        self.hero_soundtrack_caption = QLabel("Soundtrack")
+        self.hero_soundtrack_caption.setObjectName("heroSoundtrackCaption")
+
+        soundtrack_layout.addWidget(music_icon)
+        soundtrack_layout.addWidget(self.hero_soundtrack_title)
+        soundtrack_layout.addWidget(self.hero_soundtrack_caption)
+        soundtrack_layout.addStretch(1)
+
+        left_layout.addLayout(soundtrack_layout)
+
+        hero_layout.addLayout(left_layout, 1)
+
+        # Compatibility Hidden Labels
+        self.project_footage_label = QLabel()
+        self.project_footage_label.setObjectName("hiddenCompatibilityLabel")
+        self.project_footage_label.setVisible(False)
+
+        self.project_created_label = QLabel()
+        self.project_created_label.setObjectName("hiddenCompatibilityLabel")
+        self.project_created_label.setVisible(False)
+
+        self.project_music_label = QLabel()
+        self.project_music_label.setObjectName("heroSoundtrack")
+        self.project_music_label.setVisible(False)
+
         self.project_path = QLabel()
         self.project_path.setObjectName("mutedLabel")
         self.project_path.setVisible(False)
-        
-        info_layout = QVBoxLayout()
-        info_layout.setSpacing(4)
-        info_layout.addWidget(self.project_title)
-        info_layout.addWidget(self.project_footage_label)
-        info_layout.addWidget(self.project_created_label)
-        info_layout.addWidget(self.project_music_label)
-        
-        header = QHBoxLayout()
-        header.setSpacing(16)
-        header.addLayout(info_layout, 1)
 
-        self.media_table = QTableWidget(0, 7)
-        self.media_table.setHorizontalHeaderLabels(["Clip", "Marks", "Duration", "Resolution", "FPS", "Codec", "Size"])
+        compatibility_layout = QHBoxLayout()
+        compatibility_layout.addWidget(self.project_footage_label)
+        compatibility_layout.addWidget(self.project_created_label)
+        compatibility_layout.addWidget(self.project_music_label)
+        compatibility_layout.addWidget(self.project_path)
+        left_layout.addLayout(compatibility_layout)
+
+        return hero
+
+    def _build_footage_page(self) -> QWidget:
+        footage_panel = QWidget()
+        footage_layout = QVBoxLayout(footage_panel)
+        footage_layout.setContentsMargins(0, 0, 0, 0)
+        footage_layout.setSpacing(16)
+
+        card = QFrame()
+        card.setObjectName("mainCard")
+        apply_card_shadow(card)
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(22, 22, 22, 22)
+        card_layout.setSpacing(18)
+
+        card_header = QHBoxLayout()
+        film_icon = QLabel()
+        film_icon.setPixmap(QIcon(str(Path(__file__).parent / "assets" / "icons" / "footage.svg")).pixmap(24, 24))
+        
+        card_title = QLabel("Imported Clips")
+        card_title.setObjectName("cardTitle")
+
+        columns_btn = QPushButton(" Columns")
+        columns_btn.setObjectName("secondaryButton")
+        columns_btn.setIcon(QIcon(str(Path(__file__).parent / "assets" / "icons" / "columns.svg")))
+
+        columns_menu = QMenu(self)
+        for col_idx in range(9):
+            col_name = ["#", "Clip", "Marks", "Duration", "Resolution", "FPS", "Codec", "Size", "Action"][col_idx]
+            action = columns_menu.addAction(col_name)
+            action.setCheckable(True)
+            action.setChecked(True)
+            def toggle_col(checked, idx=col_idx):
+                self.media_table.setColumnHidden(idx, not checked)
+            action.triggered.connect(toggle_col)
+        columns_btn.setMenu(columns_menu)
+
+        card_header.addWidget(film_icon)
+        card_header.addWidget(card_title)
+        card_header.addStretch(1)
+        card_header.addWidget(columns_btn)
+
+        card_layout.addLayout(card_header)
+
+        self.media_table = QTableWidget(0, 9)
+        self.media_table.setHorizontalHeaderLabels([
+            "#",
+            "Clip",
+            "Marks",
+            "Duration",
+            "Resolution",
+            "FPS",
+            "Codec",
+            "Size",
+            "",
+        ])
+        self.media_table.verticalHeader().setVisible(False)
+        self.media_table.verticalHeader().setDefaultSectionSize(96)
+        self.media_table.setShowGrid(False)
+        self.media_table.setAlternatingRowColors(False)
+        self.media_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.media_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.media_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.media_table.setSortingEnabled(False)
-        header_view = self.media_table.horizontalHeader()
-        header_view.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for column in range(1, 7):
-            header_view.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
-        self.media_table.itemDoubleClicked.connect(lambda *_: self.open_preview())
-        
-        # Add files and folder buttons with icons
+        self.media_table.cellDoubleClicked.connect(lambda *_: self.open_preview())
+
+        header = self.media_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        for column in range(2, 8):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(8, QHeaderView.ResizeMode.ResizeToContents)
+
+        card_layout.addWidget(self.media_table, 1)
+
         add_files = QPushButton("Add Files")
+        add_files.setObjectName("secondaryButton")
         add_files.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon))
-        add_folder = QPushButton("Add Folder")
-        add_folder.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon))
-        self.preview_button = QPushButton("Preview / Edit")
-        self.preview_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
         add_files.clicked.connect(self.add_files)
+        self.add_files_button = add_files
+
+        add_folder = QPushButton("Add Folder")
+        add_folder.setObjectName("secondaryButton")
+        add_folder.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon))
         add_folder.clicked.connect(self.add_folder)
+        self.add_folder_button = add_folder
+
+        self.preview_button = QPushButton("Preview / Edit")
+        self.preview_button.setObjectName("primaryButton")
+        self.preview_button.setIcon(QIcon(str(Path(__file__).parent / "assets" / "icons" / "edit.svg")))
         self.preview_button.clicked.connect(self.open_preview)
-        
+
         up = self._tool_button(QStyle.StandardPixmap.SP_ArrowUp, "Move selected clip up", lambda: self.move_selected(-1))
+        up.setObjectName("squareIconButton")
+        self.move_up_button = up
+
         down = self._tool_button(QStyle.StandardPixmap.SP_ArrowDown, "Move selected clip down", lambda: self.move_selected(1))
+        down.setObjectName("squareIconButton")
+        self.move_down_button = down
+
         remove = self._tool_button(QStyle.StandardPixmap.SP_TrashIcon, "Remove selected clip", self.remove_selected)
-        
-        # Actions row
-        media_actions = QHBoxLayout()
-        media_actions.addWidget(add_files)
-        media_actions.addWidget(add_folder)
-        media_actions.addWidget(self.preview_button)
-        media_actions.addWidget(up)
-        media_actions.addWidget(down)
-        media_actions.addWidget(remove)
-        media_actions.addStretch()
+        remove.setObjectName("squareIconButton")
+        self.remove_button = remove
+
         self.media_total = QLabel("No footage imported")
-        self.media_total.setStyleSheet("color: #68716b; font-weight: 500; padding-right: 6px;")
-        self.media_total.setMinimumWidth(self.media_total.sizeHint().width())
-        media_actions.addWidget(self.media_total)
+        self.media_total.setObjectName("summaryPill")
 
-        # Footage workspace card
-        footage_card = QFrame()
-        footage_card.setObjectName("produceCard")
-        footage_layout = QVBoxLayout(footage_card)
-        footage_layout.setContentsMargins(20, 20, 20, 20)
-        footage_layout.setSpacing(14)
+        action_row = QHBoxLayout()
+        action_row.setSpacing(10)
+        action_row.setContentsMargins(0, 0, 0, 0)
+        action_row.addWidget(add_files)
+        action_row.addWidget(add_folder)
+        action_row.addWidget(self.preview_button)
+        action_row.addWidget(up)
+        action_row.addWidget(down)
+        action_row.addWidget(remove)
+        action_row.addStretch(1)
+        action_row.addWidget(self.media_total)
 
-        # Card Title Header
-        footage_header = QHBoxLayout()
-        footage_title = QLabel("Imported Clips")
-        footage_title.setStyleSheet("font-size: 11pt; font-weight: bold; color: #18342a;")
-        footage_header.addWidget(footage_title)
-        footage_header.addStretch()
-        footage_layout.addLayout(footage_header)
+        card_layout.addLayout(action_row)
+        footage_layout.addWidget(card, 1)
 
-        # Add table and actions into the card
-        footage_layout.addWidget(self.media_table, 1)
-        footage_layout.addLayout(media_actions)
+        return footage_panel
 
-        # Main panel layout
-        media_panel = QWidget()
-        media_layout = QVBoxLayout(media_panel)
-        media_layout.setContentsMargins(16, 16, 16, 16)
-        media_layout.setSpacing(16)
-        media_layout.addWidget(footage_card, 1)
-
-        self.workflow_combo = QComboBox()
-        self.workflow_combo.addItem("Epic Montage", WorkflowMode.EPIC_MONTAGE)
-        self.workflow_combo.addItem("Full-length Video", WorkflowMode.FULL_LENGTH)
-        self.workflow_combo.addItem("Real Estate Showcase", WorkflowMode.REAL_ESTATE)
-        self.workflow_combo.addItem("Custom Songs", WorkflowMode.CUSTOM)
-        self.workflow_combo.currentIndexChanged.connect(self.workflow_changed)
-        workflow_row = QHBoxLayout()
-        workflow_row.addWidget(QLabel("Workflow"))
-        workflow_row.addWidget(self.workflow_combo, 1)
-
-        self.epic_panel = self._epic_panel()
-        self.full_panel = self._full_panel()
-        self.real_estate_panel = self._real_estate_panel()
-        self.custom_panel = self._custom_panel()
-        self.mode_stack = QStackedWidget()
-        self.mode_stack.addWidget(self.epic_panel)
-        self.mode_stack.addWidget(self.full_panel)
-        self.mode_stack.addWidget(self.real_estate_panel)
-        self.mode_stack.addWidget(self.custom_panel)
+    def _build_soundtrack_page(self) -> QWidget:
+        soundtrack_panel = QWidget()
+        soundtrack_layout = QVBoxLayout(soundtrack_panel)
+        soundtrack_layout.setContentsMargins(0, 0, 0, 0)
+        soundtrack_layout.setSpacing(16)
 
         self.selected_music_card = QFrame()
         self.selected_music_card.setObjectName("selectedMusicCard")
+        apply_card_shadow(self.selected_music_card)
         card_layout = QHBoxLayout(self.selected_music_card)
         card_layout.setContentsMargins(16, 12, 16, 12)
         card_layout.setSpacing(8)
         
-        info_label = QLabel("Active Production Soundtrack:")
+        info_label = QLabel("Selected soundtrack:")
         info_label.setStyleSheet("font-weight: bold; color: #18342a; font-size: 10.5pt;")
         self.selected_music_title_label = QLabel("No music selected")
         self.selected_music_title_label.setStyleSheet("font-weight: 600; color: #246447; font-size: 10.5pt;")
@@ -819,21 +1211,69 @@ class WorkspacePage(QWidget):
         card_layout.addWidget(info_label)
         card_layout.addWidget(self.selected_music_title_label, 1)
 
-        music_panel = QWidget()
-        music_layout = QVBoxLayout(music_panel)
-        music_layout.setContentsMargins(16, 16, 16, 16)
-        music_layout.setSpacing(12)
-        music_layout.addWidget(self.selected_music_card)
-        music_layout.addLayout(workflow_row)
-        music_layout.addWidget(self.mode_stack, 1)
+        soundtrack_layout.addWidget(self.selected_music_card)
 
-        music_scroll = QScrollArea()
-        music_scroll.setWidgetResizable(True)
-        music_scroll.setWidget(music_panel)
+        workflow_card = QFrame()
+        workflow_card.setObjectName("mainCard")
+        apply_card_shadow(workflow_card)
+        w_layout = QHBoxLayout(workflow_card)
+        w_layout.setContentsMargins(20, 16, 20, 16)
+        w_layout.setSpacing(16)
 
-        # Export options card
+        workflow_label = QLabel("Workflow")
+        workflow_label.setStyleSheet("font-weight: bold; color: #18342a;")
+        
+        self.workflow_combo = QComboBox()
+        self.workflow_combo.addItem("Epic Montage", WorkflowMode.EPIC_MONTAGE)
+        self.workflow_combo.addItem("Full-length Video", WorkflowMode.FULL_LENGTH)
+        self.workflow_combo.addItem("Real Estate Showcase", WorkflowMode.REAL_ESTATE)
+        self.workflow_combo.addItem("Custom Songs", WorkflowMode.CUSTOM)
+        self.workflow_combo.currentIndexChanged.connect(self.workflow_changed)
+
+        w_layout.addWidget(workflow_label)
+        w_layout.addWidget(self.workflow_combo, 1)
+        
+        soundtrack_layout.addWidget(workflow_card)
+
+        library_card = QFrame()
+        library_card.setObjectName("mainCard")
+        apply_card_shadow(library_card)
+        lib_layout = QVBoxLayout(library_card)
+        lib_layout.setContentsMargins(20, 20, 20, 20)
+        lib_layout.setSpacing(14)
+
+        lib_title = QLabel("Music Library")
+        lib_title.setObjectName("cardTitle")
+        lib_layout.addWidget(lib_title)
+
+        self.epic_panel = self._epic_panel()
+        self.full_panel = self._full_panel()
+        self.real_estate_panel = self._real_estate_panel()
+        self.custom_panel = self._custom_panel()
+
+        self.mode_stack = QStackedWidget()
+        self.mode_stack.addWidget(self.epic_panel)
+        self.mode_stack.addWidget(self.full_panel)
+        self.mode_stack.addWidget(self.real_estate_panel)
+        self.mode_stack.addWidget(self.custom_panel)
+
+        lib_layout.addWidget(self.mode_stack, 1)
+        soundtrack_layout.addWidget(library_card, 1)
+
+        soundtrack_scroll = QScrollArea()
+        soundtrack_scroll.setWidgetResizable(True)
+        soundtrack_scroll.setWidget(soundtrack_panel)
+        return soundtrack_scroll
+
+    def _build_produce_page(self) -> QWidget:
+        produce_panel = QWidget()
+        produce_layout = QVBoxLayout(produce_panel)
+        produce_layout.setContentsMargins(0, 0, 0, 0)
+        produce_layout.setSpacing(16)
+
         config_card = QFrame()
-        config_card.setObjectName("produceCard")
+        config_card.setObjectName("mainCard")
+        apply_card_shadow(config_card)
         config_layout = QHBoxLayout(config_card)
         config_layout.setContentsMargins(20, 16, 20, 16)
         config_layout.setSpacing(16)
@@ -862,21 +1302,20 @@ class WorkspacePage(QWidget):
         config_layout.addWidget(self.render_button)
         config_layout.addWidget(self.cancel_button)
 
-        # Status / Progress card
         status_card = QFrame()
-        status_card.setObjectName("produceCard")
+        status_card.setObjectName("mainCard")
+        apply_card_shadow(status_card)
         status_layout = QVBoxLayout(status_card)
         status_layout.setContentsMargins(20, 20, 20, 20)
         status_layout.setSpacing(14)
 
         status_header = QHBoxLayout()
         status_title = QLabel("Production Status")
-        status_title.setStyleSheet("font-size: 11pt; font-weight: bold; color: #18342a;")
+        status_title.setObjectName("cardTitle")
         status_header.addWidget(status_title)
         status_header.addStretch()
         status_layout.addLayout(status_header)
 
-        # Status message display
         self.status_label = QLabel("Ready")
         self.status_label.setWordWrap(True)
         self.status_label.setStyleSheet("font-size: 10.5pt; color: #354039;")
@@ -893,6 +1332,7 @@ class WorkspacePage(QWidget):
         status_layout.addWidget(self.results_list, 1)
 
         open_folder = QPushButton("Open Renders Folder")
+        open_folder.setObjectName("secondaryButton")
         open_folder.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
         open_folder.clicked.connect(self.open_renders_folder)
         
@@ -901,11 +1341,6 @@ class WorkspacePage(QWidget):
         folder_layout.addStretch()
         status_layout.addLayout(folder_layout)
 
-        # Main Produce tab layout
-        produce_panel = QWidget()
-        produce_layout = QVBoxLayout(produce_panel)
-        produce_layout.setContentsMargins(16, 16, 16, 16)
-        produce_layout.setSpacing(16)
         produce_layout.addWidget(config_card)
         produce_layout.addWidget(status_card)
         produce_layout.addStretch(1)
@@ -913,28 +1348,29 @@ class WorkspacePage(QWidget):
         produce_scroll = QScrollArea()
         produce_scroll.setWidgetResizable(True)
         produce_scroll.setWidget(produce_panel)
+        return produce_scroll
 
-        self.workspace_tabs = QTabWidget()
-        self.workspace_tabs.addTab(media_panel, "Footage")
-        self.workspace_tabs.addTab(music_scroll, "Soundtrack")
-        self.workspace_tabs.addTab(produce_scroll, "Produce")
-        self.workspace_tabs.currentChanged.connect(self._on_tab_changed)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 18, 24, 24)
-        layout.addLayout(header)
-        layout.addWidget(self.workspace_tabs, 1)
+    def _sync_sidebar_selection(self, index: int) -> None:
+        buttons = [self.nav_footage, self.nav_soundtrack, self.nav_produce]
+        for i, button in enumerate(buttons):
+            button.setProperty("active", i == index)
+            button.style().unpolish(button)
+            button.style().polish(button)
+            button.update()
 
     def _on_tab_changed(self, index: int) -> None:
+        # Clear graphics effects on all widgets in the stack to prevent any rendering freeze
+        for i in range(self.workspace_tabs.count()):
+            w = self.workspace_tabs.widget(i)
+            if w:
+                w.setGraphicsEffect(None)
+
         widget = self.workspace_tabs.widget(index)
         if not widget:
             return
 
-        effect = widget.graphicsEffect()
-        if not isinstance(effect, QGraphicsOpacityEffect):
-            effect = QGraphicsOpacityEffect(widget)
-            widget.setGraphicsEffect(effect)
-
+        effect = QGraphicsOpacityEffect(widget)
+        widget.setGraphicsEffect(effect)
         effect.setOpacity(0.0)
 
         anim = QPropertyAnimation(effect, b"opacity")
@@ -942,6 +1378,7 @@ class WorkspacePage(QWidget):
         anim.setStartValue(0.0)
         anim.setEndValue(1.0)
         anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        anim.finished.connect(lambda: widget.setGraphicsEffect(None))
         anim.start(QPropertyAnimation.DeletionPolicy.KeepWhenStopped)
         widget._fade_anim = anim
 
@@ -1088,8 +1525,13 @@ class WorkspacePage(QWidget):
         media = self.project.settings.media
         total_duration = sum(item.duration for item in media)
         total_size = sum(item.size_bytes for item in media)
+        
+        duration_text = _duration(total_duration)
+        clips_text = str(len(media))
+        size_text = f"{total_size / 1024 ** 3:.2f} GB"
+        
         self.project_footage_label.setText(
-            f"Footage Duration: {_duration(total_duration)} ({len(media)} clip{'s' if len(media) != 1 else ''}) | {total_size / 1024 ** 3:.2f} GB"
+            f"Footage Duration: {duration_text} ({len(media)} clip{'s' if len(media) != 1 else ''}) | {size_text}"
         )
         
         # Line 3: Project created date
@@ -1142,6 +1584,13 @@ class WorkspacePage(QWidget):
             else:
                 music_str = f"Unknown Soundtrack ({song_id})"
         self.project_music_label.setText(f"Soundtrack: {music_str}")
+        
+        # Update metrics and hero soundtrack title
+        self.metric_duration_value.setText(duration_text)
+        self.metric_clips_value.setText(clips_text)
+        self.metric_size_value.setText(size_text)
+        self.metric_created_value.setText(created_str)
+        self.hero_soundtrack_title.setText(music_str)
 
     def _update_selected_music_card(self) -> None:
         if not self.project:
@@ -1206,24 +1655,81 @@ class WorkspacePage(QWidget):
             return
         media = self.project.settings.media
         self.media_table.setRowCount(len(media))
+        
+        from .thumbnail import thumbnail_path
+        
         for row, item in enumerate(media):
+            # Column 0: Index "#"
+            self.media_table.setItem(row, 0, QTableWidgetItem(str(row + 1)))
+
+            # Column 1: ClipFileCell
+            resolved_path = item.resolve(self.project.path)
+            thumb_path = thumbnail_path(self.project.path, item)
+            
+            thumb_path_str = None
+            if thumb_path.is_file():
+                thumb_path_str = str(thumb_path)
+            else:
+                # Trigger background thumbnail generation
+                runnable = ThumbnailRunnable(resolved_path, thumb_path, self.thumb_signals)
+                QThreadPool.globalInstance().start(runnable)
+
+            clip_cell = ClipFileCell(item.original_name, thumb_path_str, self.media_table)
+            self.media_table.setCellWidget(row, 1, clip_cell)
+
             excluded = sum(selection.type.value == "exclude" for selection in item.selections)
             required = sum(selection.type.value == "required" for selection in item.selections)
             marks = " / ".join(part for part in (f"R {excluded}" if excluded else "", f"G {required}" if required else "") if part)
+
             values = [
-                item.original_name, marks or "-", _duration(item.duration), f"{item.width} x {item.height}",
-                f"{item.fps:.2f}", item.codec, f"{item.size_bytes / 1024 ** 2:.1f} MB",
+                marks or "-",
+                _duration(item.duration),
+                f"{item.width} x {item.height}",
+                f"{item.fps:.2f}",
+                item.codec,
+                f"{item.size_bytes / 1024 ** 2:.1f} MB",
             ]
-            for column, value in enumerate(values):
+
+            for idx, value in enumerate(values):
+                col = idx + 2
                 table_item = QTableWidgetItem(value)
-                if column == 1 and (excluded or required):
+                if col == 2 and (excluded or required):
                     table_item.setToolTip(f"{excluded} excluded range(s)\n{required} required range(s)")
-                self.media_table.setItem(row, column, table_item)
+                self.media_table.setItem(row, col, table_item)
+
+            menu_button = QToolButton()
+            menu_button.setText("⋮")
+            menu_button.setObjectName("rowMenuButton")
+            menu_button.clicked.connect(lambda _=False, r=row: self._open_clip_row_menu(r))
+            self.media_table.setCellWidget(row, 8, menu_button)
+
         total_duration = sum(item.duration for item in media)
         total_size = sum(item.size_bytes for item in media)
-        self.media_total.setText(f"{len(media)} clips | {_duration(total_duration)} | {total_size / 1024 ** 3:.2f} GB ")
+        
+        duration_text = _duration(total_duration)
+        clips_text = str(len(media))
+        size_text = f"{total_size / 1024 ** 3:.2f} GB"
+        
+        self.media_total.setText(f"{len(media)} clips | {duration_text} | {size_text}")
         self.media_total.setMinimumWidth(self.media_total.sizeHint().width())
         self._update_header_details()
+
+    def _open_clip_row_menu(self, row: int) -> None:
+        self.media_table.selectRow(row)
+        menu = QMenu(self)
+        preview = menu.addAction("Preview / Edit")
+        move_up = menu.addAction("Move Up")
+        move_down = menu.addAction("Move Down")
+        remove = menu.addAction("Remove")
+        action = menu.exec(QCursor.pos())
+        if action == preview:
+            self.open_preview()
+        elif action == move_up:
+            self.move_selected(-1)
+        elif action == move_down:
+            self.move_selected(1)
+        elif action == remove:
+            self.remove_selected()
 
     def _install_song_preview(
         self,
@@ -1869,6 +2375,13 @@ class WorkspacePage(QWidget):
         self.media_table.setEnabled(not busy)
         self.preview_button.setEnabled(not busy)
         self.workflow_combo.setEnabled(not busy)
+        self.nav_footage.setEnabled(not busy)
+        self.nav_soundtrack.setEnabled(not busy)
+        self.add_files_button.setEnabled(not busy)
+        self.add_folder_button.setEnabled(not busy)
+        self.move_up_button.setEnabled(not busy)
+        self.move_down_button.setEnabled(not busy)
+        self.remove_button.setEnabled(not busy)
 
     def open_result(self, item) -> None:
         path = item.data(Qt.ItemDataRole.UserRole)
@@ -2097,7 +2610,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Easy Epic Drone Movie Maker - E2DM2")
         self.setWindowIcon(QIcon(str(APP_ICON_PATH)))
-        self.resize(820, 660)
+        self.resize(1180, 820)
+        self.setMinimumSize(1024, 700)
         self._centered_once = False
         self.stack = CompactPageStack()
         self.home = HomePage()
@@ -2186,83 +2700,480 @@ class MainWindow(QMainWindow):
 
 
 STYLESHEET = """
-QWidget { background: #f4f5f2; color: #202521; font-size: 10pt; }
-QMainWindow, QDialog { background: #f4f5f2; }
-QLabel#appTitle { font-size: 23pt; font-weight: 650; color: #18342a; }
-QLabel#shortName { font-size: 13pt; color: #9a5b16; }
-QFrame#brandCard { background: #fcfcfc; border: 1px solid #d8ded9; border-radius: 10px; }
-QFrame#brandCard QLabel { background: transparent; border: 0; }
-QLabel#brandLogo { background: #fcfcfc; border: 0; }
-QLabel#homeSubtitle { color: #5e6962; font-size: 10.5pt; }
-QLabel#sectionTitle { color: #18342a; font-size: 12pt; font-weight: 650; }
-QLabel#projectTitle { font-size: 17pt; font-weight: 650; color: #18342a; }
-QLabel#mutedLabel { color: #68716b; }
-QLineEdit, QComboBox, QTableWidget, QListWidget, QDoubleSpinBox {
-    background: #fcfcfc; border: 1px solid #c8cec9; border-radius: 4px; padding: 5px;
+QWidget {
+    color: #142033;
+    font-family: "Segoe UI";
+    font-size: 10.5pt;
 }
-QAbstractItemView { background-color: #fcfcfc; alternate-background-color: #f7f8f6; }
-QAbstractItemView::item:selected { background: #0e54a9; color: #ffffff; }
-QAbstractItemView::item:selected:active { background: #0e54a9; color: #ffffff; }
-QAbstractItemView::item:selected:!active { background: #0e54a9; color: #ffffff; }
-QTableWidget { gridline-color: #e0e4e0; }
-QHeaderView::section { background: #e7ebe7; color: #354039; border: 0; border-bottom: 1px solid #c8cec9; padding: 7px; }
-QPushButton, QToolButton { background: #fcfcfc; border: 1px solid #b8c0ba; border-radius: 5px; padding: 7px 12px; }
-QPushButton:hover, QToolButton:hover { background: #edf1ed; border-color: #789080; }
-QPushButton:disabled, QToolButton:disabled { color: #99a19b; background: #eceeec; }
-QPushButton#primaryButton { background: #246447; color: white; border-color: #246447; font-weight: 600; }
-QPushButton#primaryButton:hover { background: #1c543a; }
-QPushButton#destructiveButton { color: #a33131; border-color: #d4aaaa; }
-QPushButton#destructiveButton:hover { color: #ffffff; background: #b33a3a; border-color: #b33a3a; }
-QProgressBar { background: #e0e4e0; border: 0; border-radius: 4px; height: 16px; text-align: center; }
-QProgressBar::chunk { background: #d08a2f; border-radius: 4px; }
-QPlainTextEdit#backendLog { background: #171b18; color: #dce6df; border: 1px solid #39433c; font-family: Consolas; font-size: 9pt; }
-QTabWidget::pane { border: 1px solid #c8cec9; background: #fcfcfc; }
-QTabBar::tab { background: #e7ebe7; padding: 8px 16px; border: 1px solid transparent; border-bottom: none; }
+
+QMainWindow, QDialog, .HomePage, .WorkspacePage, QFrame#workspaceContent {
+    background: #F5F7F8;
+}
+
+QFrame#sidebar {
+    background: #FFFFFF;
+    border-right: 1px solid #E1E8EA;
+}
+
+QLabel#sidebarLogo {
+    background: transparent;
+}
+
+QLabel#sidebarBrand {
+    background: transparent;
+    color: #142033;
+    font-size: 22pt;
+    font-weight: 800;
+}
+
+QLabel#sidebarTagline {
+    background: transparent;
+    color: #66758A;
+    font-size: 9.5pt;
+}
+
+QPushButton#navButton {
+    background: transparent;
+    border: 0;
+    border-radius: 12px;
+    color: #526173;
+    font-size: 11pt;
+    font-weight: 600;
+    padding: 14px 18px;
+    text-align: left;
+}
+
+QPushButton#navButton:hover {
+    background: #F1F5F6;
+    color: #142033;
+}
+
+QPushButton#navButton[active="true"] {
+    background: #E7F6F5;
+    color: #087D80;
+    border-left: 4px solid #087D80;
+    padding-left: 14px;
+}
+
+QPushButton#sidebarSettings {
+    background: transparent;
+    border: 0;
+    border-radius: 12px;
+    color: #526173;
+    font-size: 11pt;
+    font-weight: 600;
+    padding: 14px 18px;
+    text-align: left;
+}
+QPushButton#sidebarSettings:hover {
+    background: #F1F5F6;
+    color: #142033;
+}
+
+QPushButton#sidebarBack {
+    background: transparent;
+    border: 0;
+    border-radius: 12px;
+    color: #526173;
+    font-size: 11pt;
+    font-weight: 600;
+    padding: 14px 18px;
+    text-align: left;
+}
+QPushButton#sidebarBack:hover {
+    background: #F1F5F6;
+    color: #142033;
+}
+
+QFrame#workspaceContent {
+    background: #F5F7F8;
+}
+
+QFrame#heroCard {
+    background: #FFFFFF;
+    border: 1px solid #DDE5E7;
+    border-radius: 20px;
+}
+
+QFrame#heroCard QLabel {
+    background: transparent;
+    border: 0;
+}
+
+QLabel#heroTitle {
+    background: transparent;
+    color: #142033;
+    font-size: 24pt;
+    font-weight: 800;
+}
+
+QLabel#metricValue {
+    background: transparent;
+    color: #142033;
+    font-size: 13pt;
+    font-weight: 700;
+}
+
+QLabel#metricCaption {
+    background: transparent;
+    color: #66758A;
+    font-size: 9pt;
+}
+
+QLabel#heroSoundtrackTitle {
+    background: transparent;
+    color: #087D80;
+    font-size: 12pt;
+    font-weight: 700;
+}
+
+QLabel#heroSoundtrackCaption {
+    background: transparent;
+    color: #66758A;
+    font-size: 9pt;
+}
+
+QFrame#mainCard {
+    background: #FFFFFF;
+    border: 1px solid #DDE5E7;
+    border-radius: 16px;
+}
+
+QFrame#mainCard QLabel {
+    background: transparent;
+}
+
+QLabel#cardTitle {
+    background: transparent;
+    color: #142033;
+    font-size: 14pt;
+    font-weight: 800;
+}
+
+QTableWidget {
+    background: #FFFFFF;
+    border: 1px solid #DDE5E7;
+    border-radius: 12px;
+    gridline-color: transparent;
+    selection-background-color: #E7F6F5;
+    selection-color: #142033;
+}
+
+QScrollArea, QScrollArea > QWidget, QScrollArea > QWidget > QWidget {
+    background: #F5F7F8;
+    border: none;
+}
+
+/* Scrollbar Custom Styling */
+QScrollBar:vertical {
+    border: none;
+    background: #F5F7F8;
+    width: 10px;
+    margin: 0px;
+}
+
+QScrollBar::handle:vertical {
+    background: #CDD8DC;
+    min-height: 20px;
+    border-radius: 5px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: #AEBEC4;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    border: none;
+    background: none;
+    height: 0px;
+}
+
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: none;
+}
+
+QScrollBar:horizontal {
+    border: none;
+    background: #F5F7F8;
+    height: 10px;
+    margin: 0px;
+}
+
+QScrollBar::handle:horizontal {
+    background: #CDD8DC;
+    min-width: 20px;
+    border-radius: 5px;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background: #AEBEC4;
+}
+
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    border: none;
+    background: none;
+    width: 0px;
+}
+
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+    background: none;
+}
+
+/* ComboBox Dropdown Styling */
+QComboBoxPrivateContainer {
+    background-color: #FFFFFF;
+    background: #FFFFFF;
+    border: 1px solid #DDE5E7;
+    padding: 0px;
+    margin: 0px;
+}
+
+QComboBox QFrame {
+    border: 1px solid #DDE5E7;
+    background-color: #FFFFFF;
+    background: #FFFFFF;
+}
+
+QComboBox QAbstractItemView {
+    border: none;
+    background-color: #FFFFFF;
+    background: #FFFFFF;
+    selection-background-color: #E7F6F5;
+    selection-color: #142033;
+    outline: none;
+    padding: 0px;
+    margin: 0px;
+}
+
+QStackedWidget, QStackedWidget > QWidget {
+    background: #F5F7F8;
+}
+
+QSplitter, QSplitter > QWidget {
+    background: #F5F7F8;
+}
+
+QTableWidget, QTableWidget > QWidget {
+    background: #FFFFFF;
+}
+
+QHeaderView, QHeaderView::section {
+    background: #F7FAFA;
+}
+
+QHeaderView::section:selected {
+    background: #E7F6F5;
+    color: #087D80;
+}
+
+QTabWidget::pane {
+    border: 1px solid #DDE5E7;
+    background: #FFFFFF;
+    border-radius: 12px;
+}
+
+QTabWidget > QWidget, QTabWidget > QStackedWidget > QWidget {
+    background: #FFFFFF;
+}
+
+QTabBar::tab {
+    background: #E6ECEE;
+    color: #526173;
+    padding: 8px 16px;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    margin-right: 4px;
+    font-weight: 600;
+}
+
 QTabBar::tab:selected {
-    background: #fcfcfc;
-    color: #246447;
-    border-left: 1px solid #354039;
-    border-right: 1px solid #354039;
-    border-top: 1px solid #354039;
-    border-bottom: none;
+    background: #FFFFFF;
+    color: #087D80;
+    border: 1px solid #DDE5E7;
+    border-bottom-color: #FFFFFF;
 }
-QSplitter::handle { background: #d7dcd8; width: 1px; }
+
+QTableWidget::item {
+    padding: 8px;
+    border-bottom: 1px solid #EEF2F3;
+}
+
+QTableWidget::item:selected {
+    background: #E7F6F5;
+    color: #142033;
+}
+
+QHeaderView::section {
+    background: #F7FAFA;
+    color: #526173;
+    border: 0;
+    border-bottom: 1px solid #DDE5E7;
+    padding: 12px 10px;
+    font-weight: 700;
+}
+
+QPushButton, QToolButton {
+    background: #FFFFFF;
+    color: #142033;
+    border: 1px solid #CDD8DC;
+    border-radius: 10px;
+    padding: 12px 22px;
+    font-weight: 600;
+}
+
+QPushButton:hover, QToolButton:hover {
+    background: #F7FAFA;
+    border-color: #AEBEC4;
+}
+
+QPushButton:pressed, QToolButton:pressed {
+    background: #EEF2F3;
+}
+
+QPushButton:disabled, QToolButton:disabled {
+    background: #E6ECEE;
+    color: #8A98A8;
+    border-color: #DDE5E7;
+}
+
+QPushButton#primaryButton {
+    background: #087D80;
+    color: #FFFFFF;
+    border: 1px solid #087D80;
+    border-radius: 10px;
+    padding: 12px 22px;
+    font-weight: 700;
+}
+
+QPushButton#primaryButton:hover {
+    background: #066B6E;
+    border-color: #066B6E;
+}
+
+QPushButton#secondaryButton {
+    background: #FFFFFF;
+    color: #142033;
+    border: 1px solid #CDD8DC;
+    border-radius: 10px;
+    padding: 12px 22px;
+    font-weight: 600;
+}
+
+QPushButton#secondaryButton:hover {
+    background: #F7FAFA;
+    border-color: #AEBEC4;
+}
+
+QToolButton#squareIconButton {
+    background: #FFFFFF;
+    color: #142033;
+    border: 1px solid #CDD8DC;
+    border-radius: 10px;
+    padding: 10px;
+    min-width: 42px;
+    min-height: 42px;
+}
+
+QToolButton#squareIconButton:hover {
+    background: #F7FAFA;
+    border-color: #AEBEC4;
+}
+
+QLabel#summaryPill {
+    background: #FFFFFF;
+    color: #66758A;
+    border: 1px solid #DDE5E7;
+    border-radius: 10px;
+    padding: 11px 18px;
+    font-weight: 600;
+}
+
+QToolButton#rowMenuButton {
+    background: transparent;
+    border: 0;
+    color: #66758A;
+    font-size: 18pt;
+    padding: 4px;
+}
+
+QToolButton#rowMenuButton:hover {
+    background: #F1F5F6;
+    border-radius: 8px;
+}
+
+QProgressBar {
+    background: #E6ECEE;
+    border: 0;
+    border-radius: 8px;
+    height: 18px;
+    text-align: center;
+}
+
+QProgressBar::chunk {
+    background: #087D80;
+    border-radius: 8px;
+}
+
+QPlainTextEdit#backendLog {
+    background: #171b18;
+    color: #dce6df;
+    border: 1px solid #39433c;
+    font-family: Consolas;
+    font-size: 9pt;
+}
+
+QSplitter::handle {
+    background: #DDE5E7;
+    width: 1px;
+}
 
 /* Options Dialog */
-QLabel#optionsTitle { color: #18342a; font-size: 19pt; font-weight: 650; }
-QLabel#optionsSubtitle { color: #68716b; font-size: 10pt; }
+QLabel#optionsTitle {
+    color: #142033;
+    font-size: 19pt;
+    font-weight: 700;
+}
+QLabel#optionsSubtitle {
+    color: #66758A;
+    font-size: 10pt;
+}
 QFrame#optionsCard {
-    background: #fcfcfc;
-    border: 1px solid #d3dad4;
-    border-radius: 10px;
+    background: #FFFFFF;
+    border: 1px solid #DDE5E7;
+    border-radius: 16px;
 }
 QFrame#optionsCard QLabel, QFrame#optionsCard QCheckBox {
     background: transparent;
     border: 0;
 }
-QLabel#optionsSection { color: #246447; font-size: 8.5pt; font-weight: 700; }
-QLabel#optionTitle { color: #18342a; font-size: 12pt; font-weight: 650; }
-QLabel#optionDescription, QLabel#optionsHint { color: #68716b; }
-QCheckBox#splashScreenOption { color: #202521; font-weight: 600; spacing: 9px; padding-top: 5px; }
-QCheckBox#splashScreenOption::indicator { width: 18px; height: 18px; }
-
-/* Produce Tab Card Design */
-QFrame#produceCard {
-    background-color: #fcfcfc;
-    border: 1px solid #d3dad4;
-    border-radius: 8px;
+QLabel#optionsSection {
+    color: #087D80;
+    font-size: 8.5pt;
+    font-weight: 700;
 }
-QFrame#produceCard QLabel, QFrame#produceCard QCheckBox {
-    background: transparent;
+QLabel#optionTitle {
+    color: #142033;
+    font-size: 12pt;
+    font-weight: 700;
 }
-QFrame#produceCard QTableWidget {
-    border: none;
+QLabel#optionDescription, QLabel#optionsHint {
+    color: #66758A;
+}
+QCheckBox#splashScreenOption {
+    color: #142033;
+    font-weight: 600;
+    spacing: 9px;
+    padding-top: 5px;
+}
+QCheckBox#splashScreenOption::indicator {
+    width: 18px;
+    height: 18px;
 }
 
 /* Splash Screen Design */
 QFrame#splashCard {
-    background-color: #fcfcfc;
-    border: 2px solid #246447;
+    background-color: #FFFFFF;
+    border: 2px solid #087D80;
     border-radius: 12px;
 }
 QFrame#splashCard QLabel {
@@ -2271,26 +3182,91 @@ QFrame#splashCard QLabel {
 QLabel#splashVersion {
     font-size: 11pt;
     font-weight: 600;
-    color: #d08a2f;
+    color: #087D80;
 }
 QLabel#splashStatus {
     font-size: 9.5pt;
-    color: #68716b;
+    color: #66758A;
     font-style: italic;
 }
 QLabel#splashCopyright {
     font-size: 8pt;
-    color: #99a19b;
+    color: #8A98A8;
 }
 
 /* Selected Music Card Design */
 QFrame#selectedMusicCard {
-    background-color: #f0f7f4;
-    border: 1px solid #b2d4c5;
-    border-radius: 8px;
+    background-color: #E7F6F5;
+    border: 1px solid #087D80;
+    border-radius: 12px;
 }
 QFrame#selectedMusicCard QLabel {
     background: transparent;
+}
+
+/* Home Screen Specifics */
+QLabel#appTitle {
+    font-size: 26pt;
+    font-weight: 800;
+    color: #142033;
+}
+QLabel#shortName {
+    font-size: 14pt;
+    color: #087D80;
+    font-weight: 700;
+}
+QFrame#brandCard {
+    background: #FFFFFF;
+    border: 1px solid #DDE5E7;
+    border-radius: 16px;
+}
+QFrame#brandCard QLabel {
+    background: transparent;
+    border: 0;
+}
+QLabel#brandLogo {
+    background: #FFFFFF;
+    border: 0;
+}
+QLabel#homeSubtitle {
+    color: #66758A;
+    font-size: 10.5pt;
+}
+QLabel#sectionTitle {
+    color: #142033;
+    font-size: 12pt;
+    font-weight: 700;
+}
+QLabel#projectTitle {
+    font-size: 18pt;
+    font-weight: 800;
+    color: #142033;
+}
+QLabel#mutedLabel {
+    color: #66758A;
+}
+QLineEdit, QComboBox, QListWidget, QDoubleSpinBox {
+    background: #FFFFFF;
+    border: 1px solid #DDE5E7;
+    border-radius: 8px;
+    padding: 6px;
+    color: #142033;
+}
+QAbstractItemView {
+    background-color: #FFFFFF;
+    alternate-background-color: #F7FAFA;
+}
+QAbstractItemView::item:selected {
+    background: #E7F6F5;
+    color: #142033;
+}
+QAbstractItemView::item:selected:active {
+    background: #E7F6F5;
+    color: #142033;
+}
+QAbstractItemView::item:selected:!active {
+    background: #E7F6F5;
+    color: #142033;
 }
 """
 

@@ -23,8 +23,8 @@ from e2dm2.ui import WorkspacePage
 def test_main_window_smoke(qtbot):
     window = MainWindow()
     qtbot.addWidget(window)
-    assert window.size().width() == 820
-    assert window.size().height() == 660
+    assert window.minimumWidth() >= 1024
+    assert window.minimumHeight() >= 700
     window.show()
     assert window.windowTitle().startswith("Easy Epic Drone Movie Maker")
     assert not window.windowIcon().isNull()
@@ -235,24 +235,24 @@ def test_new_project_and_workflow_changes_select_default_songs(qtbot, tmp_path):
     assert page.song_table.currentRow() == 0
     assert page.song_table.item(0, 0).data(Qt.ItemDataRole.UserRole) == "epic-montage-1"
     epic_cell = page.song_table.cellWidget(0, 0)
-    assert "background: #0e54a9" in epic_cell.styleSheet()
-    assert "color: #ffffff" in epic_cell.title_label.styleSheet()
+    assert "background: #E7F6F5" in epic_cell.styleSheet()
+    assert "color: #087D80" in epic_cell.title_label.styleSheet()
 
     page.workflow_combo.setCurrentIndex(page.workflow_combo.findData(WorkflowMode.FULL_LENGTH))
     first_full_length_id = page.full_song_table.item(0, 0).data(Qt.ItemDataRole.UserRole)
     assert page.full_song_table.currentRow() == 0
     assert project.settings.full_length_track_id == first_full_length_id
     full_cell = page.full_song_table.cellWidget(0, 0)
-    assert "background: #0e54a9" in full_cell.styleSheet()
-    assert "color: #ffffff" in full_cell.title_label.styleSheet()
+    assert "background: #E7F6F5" in full_cell.styleSheet()
+    assert "color: #087D80" in full_cell.title_label.styleSheet()
 
     page.workflow_combo.setCurrentIndex(page.workflow_combo.findData(WorkflowMode.REAL_ESTATE))
     first_real_estate_id = page.re_song_table.item(0, 0).data(Qt.ItemDataRole.UserRole)
     assert page.re_song_table.currentRow() == 0
     assert project.settings.song_id == first_real_estate_id
     real_estate_cell = page.re_song_table.cellWidget(0, 0)
-    assert "background: #0e54a9" in real_estate_cell.styleSheet()
-    assert "color: #ffffff" in real_estate_cell.title_label.styleSheet()
+    assert "background: #E7F6F5" in real_estate_cell.styleSheet()
+    assert "color: #087D80" in real_estate_cell.title_label.styleSheet()
 
 
 def test_song_row_preview_toggles_play_pause_and_progress(qtbot):
@@ -269,8 +269,8 @@ def test_song_row_preview_toggles_play_pause_and_progress(qtbot):
     assert cell.play_button.width() == cell.play_button.height() == 34
     assert cell.play_button.icon().actualSize(cell.play_button.iconSize()) == cell.play_button.iconSize()
     page.song_table.selectRow(0)
-    assert "color: #ffffff" in cell.title_label.styleSheet()
-    assert "background: #0e54a9" in cell.styleSheet()
+    assert "color: #087D80" in cell.title_label.styleSheet()
+    assert "background: #E7F6F5" in cell.styleSheet()
     assert cell.progress_slider.isHidden()
 
     qtbot.wait(50)
@@ -294,8 +294,8 @@ def test_song_row_preview_toggles_play_pause_and_progress(qtbot):
     transport_sample = rendered_cell.pixelColor(
         min(rendered_cell.width() - 1, cell.play_button.geometry().right() + 6), 2,
     )
-    assert transport_sample.name() == "#fcfcfc"
-    assert rendered_cell.pixelColor(2, 2).name() == "#0e54a9"
+    assert transport_sample.name() == "#ffffff"
+    assert rendered_cell.pixelColor(2, 2).name() == "#e7f6f5"
 
     qtbot.mouseClick(
         cell.progress_slider,
@@ -480,7 +480,7 @@ def test_footage_table_displays_mark_counts(qtbot, tmp_path):
         [ClipSelection(SelectionType.EXCLUDE, 0, 1000), ClipSelection(SelectionType.REQUIRED, 2000, 3000)],
     )]
     page.set_project(project)
-    assert page.media_table.item(0, 1).text() == "R 1 / G 1"
+    assert page.media_table.item(0, 2).text() == "R 1 / G 1"
 
 
 def test_combined_timeline_hovers_and_drag_creates_selection(qtbot):
@@ -626,3 +626,17 @@ def test_splash_screen(qtbot):
     
     # The splash screen should start visible
     assert splash.isVisible()
+
+
+def test_sidebar_navigation_changes_workspace_pages(qtbot):
+    page = WorkspacePage()
+    qtbot.addWidget(page)
+
+    page.nav_soundtrack.click()
+    assert page.workspace_tabs.currentIndex() == 1
+
+    page.nav_produce.click()
+    assert page.workspace_tabs.currentIndex() == 2
+
+    page.nav_footage.click()
+    assert page.workspace_tabs.currentIndex() == 0
