@@ -307,6 +307,8 @@ def test_home_page_shows_recent_project_metadata(qtbot, tmp_path, monkeypatch):
     assert page.recent_list.item(0, 1).text() == "2026-06-20  14:30"
     assert page.recent_list.item(0, 2).text() == "2026-06-28  09:45"
     assert page.recent_list.item(0, 2).data(Qt.ItemDataRole.UserRole) == str(project.path)
+    assert page.recent_list.selectionBehavior() == QTableWidget.SelectionBehavior.SelectRows
+    assert isinstance(page.recent_list.itemDelegate(), FullRowSelectionDelegate)
 
 
 def test_open_project_uses_latest_modified_or_selected_project(qtbot, tmp_path, monkeypatch):
@@ -846,9 +848,18 @@ def test_splash_screen(qtbot):
 def test_sidebar_navigation_changes_workspace_pages(qtbot):
     page = WorkspacePage()
     qtbot.addWidget(page)
+    page.show()
+    qtbot.waitUntil(page.nav_selection_indicator.isVisible)
 
     page.nav_soundtrack.click()
     assert page.workspace_tabs.currentIndex() == 1
+    assert page._nav_highlight_animation.state() == QAbstractAnimation.State.Running
+    qtbot.waitUntil(
+        lambda: page._nav_highlight_animation.state() == QAbstractAnimation.State.Stopped,
+        timeout=1000,
+    )
+    assert page.nav_selection_highlight.geometry() == page.nav_soundtrack.geometry()
+    assert page.nav_soundtrack.property("active")
 
     page.nav_produce.click()
     assert page.workspace_tabs.currentIndex() == 2

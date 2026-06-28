@@ -34,6 +34,7 @@ from PySide6.QtGui import (
     QPen,
     QPixmap,
     QPolygonF,
+    QResizeEvent,
     QShowEvent,
 )
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
@@ -734,6 +735,7 @@ class HomePage(QWidget):
         self.recent_list.setHorizontalHeaderLabels(["Project title", "Created", "Last modified"])
         self.recent_list.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.recent_list.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.recent_list.setItemDelegate(FullRowSelectionDelegate(self.recent_list))
         self.recent_list.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.recent_list.setAlternatingRowColors(True)
         self.recent_list.verticalHeader().setVisible(False)
@@ -938,6 +940,28 @@ class WorkspacePage(QWidget):
         root.addWidget(content, 1)
         self._sync_sidebar_selection(0)
 
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        self.layout().activate()
+        self._align_sidebar_controls()
+        if hasattr(self, "_active_sidebar_index"):
+            self._place_nav_highlight(self._active_sidebar_index)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self.layout().activate()
+        self._align_sidebar_controls()
+        if hasattr(self, "_active_sidebar_index"):
+            self._place_nav_highlight(self._active_sidebar_index)
+
+    def _align_sidebar_controls(self) -> None:
+        if not hasattr(self, "sidebar_logo_spacer") or not hasattr(self, "workspace_tabs"):
+            return
+        tabs_y = self.workspace_tabs.y()
+        logo_bottom = 24 + self.sidebar_logo_label.height()
+        spacing = max(0, tabs_y - logo_bottom)
+        self.sidebar_logo_spacer.setFixedHeight(spacing)
+
     def _metric_item(self, value_label: QLabel, caption: str, icon: QIcon | None = None) -> QWidget:
         container = QWidget()
         container.setObjectName("metricItem")
@@ -982,6 +1006,10 @@ class WorkspacePage(QWidget):
             self.sidebar_logo_label.setFixedSize(logo_pix.deviceIndependentSize().toSize())
         sidebar.setFixedWidth(max(252, self.sidebar_logo_label.width()))
 
+        self.sidebar_logo_spacer = QWidget()
+        self.sidebar_logo_spacer.setObjectName("sidebarLogoSpacer")
+        self.sidebar_logo_spacer.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
         self.nav_footage = QPushButton("  Footage")
         self.nav_soundtrack = QPushButton("  Soundtrack")
         self.nav_produce = QPushButton("  Produce")
@@ -1014,9 +1042,10 @@ class WorkspacePage(QWidget):
 
         layout.addWidget(self.sidebar_logo_label, 0, Qt.AlignmentFlag.AlignHCenter)
         
-        layout.addSpacing(20)
+        layout.addWidget(self.sidebar_logo_spacer)
 
         controls = QWidget()
+        self.sidebar_controls = controls
         controls_layout = QVBoxLayout(controls)
         controls_layout.setContentsMargins(20, 0, 20, 0)
         controls_layout.setSpacing(16)
@@ -1029,6 +1058,16 @@ class WorkspacePage(QWidget):
 
         controls_layout.addWidget(settings_button)
         controls_layout.addWidget(self.back_button)
+
+        self.nav_selection_highlight = QFrame(controls)
+        self.nav_selection_highlight.setObjectName("navSelectionHighlight")
+        self.nav_selection_highlight.hide()
+        self.nav_selection_highlight.lower()
+
+        self.nav_selection_indicator = QFrame(self.nav_selection_highlight)
+        self.nav_selection_indicator.setObjectName("navSelectionIndicator")
+        self.nav_selection_indicator.show()
+        self.nav_selection_indicator.raise_()
         layout.addWidget(controls, 1)
 
         return sidebar
@@ -1420,11 +1459,54 @@ class WorkspacePage(QWidget):
 
     def _sync_sidebar_selection(self, index: int) -> None:
         buttons = [self.nav_footage, self.nav_soundtrack, self.nav_produce]
+        previous_index = getattr(self, "_active_sidebar_index", None)
+
+        if previous_index is None:
+            self._active_sidebar_index = index
+            for i, button in enumerate(buttons):
+                button.setProperty("active", i == index)
+                button.style().unpolish(button)
+                button.style().polish(button)
+            QTimer.singleShot(0, lambda: self._place_nav_highlight(index))
+            return
+
+        if previous_index == index:
+            return
+
+        if hasattr(self, "_nav_highlight_animation"):
+            self._nav_highlight_animation.stop()
+
+        self._active_sidebar_index = index
         for i, button in enumerate(buttons):
             button.setProperty("active", i == index)
             button.style().unpolish(button)
             button.style().polish(button)
-            button.update()
+
+        target = buttons[index]
+        self.nav_selection_highlight.resize(target.size())
+        self.nav_selection_highlight.show()
+        self.nav_selection_highlight.lower()
+        self._size_nav_indicator()
+
+        highlight_animation = QPropertyAnimation(self.nav_selection_highlight, b"pos", self)
+        highlight_animation.setDuration(220)
+        highlight_animation.setStartValue(self.nav_selection_highlight.pos())
+        highlight_animation.setEndValue(target.pos())
+        highlight_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        highlight_animation.finished.connect(lambda: self._place_nav_highlight(index))
+        self._nav_highlight_animation = highlight_animation
+        highlight_animation.start()
+
+    def _size_nav_indicator(self) -> None:
+        height = self.nav_selection_highlight.height()
+        self.nav_selection_indicator.setGeometry(0, 6, 4, max(4, height - 12))
+
+    def _place_nav_highlight(self, index: int) -> None:
+        button = (self.nav_footage, self.nav_soundtrack, self.nav_produce)[index]
+        self.nav_selection_highlight.setGeometry(button.geometry())
+        self._size_nav_indicator()
+        self.nav_selection_highlight.show()
+        self.nav_selection_highlight.lower()
 
     def _on_tab_changed(self, index: int) -> None:
         # Clear graphics effects on all widgets in the stack to prevent any rendering freeze
@@ -2826,10 +2908,20 @@ QPushButton#navButton:hover {
 }
 
 QPushButton#navButton[active="true"] {
-    background: #EAF2FC;
+    background: transparent;
     color: #0E56AA;
-    border-left: 4px solid #0E56AA;
-    padding-left: 14px;
+}
+
+QFrame#navSelectionHighlight {
+    background: #EAF2FC;
+    border: 0;
+    border-radius: 12px;
+}
+
+QFrame#navSelectionIndicator {
+    background: #0E56AA;
+    border: 0;
+    border-radius: 2px;
 }
 
 QPushButton#sidebarSettings {
