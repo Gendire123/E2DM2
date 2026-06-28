@@ -212,7 +212,7 @@ def save_custom_song(song: SongManifest, audio_source: Path, library_root: Path 
         partial.replace(audio_destination)
     song.audio_file = audio_destination.name
     song.manifest_path = target_manifest
-    song.readonly = True
+    song.readonly = target_manifest.resolve().is_relative_to(BUILTIN_SONG_ROOT.resolve())
     errors = validate_song_manifest(song)
     if not errors:
         audio_duration = probe_audio_duration(audio_destination)

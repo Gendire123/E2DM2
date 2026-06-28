@@ -766,6 +766,7 @@ class WorkspacePage(QWidget):
         self.workflow_combo.addItem("Epic Montage", WorkflowMode.EPIC_MONTAGE)
         self.workflow_combo.addItem("Full-length Video", WorkflowMode.FULL_LENGTH)
         self.workflow_combo.addItem("Real Estate Showcase", WorkflowMode.REAL_ESTATE)
+        self.workflow_combo.addItem("Custom Songs", WorkflowMode.CUSTOM)
         self.workflow_combo.currentIndexChanged.connect(self.workflow_changed)
         workflow_row = QHBoxLayout()
         workflow_row.addWidget(QLabel("Workflow"))
@@ -774,10 +775,12 @@ class WorkspacePage(QWidget):
         self.epic_panel = self._epic_panel()
         self.full_panel = self._full_panel()
         self.real_estate_panel = self._real_estate_panel()
+        self.custom_panel = self._custom_panel()
         self.mode_stack = QStackedWidget()
         self.mode_stack.addWidget(self.epic_panel)
         self.mode_stack.addWidget(self.full_panel)
         self.mode_stack.addWidget(self.real_estate_panel)
+        self.mode_stack.addWidget(self.custom_panel)
 
         music_panel = QWidget()
         music_layout = QVBoxLayout(music_panel)
@@ -980,6 +983,39 @@ class WorkspacePage(QWidget):
         layout.addWidget(self.re_song_table)
         return panel
 
+    def _custom_panel(self) -> QWidget:
+        panel = QWidget()
+        self.custom_song_search = QLineEdit()
+        self.custom_song_search.setPlaceholderText("Search songs, artists, or moods")
+        self.custom_song_search.textChanged.connect(self.apply_song_filters)
+        self.custom_mood_filter = QComboBox()
+        self.custom_energy_filter = QComboBox()
+        self.custom_mood_filter.currentIndexChanged.connect(self.apply_song_filters)
+        self.custom_energy_filter.addItems(["All energies", "Low", "Medium", "High"])
+        self.custom_energy_filter.currentIndexChanged.connect(self.apply_song_filters)
+        manage = QPushButton("Manage Library")
+        manage.clicked.connect(self.open_library)
+        filters = QHBoxLayout()
+        filters.addWidget(self.custom_song_search, 1)
+        filters.addWidget(self.custom_mood_filter)
+        filters.addWidget(self.custom_energy_filter)
+        filters.addWidget(manage)
+        self.custom_song_table = QTableWidget(0, 4)
+        self.custom_song_table.setHorizontalHeaderLabels(["Song", "Mood", "Cuts", "Length"])
+        self.custom_song_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.custom_song_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.custom_song_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.custom_song_table.verticalHeader().setDefaultSectionSize(42)
+        self.custom_song_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for column in range(1, 4):
+            self.custom_song_table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        self.custom_song_table.itemSelectionChanged.connect(self.song_selected)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 8, 0, 8)
+        layout.addLayout(filters)
+        layout.addWidget(self.custom_song_table)
+        return panel
+
     def set_project(self, project: Project) -> None:
         self.project = project
         self.project_title.setText(project.settings.name)
@@ -1169,6 +1205,19 @@ class WorkspacePage(QWidget):
             self.re_mood_filter.setCurrentIndex(max(0, index))
             self.re_mood_filter.blockSignals(False)
 
+        # Custom Songs moods & filter
+        custom_moods = sorted({mood for song in self.songs if not song.readonly for mood in song.moods}, key=str.casefold)
+        current_custom_mood = self.custom_mood_filter.currentText() if hasattr(self, "custom_mood_filter") else "All moods"
+        if hasattr(self, "custom_mood_filter"):
+            self.custom_mood_filter.blockSignals(True)
+            self.custom_mood_filter.clear()
+            self.custom_mood_filter.addItem("All moods", "")
+            for mood in custom_moods:
+                self.custom_mood_filter.addItem(mood.title(), mood)
+            index = self.custom_mood_filter.findText(current_custom_mood)
+            self.custom_mood_filter.setCurrentIndex(max(0, index))
+            self.custom_mood_filter.blockSignals(False)
+
         self.apply_song_filters(selected_id)
 
     def apply_song_filters(self, selected_id: str | None = None) -> None:
@@ -1280,9 +1329,36 @@ class WorkspacePage(QWidget):
                 self.re_song_table.selectRow(selected_re_row)
                 self._update_preview_selection(self.re_song_table)
 
+        # 4. Custom Songs filter
+        if hasattr(self, "custom_mood_filter"):
+            custom_mood = self.custom_mood_filter.currentData() or ""
+            custom_energy = "" if self.custom_energy_filter.currentIndex() == 0 else self.custom_energy_filter.currentText().lower()
+            custom_songs = [s for s in self.songs if not s.readonly]
+            custom_filtered = filter_songs(custom_songs, self.custom_song_search.text(), custom_mood, custom_energy)
+            self.custom_song_table.setRowCount(len(custom_filtered))
+            selected_custom_row = -1
+            for row, song in enumerate(custom_filtered):
+                values = [song.title, ", ".join(song.moods), str(len(song.cut_timestamps)), _duration(song.total_duration_seconds)]
+                for column, value in enumerate(values):
+                    item = QTableWidgetItem(value)
+                    if column == 0:
+                        item.setData(Qt.ItemDataRole.UserRole, song.song_id)
+                        item.setToolTip(f"{song.artist}\nMinimum footage: {_duration(song.minimum_source_duration_seconds)}")
+                    self.custom_song_table.setItem(row, column, item)
+                self._install_song_preview(
+                    self.custom_song_table, row, song.song_id, song.title, song.audio_path, song.total_duration_seconds,
+                )
+                if song.song_id == current_id:
+                    selected_custom_row = row
+            if selected_custom_row < 0 and custom_filtered:
+                selected_custom_row = 0
+            if selected_custom_row >= 0:
+                self.custom_song_table.selectRow(selected_custom_row)
+                self._update_preview_selection(self.custom_song_table)
+
     def song_selected(self) -> None:
         sender = self.sender()
-        if sender in (self.song_table, self.full_song_table, self.re_song_table):
+        if sender in (self.song_table, self.full_song_table, self.re_song_table, self.custom_song_table):
             self._update_preview_selection(sender)
         if not self.project:
             return
@@ -1290,6 +1366,7 @@ class WorkspacePage(QWidget):
             self.song_table: WorkflowMode.EPIC_MONTAGE,
             self.full_song_table: WorkflowMode.FULL_LENGTH,
             self.re_song_table: WorkflowMode.REAL_ESTATE,
+            self.custom_song_table: WorkflowMode.CUSTOM,
         }
         if table_workflows.get(sender) != self.workflow_combo.currentData():
             return
@@ -1308,6 +1385,18 @@ class WorkspacePage(QWidget):
             item = self.full_song_table.item(row, 0) if row >= 0 else None
             if item:
                 self.project.settings.full_length_track_id = item.data(Qt.ItemDataRole.UserRole)
+        elif sender == self.custom_song_table:
+            row = self.custom_song_table.currentRow()
+            item = self.custom_song_table.item(row, 0) if row >= 0 else None
+            if item:
+                selected_id = item.data(Qt.ItemDataRole.UserRole)
+                song = next((s for s in self.songs if s.song_id == selected_id), None)
+                if song:
+                    if song.workflow == WorkflowMode.FULL_LENGTH:
+                        self.project.settings.full_length_track_id = selected_id
+                    else:
+                        self.project.settings.song_id = selected_id
+                    self.project.settings.workflow = song.workflow
 
     def workflow_changed(self) -> None:
         self.stop_song_preview()
@@ -1321,12 +1410,15 @@ class WorkspacePage(QWidget):
         elif workflow == WorkflowMode.REAL_ESTATE:
             self.mode_stack.setCurrentIndex(2)
             table = self.re_song_table
+        elif workflow == WorkflowMode.CUSTOM:
+            self.mode_stack.setCurrentIndex(3)
+            table = self.custom_song_table
         else:
             return
 
         if table.rowCount() == 0:
             return
-        if workflow in {WorkflowMode.FULL_LENGTH, WorkflowMode.REAL_ESTATE} or table.currentRow() < 0:
+        if workflow in {WorkflowMode.FULL_LENGTH, WorkflowMode.REAL_ESTATE, WorkflowMode.CUSTOM} or table.currentRow() < 0:
             table.selectRow(0)
         self._update_preview_selection(table)
 
@@ -1336,7 +1428,15 @@ class WorkspacePage(QWidget):
         if item is None:
             return
         selected_id = item.data(Qt.ItemDataRole.UserRole)
-        if workflow == WorkflowMode.FULL_LENGTH:
+        if workflow == WorkflowMode.CUSTOM:
+            song = next((s for s in self.songs if s.song_id == selected_id), None)
+            if song:
+                if song.workflow == WorkflowMode.FULL_LENGTH:
+                    self.project.settings.full_length_track_id = selected_id
+                else:
+                    self.project.settings.song_id = selected_id
+                self.project.settings.workflow = song.workflow
+        elif workflow == WorkflowMode.FULL_LENGTH:
             self.project.settings.full_length_track_id = selected_id
         else:
             self.project.settings.song_id = selected_id
@@ -1475,7 +1575,27 @@ class WorkspacePage(QWidget):
             QMessageBox.warning(self, "Export size", "Choose at least one export size.")
             return
         workflow = WorkflowMode(self.workflow_combo.currentData())
-        song_id = self.project.settings.song_id
+        if workflow == WorkflowMode.CUSTOM:
+            selected_row = self.custom_song_table.currentRow()
+            if selected_row < 0:
+                QMessageBox.warning(self, "Missing song", "Choose a custom song.")
+                return
+            item = self.custom_song_table.item(selected_row, 0)
+            selected_id = item.data(Qt.ItemDataRole.UserRole)
+            song = next((s for s in self.songs if s.song_id == selected_id), None)
+            if not song:
+                QMessageBox.warning(self, "Missing song", "Choose a custom song.")
+                return
+            workflow = song.workflow
+            if workflow == WorkflowMode.FULL_LENGTH:
+                self.project.settings.full_length_track_id = selected_id
+                song_id = None
+            else:
+                self.project.settings.song_id = selected_id
+                song_id = selected_id
+        else:
+            song_id = self.project.settings.song_id
+
         if workflow in {WorkflowMode.EPIC_MONTAGE, WorkflowMode.REAL_ESTATE} and not song_id:
             msg = "Choose a Real Estate song." if workflow == WorkflowMode.REAL_ESTATE else "Choose an Epic song."
             QMessageBox.warning(self, "Missing song", msg)

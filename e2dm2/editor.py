@@ -503,6 +503,8 @@ class SongEditorDialog(QDialog):
             title_text = "Epic Song Library"
         elif self.workflow_filter == WorkflowMode.FULL_LENGTH:
             title_text = "Full-length Song Library"
+        elif self.workflow_filter == WorkflowMode.CUSTOM:
+            title_text = "Custom Song Library"
         else:
             title_text = "Song Library"
             
@@ -559,6 +561,8 @@ class SongEditorDialog(QDialog):
             label_text = "Epic songs"
         elif self.workflow_filter == WorkflowMode.FULL_LENGTH:
             label_text = "Full-length songs"
+        elif self.workflow_filter == WorkflowMode.CUSTOM:
+            label_text = "Custom songs"
         else:
             label_text = "Songs"
             
@@ -699,6 +703,8 @@ class SongEditorDialog(QDialog):
     @property
     def filtered_songs(self) -> list[SongManifest]:
         if getattr(self, "workflow_filter", None) is not None:
+            if self.workflow_filter == WorkflowMode.CUSTOM:
+                return [s for s in self.songs if not s.readonly]
             return [s for s in self.songs if s.workflow == self.workflow_filter]
         return self.songs
 
@@ -871,8 +877,8 @@ class SongEditorDialog(QDialog):
             wf_dialog = WorkflowSelectionDialog(
                 self,
                 suggestions=suggestions,
-                initial_workflow=self.workflow_filter or WorkflowMode.EPIC_MONTAGE,
-                lock_workflow=self.workflow_filter is not None,
+                initial_workflow=self.workflow_filter if (self.workflow_filter and self.workflow_filter != WorkflowMode.CUSTOM) else WorkflowMode.EPIC_MONTAGE,
+                lock_workflow=self.workflow_filter is not None and self.workflow_filter != WorkflowMode.CUSTOM,
             )
             if wf_dialog.exec() != QDialog.DialogCode.Accepted:
                 return

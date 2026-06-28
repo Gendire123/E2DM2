@@ -55,9 +55,10 @@ def test_epic_two_heartbeat_manifest():
 def test_duplicate_builtin_creates_editable_manifest(tmp_path):
     original = next(song for song in load_song_catalog(custom_root=tmp_path) if song.song_id == "epic-montage-1")
     duplicate = duplicate_song(original, "my-epic-song", "My Epic Song", tmp_path)
-    assert duplicate.readonly
+    assert not duplicate.readonly
     assert duplicate.audio_path.is_file()
     loaded = load_song_manifest(tmp_path / "my-epic-song" / "preset.json")
+    assert not loaded.readonly
     assert loaded.song_id == "my-epic-song"
     assert loaded.cut_timestamps == original.cut_timestamps
 
@@ -105,7 +106,7 @@ def test_save_builtin_song_is_allowed(tmp_path):
     loaded_builtin.title = "Updated Builtin Title"
     saved = save_custom_song(loaded_builtin, loaded_builtin.audio_path, tmp_path)
     
-    assert saved.readonly
+    assert not saved.readonly
     assert saved.title == "Updated Builtin Title"
     
     reloaded = load_song_manifest(temp_manifest, readonly=True)
@@ -304,11 +305,11 @@ def test_filtered_library_locks_new_song_to_full_length(monkeypatch, tmp_path, q
     )
     dialog = SongEditorDialog(AlphaEntitlementProvider(), workflow_filter=WorkflowMode.FULL_LENGTH)
     qtbot.addWidget(dialog)
-    assert dialog.song_list.count() == 4
+    assert dialog.song_list.count() == 5
     assert [song.song_id for song in dialog.filtered_songs] == [
-        "drone-music-1", "drone-music-2", "drone-music-3", "drone-music-4",
+        "drone-music-1", "drone-music-2", "drone-music-3", "drone-music-4", "drone-music-5",
     ]
-    assert all(dialog.song_list.item(row).text().endswith("  [built-in]") for row in range(4))
+    assert all(dialog.song_list.item(row).text().endswith("  [built-in]") for row in range(5))
     assert dialog.current.song_id == "drone-music-1"
     assert dialog.audio_edit.text().endswith("e2dm2\\assets\\songs\\drone-music-1\\dronemusic1.m4a")
     assert dialog.save_button.isEnabled()
@@ -395,3 +396,41 @@ def test_new_song_details_modal_appears_after_file_picker(workflow, monkeypatch,
     qtbot.waitUntil(lambda: bool(seen), timeout=2000)
 
     assert seen == [workflow.value]
+
+
+def test_custom_songs_workflow_and_library_editor(monkeypatch, tmp_path, qtbot):
+    from e2dm2.editor import SongEditorDialog
+    from e2dm2.ui import AlphaEntitlementProvider
+    from e2dm2.models import WorkflowMode, SongManifest, EnergyLevel
+
+    custom_song = SongManifest(
+        schema_version=1,
+        song_id="custom-epic-1",
+        title="Custom Epic One",
+        artist="Test Artist",
+        audio_file="test_audio.m4a",
+        moods=["chill"],
+        bpm=120,
+        energy=EnergyLevel.MEDIUM,
+        total_duration_seconds=10.0,
+        minimum_source_duration_seconds=10.0,
+        opening_fade_seconds=0.0,
+        cuts_end_seconds=10.0,
+        fade_out_seconds=0.0,
+        escalation_seconds=0.0,
+        cut_timestamps=[0.0],
+        effects=["none"],
+        workflow=WorkflowMode.EPIC_MONTAGE,
+        readonly=False
+    )
+    monkeypatch.setattr(
+        "e2dm2.editor.load_song_catalog",
+        lambda: [custom_song],
+    )
+
+    dialog = SongEditorDialog(AlphaEntitlementProvider(), workflow_filter=WorkflowMode.CUSTOM)
+    qtbot.addWidget(dialog)
+    assert dialog.song_list.count() == 1
+    assert dialog.filtered_songs == [custom_song]
+    assert dialog.windowTitle() == "Custom Song Library"
+

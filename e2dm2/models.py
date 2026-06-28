@@ -11,6 +11,7 @@ class WorkflowMode(str, Enum):
     FULL_LENGTH = "full_length"
     EPIC_MONTAGE = "epic_montage"
     REAL_ESTATE = "real_estate"
+    CUSTOM = "custom"
 
 
 class ExportSize(str, Enum):
