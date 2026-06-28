@@ -121,13 +121,13 @@ class SelectionTimeline(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         rect = self._track_rect()
-        painter.fillRect(rect, QColor("#d9dedb"))
-        painter.setPen(QPen(QColor("#7c8981"), 1))
+        painter.fillRect(rect, QColor("#DDE5E7"))
+        painter.setPen(QPen(QColor("#7B8CA3"), 1))
         for tick in range(11):
             x = rect.left() + rect.width() * tick / 10
             painter.drawLine(round(x), round(rect.top() - 5), round(x), round(rect.bottom() + 5))
         for index, selection in enumerate(self.selections):
-            color = QColor("#2fa55d") if selection.type is SelectionType.REQUIRED else QColor("#d84a4a")
+            color = QColor("#0E56AA") if selection.type is SelectionType.REQUIRED else QColor("#d84a4a")
             color.setAlpha(205)
             selection_rect = QRectF(
                 self._x_for_ms(selection.start_ms), rect.top(),
@@ -135,13 +135,13 @@ class SelectionTimeline(QWidget):
             )
             painter.fillRect(selection_rect, color)
             if index == self.selected_index:
-                painter.setPen(QPen(QColor("#17231d"), 2))
+                painter.setPen(QPen(QColor("#142033"), 2))
                 painter.drawRect(selection_rect)
                 painter.fillRect(QRectF(selection_rect.left() - 2, rect.top(), 5, rect.height()), QColor("#fcfcfc"))
                 painter.fillRect(QRectF(selection_rect.right() - 2, rect.top(), 5, rect.height()), QColor("#fcfcfc"))
         if self._preview_start is not None and self._preview_end is not None:
             start, end = sorted((self._preview_start, self._preview_end))
-            color = QColor("#2fa55d") if self.tool is SelectionType.REQUIRED else QColor("#d84a4a")
+            color = QColor("#0E56AA") if self.tool is SelectionType.REQUIRED else QColor("#d84a4a")
             color.setAlpha(130)
             painter.fillRect(
                 QRectF(self._x_for_ms(start), rect.top(), max(2, self._x_for_ms(end) - self._x_for_ms(start)), rect.height()),
@@ -157,9 +157,9 @@ class SelectionTimeline(QWidget):
             hover_label = format_timecode(self.hover_ms)
             label_width = painter.fontMetrics().horizontalAdvance(hover_label)
             label_x = max(10, min(self.width() - label_width - 10, round(hover_x - label_width / 2)))
-            painter.setPen(QColor("#354039"))
+            painter.setPen(QColor("#526173"))
             painter.drawText(label_x, round(rect.bottom() + 20), hover_label)
-        painter.setPen(QColor("#354039"))
+        painter.setPen(QColor("#526173"))
         painter.drawText(10, 16, format_timecode(0))
         end_label = format_timecode(self.duration_ms)
         painter.drawText(max(10, self.width() - 10 - painter.fontMetrics().horizontalAdvance(end_label)), 16, end_label)
@@ -348,7 +348,7 @@ class ClipPreviewDialog(QDialog):
         self.warning.setStyleSheet("color: #b3261e;")
         self.warning.setWordWrap(True)
         self.proxy_status = QLabel()
-        self.proxy_status.setStyleSheet("color: #68716b;")
+        self.proxy_status.setStyleSheet("color: #66758A;")
         self.proxy_status.setWordWrap(False)
         self.proxy_status.setMaximumHeight(22)
         self.proxy_progress = QProgressBar()
@@ -654,7 +654,7 @@ class ClipPreviewDialog(QDialog):
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 if column == 0:
-                    item.setForeground(QColor("#208348") if selection.type is SelectionType.REQUIRED else QColor("#bd2f2f"))
+                    item.setForeground(QColor("#0E56AA") if selection.type is SelectionType.REQUIRED else QColor("#bd2f2f"))
                 self.selection_table.setItem(row, column, item)
         if 0 <= self.selected_index < len(self.draft):
             self.selection_table.selectRow(self.selected_index)

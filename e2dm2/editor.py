@@ -375,10 +375,10 @@ class WorkflowSelectionDialog(QDialog):
         self.suggestions = suggestions or {}
 
         title = QLabel("Add song to library")
-        title.setStyleSheet("font-size: 15pt; font-weight: 650; color: #18342a;")
+        title.setStyleSheet("font-size: 15pt; font-weight: 650; color: #142033;")
         description = QLabel("Confirm how this audio file should appear in the music library.")
         description.setWordWrap(True)
-        description.setStyleSheet("color: #68716b;")
+        description.setStyleSheet("color: #66758A;")
 
         form = QFormLayout()
         self.audio_edit = QLineEdit()

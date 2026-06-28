@@ -220,11 +220,11 @@ class SongPreviewCell(QWidget):
         self.progress_slider.setToolTip("Song position")
         self.progress_slider.setVisible(False)
         self.progress_slider.setStyleSheet(
-            "QSlider::groove:horizontal { height: 6px; background: #dce5df; border-radius: 3px; }"
-            "QSlider::sub-page:horizontal { background: #1870c8; border-radius: 3px; }"
-            "QSlider::add-page:horizontal { background: #dce5df; border-radius: 3px; }"
+            "QSlider::groove:horizontal { height: 6px; background: #DDE5EF; border-radius: 3px; }"
+            "QSlider::sub-page:horizontal { background: #0E56AA; border-radius: 3px; }"
+            "QSlider::add-page:horizontal { background: #DDE5EF; border-radius: 3px; }"
             "QSlider::handle:horizontal { width: 18px; height: 18px; margin: -6px 0; background: #ffffff; "
-            "border: 2px solid #0e54a9; border-radius: 9px; }"
+            "border: 2px solid #084481; border-radius: 9px; }"
         )
         self.progress_slider.sliderMoved.connect(self.seek_requested.emit)
         self.progress_slider.position_requested.connect(self.seek_requested.emit)
@@ -316,11 +316,11 @@ class SongPreviewCell(QWidget):
         self._apply_colors()
 
     def _apply_colors(self) -> None:
-        background = "#E7F6F5" if self._selected else "#FFFFFF"
-        foreground = "#087D80" if self._selected else "#142033"
-        button = "#087D80" if self._playing else "#66758A"
-        button_hover = "#066B6E" if self._playing else "#526173"
-        border = "#087D80" if self._selected else "#CDD8DC"
+        background = "#EAF2FC" if self._selected else "#FFFFFF"
+        foreground = "#0E56AA" if self._selected else "#142033"
+        button = "#0E56AA" if self._playing else "#66758A"
+        button_hover = "#084481" if self._playing else "#526173"
+        border = "#0E56AA" if self._selected else "#CDD8DC"
         self.setStyleSheet(f"QWidget#songPreviewCell {{ background: {background}; }}")
         self.title_label.setStyleSheet(f"background: transparent; color: {foreground}; font-weight: 500;")
         self.play_button.setStyleSheet(
@@ -1238,7 +1238,7 @@ class WorkspacePage(QWidget):
         w_layout.setSpacing(16)
 
         workflow_label = QLabel("Workflow")
-        workflow_label.setStyleSheet("font-weight: bold; color: #18342a;")
+        workflow_label.setStyleSheet("font-weight: bold; color: #142033;")
         
         self.workflow_combo = SoundtrackComboBox()
         self.workflow_combo.addItem("Epic Montage", WorkflowMode.EPIC_MONTAGE)
@@ -1296,7 +1296,7 @@ class WorkspacePage(QWidget):
         config_layout.setSpacing(16)
 
         export_label = QLabel("Export Resolution:")
-        export_label.setStyleSheet("font-weight: bold; color: #18342a;")
+        export_label.setStyleSheet("font-weight: bold; color: #142033;")
         config_layout.addWidget(export_label)
 
         self.source_export = VisibleCheckBox("Source resolution")
@@ -1335,7 +1335,7 @@ class WorkspacePage(QWidget):
 
         self.status_label = QLabel("Ready")
         self.status_label.setWordWrap(True)
-        self.status_label.setStyleSheet("font-size: 10.5pt; color: #354039;")
+        self.status_label.setStyleSheet("font-size: 10.5pt; color: #526173;")
         status_layout.addWidget(self.status_label)
 
         self.progress_bar = QProgressBar()
@@ -2408,7 +2408,7 @@ class AppSplashScreen(QWidget):
         logo_pixmap = QPixmap(str(logo_path))
         if logo_pixmap.isNull():
             self.logo_label.setText("E2DM2")
-            self.logo_label.setStyleSheet("font-size: 32pt; font-weight: bold; color: #246447;")
+            self.logo_label.setStyleSheet("font-size: 32pt; font-weight: bold; color: #0E56AA;")
         else:
             self.logo_label.setPixmap(logo_pixmap.scaled(
                 self.logo_label.size(),
@@ -2462,10 +2462,10 @@ class VisibleCheckBox(QCheckBox):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         enabled = self.isEnabled()
         checked = self.isChecked()
-        border_color = QColor("#246447" if enabled else "#aeb7b1")
-        fill_color = QColor("#246447" if checked and enabled else "#ffffff")
+        border_color = QColor("#0E56AA" if enabled else "#AEBEC4")
+        fill_color = QColor("#0E56AA" if checked and enabled else "#ffffff")
         if checked and not enabled:
-            fill_color = QColor("#aeb7b1")
+            fill_color = QColor("#AEBEC4")
 
         box = QRectF(indicator).adjusted(1, 1, -1, -1)
         painter.setPen(QPen(border_color, 1.5))
@@ -2726,9 +2726,9 @@ QPushButton#navButton:hover {
 }
 
 QPushButton#navButton[active="true"] {
-    background: #E7F6F5;
-    color: #087D80;
-    border-left: 4px solid #087D80;
+    background: #EAF2FC;
+    color: #0E56AA;
+    border-left: 4px solid #0E56AA;
     padding-left: 14px;
 }
 
@@ -2799,7 +2799,7 @@ QLabel#metricCaption {
 
 QLabel#heroSoundtrackTitle {
     background: transparent;
-    color: #087D80;
+    color: #0E56AA;
     font-size: 12pt;
     font-weight: 700;
 }
@@ -2826,7 +2826,7 @@ QTableWidget {
     border: 1px solid #DDE5E7;
     border-radius: 12px;
     gridline-color: transparent;
-    selection-background-color: #E7F6F5;
+    selection-background-color: #EAF2FC;
     selection-color: #142033;
 }
 
@@ -2909,7 +2909,7 @@ QComboBox QAbstractItemView {
     border: none;
     background-color: #FFFFFF;
     background: #FFFFFF;
-    selection-background-color: #E7F6F5;
+    selection-background-color: #EAF2FC;
     selection-color: #142033;
     outline: none;
     padding: 0px;
@@ -2933,8 +2933,8 @@ QHeaderView, QHeaderView::section {
 }
 
 QHeaderView::section:selected {
-    background: #E7F6F5;
-    color: #087D80;
+    background: #EAF2FC;
+    color: #0E56AA;
 }
 
 QTabWidget::pane {
@@ -2963,7 +2963,7 @@ QTabBar::tab {
 
 QTabBar::tab:selected {
     background: #FFFFFF;
-    color: #087D80;
+    color: #0E56AA;
     border: 1px solid #DDE5E7;
     border-bottom-color: #FFFFFF;
 }
@@ -2974,7 +2974,7 @@ QTableWidget::item {
 }
 
 QTableWidget::item:selected {
-    background: #E7F6F5;
+    background: #EAF2FC;
     color: #142033;
 }
 
@@ -3012,17 +3012,17 @@ QPushButton:disabled, QToolButton:disabled {
 }
 
 QPushButton#primaryButton {
-    background: #087D80;
+    background: #0E56AA;
     color: #FFFFFF;
-    border: 1px solid #087D80;
+    border: 1px solid #0E56AA;
     border-radius: 10px;
     padding: 12px 22px;
     font-weight: 700;
 }
 
 QPushButton#primaryButton:hover {
-    background: #066B6E;
-    border-color: #066B6E;
+    background: #084481;
+    border-color: #084481;
 }
 
 QPushButton#secondaryButton {
@@ -3084,14 +3084,14 @@ QProgressBar {
 }
 
 QProgressBar::chunk {
-    background: #087D80;
+    background: #0E56AA;
     border-radius: 8px;
 }
 
 QPlainTextEdit#backendLog {
-    background: #171b18;
-    color: #dce6df;
-    border: 1px solid #39433c;
+    background: #141B26;
+    color: #DDE5EF;
+    border: 1px solid #34445A;
     font-family: Consolas;
     font-size: 9pt;
 }
@@ -3121,7 +3121,7 @@ QFrame#optionsCard QLabel, QFrame#optionsCard QCheckBox {
     border: 0;
 }
 QLabel#optionsSection {
-    color: #087D80;
+    color: #0E56AA;
     font-size: 8.5pt;
     font-weight: 700;
 }
@@ -3147,7 +3147,7 @@ QCheckBox#splashScreenOption::indicator {
 /* Splash Screen Design */
 QFrame#splashCard {
     background-color: #FFFFFF;
-    border: 2px solid #087D80;
+    border: 2px solid #0E56AA;
     border-radius: 12px;
 }
 QFrame#splashCard QLabel {
@@ -3156,7 +3156,7 @@ QFrame#splashCard QLabel {
 QLabel#splashVersion {
     font-size: 11pt;
     font-weight: 600;
-    color: #087D80;
+    color: #0E56AA;
 }
 QLabel#splashStatus {
     font-size: 9.5pt;
@@ -3176,7 +3176,7 @@ QLabel#appTitle {
 }
 QLabel#shortName {
     font-size: 14pt;
-    color: #087D80;
+    color: #0E56AA;
     font-weight: 700;
 }
 QFrame#brandCard {
@@ -3221,15 +3221,15 @@ QAbstractItemView {
     alternate-background-color: #F7FAFA;
 }
 QAbstractItemView::item:selected {
-    background: #E7F6F5;
+    background: #EAF2FC;
     color: #142033;
 }
 QAbstractItemView::item:selected:active {
-    background: #E7F6F5;
+    background: #EAF2FC;
     color: #142033;
 }
 QAbstractItemView::item:selected:!active {
-    background: #E7F6F5;
+    background: #EAF2FC;
     color: #142033;
 }
 """

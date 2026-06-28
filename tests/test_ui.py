@@ -120,10 +120,10 @@ def test_hero_shows_created_then_selected_soundtrack_target_duration(qtbot, tmp_
             image.pixelColor(x, y)
             for x in range(image.width())
             for y in range(image.height())
-            if image.pixelColor(x, y).alpha() > 0
+                if image.pixelColor(x, y).alpha() > 200
         ]
         assert colored_pixels
-        assert all(color.green() >= color.red() for color in colored_pixels)
+        assert all(color.blue() > color.green() > color.red() for color in colored_pixels)
 
     selected_song_id = page.project.settings.song_id
     selected_song = next(song for song in page.songs if song.song_id == selected_song_id)
@@ -367,24 +367,24 @@ def test_new_project_and_workflow_changes_select_default_songs(qtbot, tmp_path):
     assert page.song_table.currentRow() == 0
     assert page.song_table.item(0, 0).data(Qt.ItemDataRole.UserRole) == "epic-montage-1"
     epic_cell = page.song_table.cellWidget(0, 0)
-    assert "background: #E7F6F5" in epic_cell.styleSheet()
-    assert "color: #087D80" in epic_cell.title_label.styleSheet()
+    assert "background: #EAF2FC" in epic_cell.styleSheet()
+    assert "color: #0E56AA" in epic_cell.title_label.styleSheet()
 
     page.workflow_combo.setCurrentIndex(page.workflow_combo.findData(WorkflowMode.FULL_LENGTH))
     first_full_length_id = page.full_song_table.item(0, 0).data(Qt.ItemDataRole.UserRole)
     assert page.full_song_table.currentRow() == 0
     assert project.settings.full_length_track_id == first_full_length_id
     full_cell = page.full_song_table.cellWidget(0, 0)
-    assert "background: #E7F6F5" in full_cell.styleSheet()
-    assert "color: #087D80" in full_cell.title_label.styleSheet()
+    assert "background: #EAF2FC" in full_cell.styleSheet()
+    assert "color: #0E56AA" in full_cell.title_label.styleSheet()
 
     page.workflow_combo.setCurrentIndex(page.workflow_combo.findData(WorkflowMode.REAL_ESTATE))
     first_real_estate_id = page.re_song_table.item(0, 0).data(Qt.ItemDataRole.UserRole)
     assert page.re_song_table.currentRow() == 0
     assert project.settings.song_id == first_real_estate_id
     real_estate_cell = page.re_song_table.cellWidget(0, 0)
-    assert "background: #E7F6F5" in real_estate_cell.styleSheet()
-    assert "color: #087D80" in real_estate_cell.title_label.styleSheet()
+    assert "background: #EAF2FC" in real_estate_cell.styleSheet()
+    assert "color: #0E56AA" in real_estate_cell.title_label.styleSheet()
 
 
 def test_song_row_preview_toggles_play_pause_and_progress(qtbot):
@@ -401,8 +401,8 @@ def test_song_row_preview_toggles_play_pause_and_progress(qtbot):
     assert cell.play_button.width() == cell.play_button.height() == 34
     assert cell.play_button.icon().actualSize(cell.play_button.iconSize()) == cell.play_button.iconSize()
     page.song_table.selectRow(0)
-    assert "color: #087D80" in cell.title_label.styleSheet()
-    assert "background: #E7F6F5" in cell.styleSheet()
+    assert "color: #0E56AA" in cell.title_label.styleSheet()
+    assert "background: #EAF2FC" in cell.styleSheet()
     assert cell.progress_slider.isHidden()
 
     qtbot.wait(50)
@@ -427,7 +427,7 @@ def test_song_row_preview_toggles_play_pause_and_progress(qtbot):
         min(rendered_cell.width() - 1, cell.play_button.geometry().right() + 6), 2,
     )
     assert transport_sample.name() == "#ffffff"
-    assert rendered_cell.pixelColor(2, 2).name() == "#e7f6f5"
+    assert rendered_cell.pixelColor(2, 2).name() == "#eaf2fc"
 
     qtbot.mouseClick(
         cell.progress_slider,

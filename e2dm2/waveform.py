@@ -316,13 +316,13 @@ class WaveformWidget(QWidget):
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-        painter.fillRect(self.rect(), QColor("#18201b"))
+        painter.fillRect(self.rect(), QColor("#151D29"))
         content = self.rect().adjusted(0, 18, 0, -20)
         center_y = content.center().y()
-        painter.setPen(QPen(QColor("#465149"), 1))
+        painter.setPen(QPen(QColor("#46566A"), 1))
         painter.drawLine(content.left(), center_y, content.right(), center_y)
         if self.loading:
-            painter.setPen(QColor("#dce6df"))
+            painter.setPen(QColor("#DDE5EF"))
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Analyzing waveform...")
             return
         if self.error:
@@ -330,7 +330,7 @@ class WaveformWidget(QWidget):
             painter.drawText(self.rect().adjusted(12, 0, -12, 0), Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap, self.error)
             return
         if not self.data:
-            painter.setPen(QColor("#9ba79f"))
+            painter.setPen(QColor("#94A3B8"))
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "No waveform")
             return
 
@@ -338,14 +338,14 @@ class WaveformWidget(QWidget):
         span = max(end - start, 0.001)
         seconds_per_pixel = span / max(self.width(), 1)
         first_grid = math.ceil(max(start, 0) / 5) * 5
-        painter.setPen(QPen(QColor("#2c3730"), 1))
+        painter.setPen(QPen(QColor("#273548"), 1))
         grid_time = first_grid
         while grid_time <= min(end, self.duration_seconds):
             x = (grid_time - start) / span * self.width()
             painter.drawLine(round(x), content.top(), round(x), content.bottom())
-            painter.setPen(QColor("#829087"))
+            painter.setPen(QColor("#7B8CA3"))
             painter.drawText(QRectF(x + 3, 1, 65, 16), f"{int(grid_time // 60)}:{grid_time % 60:04.1f}")
-            painter.setPen(QPen(QColor("#2c3730"), 1))
+            painter.setPen(QPen(QColor("#273548"), 1))
             grid_time += 5
 
         playhead_x = (
@@ -364,7 +364,7 @@ class WaveformWidget(QWidget):
                 amplitude = max(self.data.peaks[first:last], default=0.0)
             amplitude = amplitude ** 0.62
             half_height = max(1, amplitude * content.height() * 0.46)
-            color = QColor("#668477") if x < playhead_x else QColor("#72c49c")
+            color = QColor("#0A4DA5") if x < playhead_x else QColor("#2C7BD0")
             painter.setPen(QPen(color, 1))
             painter.drawLine(x, round(center_y - half_height), x, round(center_y + half_height))
 
@@ -413,7 +413,7 @@ class WaveformWidget(QWidget):
             painter.setPen(QPen(QColor("#ffffff"), 1, Qt.PenStyle.DotLine))
             painter.drawLine(round(self.hover_x), content.top(), round(self.hover_x), content.bottom())
             label_x = min(max(self.hover_x - 34, 2), self.width() - 70)
-            painter.fillRect(QRectF(label_x, content.bottom() - 18, 68, 17), QColor("#253129"))
+            painter.fillRect(QRectF(label_x, content.bottom() - 18, 68, 17), QColor("#203047"))
             painter.setPen(QColor("#ffffff"))
             painter.drawText(QRectF(label_x, content.bottom() - 18, 68, 17), Qt.AlignmentFlag.AlignCenter, self._time_text(hover_time))
 
