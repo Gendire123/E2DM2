@@ -55,6 +55,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QProgressBar,
+    QProgressDialog,
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
@@ -689,14 +690,34 @@ class WorkspacePage(QWidget):
 
     def _build_ui(self) -> None:
         self.back_button = self._tool_button(QStyle.StandardPixmap.SP_ArrowBack, "Back to projects", self.home_requested.emit)
-        self.project_title = QLabel("Project")
+        self.back_button.setVisible(False)
+        self.project_title = QLabel("Project Name")
         self.project_title.setObjectName("projectTitle")
+        self.project_title.setStyleSheet("font-size: 16pt; font-weight: bold; color: #18342a;")
+        
+        self.project_footage_label = QLabel("Combined Footage Duration: --")
+        self.project_footage_label.setStyleSheet("font-size: 10.5pt; color: #354039;")
+        
+        self.project_created_label = QLabel("Created: --")
+        self.project_created_label.setStyleSheet("font-size: 10.5pt; color: #68716b; font-style: italic;")
+        
+        self.project_music_label = QLabel("Soundtrack: --")
+        self.project_music_label.setStyleSheet("font-size: 10.5pt; color: #246447; font-weight: 500;")
+        
         self.project_path = QLabel()
         self.project_path.setObjectName("mutedLabel")
+        self.project_path.setVisible(False)
+        
+        info_layout = QVBoxLayout()
+        info_layout.setSpacing(4)
+        info_layout.addWidget(self.project_title)
+        info_layout.addWidget(self.project_footage_label)
+        info_layout.addWidget(self.project_created_label)
+        info_layout.addWidget(self.project_music_label)
+        
         header = QHBoxLayout()
-        header.addWidget(self.back_button)
-        header.addWidget(self.project_title)
-        header.addWidget(self.project_path, 1)
+        header.setSpacing(16)
+        header.addLayout(info_layout, 1)
 
         self.media_table = QTableWidget(0, 7)
         self.media_table.setHorizontalHeaderLabels(["Clip", "Marks", "Duration", "Resolution", "FPS", "Codec", "Size"])
@@ -821,9 +842,11 @@ class WorkspacePage(QWidget):
         export_label.setStyleSheet("font-weight: bold; color: #18342a;")
         config_layout.addWidget(export_label)
 
-        self.source_export = QCheckBox("Source resolution")
-        self.hd_export = QCheckBox("1080p maximum")
+        self.source_export = VisibleCheckBox("Source resolution")
+        self.hd_export = VisibleCheckBox("1080p maximum")
         self.source_export.setChecked(True)
+        self.source_export.toggled.connect(lambda checked: self.hd_export.setChecked(False) if checked else None)
+        self.hd_export.toggled.connect(lambda checked: self.source_export.setChecked(False) if checked else None)
         config_layout.addWidget(self.source_export)
         config_layout.addWidget(self.hd_export)
         config_layout.addStretch(1)
@@ -893,7 +916,7 @@ class WorkspacePage(QWidget):
 
         self.workspace_tabs = QTabWidget()
         self.workspace_tabs.addTab(media_panel, "Footage")
-        self.workspace_tabs.addTab(music_scroll, "Music")
+        self.workspace_tabs.addTab(music_scroll, "Soundtrack")
         self.workspace_tabs.addTab(produce_scroll, "Produce")
         self.workspace_tabs.currentChanged.connect(self._on_tab_changed)
 
@@ -1054,6 +1077,72 @@ class WorkspacePage(QWidget):
         layout.addWidget(self.custom_song_table)
         return panel
 
+    def _update_header_details(self) -> None:
+        if not self.project:
+            return
+        
+        # Line 1: Project Name
+        self.project_title.setText(self.project.settings.name)
+        
+        # Line 2: Combined file footage length time
+        media = self.project.settings.media
+        total_duration = sum(item.duration for item in media)
+        total_size = sum(item.size_bytes for item in media)
+        self.project_footage_label.setText(
+            f"Footage Duration: {_duration(total_duration)} ({len(media)} clip{'s' if len(media) != 1 else ''}) | {total_size / 1024 ** 3:.2f} GB"
+        )
+        
+        # Line 3: Project created date
+        created_dt = None
+        try:
+            created_dt = datetime.fromisoformat(str(self.project.settings.created_at).replace("Z", "+00:00"))
+            if created_dt.tzinfo is not None:
+                created_dt = created_dt.astimezone()
+        except (TypeError, ValueError):
+            if self.project.path:
+                try:
+                    file_timestamp = self.project.path.stat().st_ctime
+                    created_dt = datetime.fromtimestamp(file_timestamp).astimezone()
+                except OSError:
+                    pass
+        if created_dt:
+            created_str = created_dt.strftime("%B %d, %Y at %H:%M")
+        else:
+            created_str = "Unavailable"
+        self.project_created_label.setText(f"Created: {created_str}")
+
+        # Line 4: Music Selection information
+        workflow = self.workflow_combo.currentData()
+        song_id = None
+        if workflow == WorkflowMode.FULL_LENGTH:
+            song_id = self.project.settings.full_length_track_id
+        else:
+            song_id = self.project.settings.song_id
+
+        if not song_id:
+            music_str = "No soundtrack selected"
+        else:
+            song_title = None
+            song_artist = None
+            
+            song = next((s for s in self.songs if s.song_id == song_id), None)
+            if song:
+                song_title = song.title
+                song_artist = song.artist
+            elif workflow == WorkflowMode.FULL_LENGTH:
+                for track in FULL_LENGTH_TRACKS:
+                    if track.track_id == song_id:
+                        song_title = track.title
+                        song_artist = "E2DM2"
+                        break
+            
+            if song_title:
+                artist_info = f" by {song_artist}" if song_artist else ""
+                music_str = f"{song_title}{artist_info}"
+            else:
+                music_str = f"Unknown Soundtrack ({song_id})"
+        self.project_music_label.setText(f"Soundtrack: {music_str}")
+
     def _update_selected_music_card(self) -> None:
         if not self.project:
             self.selected_music_title_label.setText("No project loaded")
@@ -1089,6 +1178,8 @@ class WorkspacePage(QWidget):
             self.selected_music_title_label.setText(f"{song_title}{artist_info}{type_info}")
         else:
             self.selected_music_title_label.setText(f"Unknown Song ({song_id})")
+        
+        self._update_header_details()
 
     def set_project(self, project: Project) -> None:
         self.project = project
@@ -1132,6 +1223,7 @@ class WorkspacePage(QWidget):
         total_size = sum(item.size_bytes for item in media)
         self.media_total.setText(f"{len(media)} clips | {_duration(total_duration)} | {total_size / 1024 ** 3:.2f} GB ")
         self.media_total.setMinimumWidth(self.media_total.sizeHint().width())
+        self._update_header_details()
 
     def _install_song_preview(
         self,
@@ -1555,14 +1647,31 @@ class WorkspacePage(QWidget):
         self.worker = worker
         self._set_busy(True)
         self.status_label.setText("Copying footage into the project")
+
+        self.import_dialog = QProgressDialog("Copying footage into the project...", "Cancel", 0, 100, self)
+        self.import_dialog.setWindowTitle("Importing Footage")
+        self.import_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        self.import_dialog.setAutoClose(True)
+        self.import_dialog.setAutoReset(True)
+        self.import_dialog.canceled.connect(self.cancel_operation)
+        self.import_dialog.setValue(0)
+        self.import_dialog.show()
+
         LOGGER.info("UI started import for %d selected file(s)", len(paths))
         thread.start()
 
     def import_progress(self, percent: float, name: str) -> None:
-        self.progress_bar.setValue(round(percent))
+        val = round(percent)
+        self.progress_bar.setValue(val)
         self.status_label.setText(f"Importing {name}")
+        if hasattr(self, "import_dialog") and self.import_dialog:
+            self.import_dialog.setLabelText(f"Importing {name} ({val}%)")
+            self.import_dialog.setValue(val)
 
     def import_finished(self, imported) -> None:
+        if hasattr(self, "import_dialog") and self.import_dialog:
+            self.import_dialog.close()
+            self.import_dialog = None
         self.refresh_media()
         self.status_label.setText(f"Imported {len(imported)} clip(s)")
         self.progress_bar.setValue(100)
@@ -1729,6 +1838,9 @@ class WorkspacePage(QWidget):
             self.status_label.setText("Production failed. Open a failed result for details.")
 
     def operation_failed(self, message: str) -> None:
+        if hasattr(self, "import_dialog") and self.import_dialog:
+            self.import_dialog.close()
+            self.import_dialog = None
         self.status_label.setText(message)
         LOGGER.error("UI operation failed: %s", message)
         QMessageBox.critical(self, "Operation failed", message)
@@ -1739,6 +1851,9 @@ class WorkspacePage(QWidget):
             self.status_label.setText("Cancelling...")
 
     def thread_finished(self) -> None:
+        if hasattr(self, "import_dialog") and self.import_dialog:
+            self.import_dialog.close()
+            self.import_dialog = None
         if self.thread:
             self.thread.deleteLater()
         self.thread = None
@@ -1764,7 +1879,12 @@ class WorkspacePage(QWidget):
 
     def open_renders_folder(self) -> None:
         if self.project:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.project.path / "renders")))
+            custom_dir = QSettings().value("custom_output_folder", "")
+            if custom_dir:
+                renders_path = Path(custom_dir)
+            else:
+                renders_path = self.project.path / "renders"
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(renders_path)))
 
 
 class AppSplashScreen(QWidget):
@@ -1899,6 +2019,42 @@ class OptionsDialog(QDialog):
         card_layout.addSpacing(4)
         card_layout.addWidget(self.splash_checkbox)
 
+        card_layout.addSpacing(16)
+        
+        output_section = QLabel("OUTPUT")
+        output_section.setObjectName("optionsSection")
+        output_title = QLabel("Output directory")
+        output_title.setObjectName("optionTitle")
+        
+        output_desc = QLabel("Default: [Project Directory]/renders")
+        output_desc.setObjectName("optionDescription")
+        output_desc.setWordWrap(True)
+        
+        self.output_edit = QLineEdit()
+        self.output_edit.setReadOnly(True)
+        self.output_edit.setPlaceholderText("Using default output directory")
+        
+        custom_folder = self.settings.value("custom_output_folder", "")
+        if custom_folder:
+            self.output_edit.setText(custom_folder)
+            
+        self.browse_button = QPushButton("Browse...")
+        self.browse_button.clicked.connect(self._browse_output_folder)
+        
+        self.clear_button = QPushButton("Reset to Default")
+        self.clear_button.clicked.connect(self._clear_output_folder)
+        
+        output_row = QHBoxLayout()
+        output_row.addWidget(self.output_edit, 1)
+        output_row.addWidget(self.browse_button)
+        output_row.addWidget(self.clear_button)
+        
+        card_layout.addWidget(output_section)
+        card_layout.addWidget(output_title)
+        card_layout.addWidget(output_desc)
+        card_layout.addSpacing(4)
+        card_layout.addLayout(output_row)
+
         hint = QLabel("Changes are saved automatically and take effect the next time you launch E2DM2.")
         hint.setObjectName("optionsHint")
         hint.setWordWrap(True)
@@ -1917,6 +2073,21 @@ class OptionsDialog(QDialog):
 
     def _save_splash_preference(self, enabled: bool) -> None:
         self.settings.setValue(SHOW_SPLASH_SETTING, enabled)
+        self.settings.sync()
+
+    def _browse_output_folder(self) -> None:
+        current_dir = self.output_edit.text() or str(Path.home())
+        selected_dir = QFileDialog.getExistingDirectory(
+            self, "Select Output Folder", current_dir
+        )
+        if selected_dir:
+            self.output_edit.setText(selected_dir)
+            self.settings.setValue("custom_output_folder", selected_dir)
+            self.settings.sync()
+
+    def _clear_output_folder(self) -> None:
+        self.output_edit.clear()
+        self.settings.remove("custom_output_folder")
         self.settings.sync()
 
 
@@ -1941,6 +2112,9 @@ class MainWindow(QMainWindow):
         self.resizeDocks([self.log_dock], [120], Qt.Orientation.Vertical)
         self.log_dock.hide()
         view_menu = self.menuBar().addMenu("View")
+        self.home_action = view_menu.addAction("Home Screen")
+        self.home_action.triggered.connect(self.show_home)
+        view_menu.addSeparator()
         view_menu.addAction(self.log_dock.toggleViewAction())
         view_menu.addSeparator()
         self.options_action = view_menu.addAction("Options...")

@@ -57,6 +57,15 @@ def test_options_dialog_persists_splash_screen_preference(qtbot, tmp_path):
 
     assert not splash_screen_enabled(settings)
 
+    # Test output directory settings loading/saving
+    assert dialog.output_edit.text() == ""
+    assert settings.value("custom_output_folder", "") == ""
+
+    # Clear/reset
+    dialog._clear_output_folder()
+    assert dialog.output_edit.text() == ""
+    assert settings.value("custom_output_folder", "") == ""
+
 
 def test_background_import_worker_is_retained(qtbot, tmp_path):
     source = tmp_path / "worker-test.mp4"

@@ -193,6 +193,9 @@ def create_render_plan(
             mode_label = song.song_id if song else "full-length"
             output_id = f"{group_key}-{mode_label}-{export_size.value}"
             output_name = f"{stamp}_{_safe_name(project.settings.name)}_{mode_label}_{group_key}_{export_size.value}.mp4"
+            from PySide6.QtCore import QSettings
+            custom_dir = QSettings().value("custom_output_folder", "")
+            output_dir = Path(custom_dir) if custom_dir else project.path / "renders"
             outputs.append(RenderOutputPlan(
                 output_id=output_id,
                 group_key=group_key,
@@ -202,7 +205,7 @@ def create_render_plan(
                 fps=fps,
                 duration_seconds=output_duration,
                 export_size=export_size,
-                output_path=str(project.path / "renders" / output_name),
+                output_path=str(output_dir / output_name),
                 bitrate_kbps=_target_bitrate(media, width, height, fps),
                 segments=segments,
             ))
