@@ -8,14 +8,14 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QObject, QPoint, Qt, Signal, Slot
+from PySide6.QtCore import QAbstractAnimation, QObject, QPoint, Qt, Signal, Slot
 from PySide6.QtWidgets import QMessageBox
 
 from e2dm2.models import ClipSelection, MediaItem, RenderResult, SelectionType, WorkflowMode
 from e2dm2.preview import ClipPreviewDialog, SelectionTimeline, format_timecode, parse_timecode
 from e2dm2.editor import SongEditorDialog
 from e2dm2.entitlements import AlphaEntitlementProvider
-from e2dm2.ui import HomePage, MainWindow
+from e2dm2.ui import ClickSeekSlider, HomePage, MainWindow, SongPreviewCell
 from e2dm2.project import create_project
 from e2dm2.ui import WorkspacePage
 
@@ -98,9 +98,122 @@ def test_produce_coerces_qt_combo_data_to_workflow_enum(qtbot, tmp_path, monkeyp
     assert page.project.settings.workflow is WorkflowMode.EPIC_MONTAGE
 
 
+def test_full_length_workflow_uses_library_table_and_tracks_selection(qtbot, tmp_path):
+    page = WorkspacePage()
+    qtbot.addWidget(page)
+    project = create_project("Full Length Library", tmp_path / "projects")
+    page.set_project(project)
+
+    page.workflow_combo.setCurrentIndex(page.workflow_combo.findData(WorkflowMode.FULL_LENGTH))
+
+    assert page.mode_stack.currentWidget() is page.full_panel
+    assert page.full_song_search.placeholderText() == "Search songs, artists, or moods"
+    assert page.full_song_table.horizontalHeaderItem(0).text() == "Song"
+    assert page.full_song_table.rowCount() >= 4
+
+    target_row = next(
+        row
+        for row in range(page.full_song_table.rowCount())
+        if page.full_song_table.item(row, 0).data(Qt.ItemDataRole.UserRole) == "drone-music-2"
+    )
+    page.full_song_table.selectRow(target_row)
+    assert project.settings.full_length_track_id == "drone-music-2"
+
+
+def test_song_row_preview_toggles_play_pause_and_progress(qtbot):
+    from PySide6.QtMultimedia import QMediaPlayer
+
+    page = WorkspacePage()
+    qtbot.addWidget(page)
+    page.resize(900, 600)
+    page.workspace_tabs.setCurrentIndex(1)
+    page.show()
+    cell = page.song_table.cellWidget(0, 0)
+
+    assert isinstance(cell, SongPreviewCell)
+    assert cell.play_button.width() == cell.play_button.height() == 34
+    assert cell.play_button.icon().actualSize(cell.play_button.iconSize()) == cell.play_button.iconSize()
+    page.song_table.selectRow(0)
+    assert "color: #ffffff" in cell.title_label.styleSheet()
+    assert "background: #0e54a9" in cell.styleSheet()
+    assert cell.progress_slider.isHidden()
+
+    qtbot.wait(50)
+    resting_button_x = cell.play_button.x()
+    cell.play_button.click()
+    assert cell._progress_animation.state() == QAbstractAnimation.State.Running
+    qtbot.waitUntil(
+        lambda: page.song_preview_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState,
+        timeout=5000,
+    )
+    qtbot.waitUntil(
+        lambda: cell._progress_animation.state() == QAbstractAnimation.State.Stopped,
+        timeout=1000,
+    )
+    assert cell.play_button.toolTip() == "Stop"
+    assert not cell.progress_slider.isHidden()
+    assert cell.progress_slider.minimumHeight() >= 26
+    assert cell.progress_slider.maximum() > 0
+    assert cell.play_button.x() < resting_button_x
+    rendered_cell = cell.grab().toImage()
+    transport_sample = rendered_cell.pixelColor(
+        min(rendered_cell.width() - 1, cell.play_button.geometry().right() + 6), 2,
+    )
+    assert transport_sample.name() == "#fcfcfc"
+    assert rendered_cell.pixelColor(2, 2).name() == "#0e54a9"
+
+    qtbot.mouseClick(
+        cell.progress_slider,
+        Qt.MouseButton.LeftButton,
+        pos=QPoint(cell.progress_slider.width() * 3 // 5, cell.progress_slider.height() // 2),
+    )
+    target_position = cell.progress_slider.maximum() * 3 // 5
+    qtbot.waitUntil(
+        lambda: abs(page.song_preview_player.position() - target_position) < 1500,
+        timeout=5000,
+    )
+    assert page.song_preview_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
+
+    playing_button_x = cell.play_button.x()
+    cell.play_button.click()
+    assert cell._progress_animation.state() == QAbstractAnimation.State.Running
+    assert not cell.progress_slider.isHidden()
+    assert page.song_preview_player.playbackState() == QMediaPlayer.PlaybackState.StoppedState
+    qtbot.waitUntil(
+        lambda: cell._progress_animation.state() == QAbstractAnimation.State.Stopped,
+        timeout=1000,
+    )
+    assert cell.play_button.toolTip() == "Play"
+    assert cell.progress_slider.isHidden()
+    assert cell.play_button.x() > playing_button_x
+    assert abs(cell.play_button.x() - resting_button_x) <= 2
+    assert page.song_preview_player.position() == 0
+
+
+def test_click_seek_slider_emits_clicked_position(qtbot):
+    slider = ClickSeekSlider(Qt.Orientation.Horizontal)
+    qtbot.addWidget(slider)
+    slider.setRange(0, 1000)
+    slider.resize(400, 30)
+    slider.show()
+    requested = []
+    slider.position_requested.connect(requested.append)
+
+    qtbot.mouseClick(slider, Qt.MouseButton.LeftButton, pos=QPoint(300, 15))
+
+    assert requested
+    assert requested[-1] == pytest.approx(750, abs=5)
+    assert slider.value() == requested[-1]
+
+
 def test_cut_table_and_waveform_selection_stay_synchronized(qtbot):
     dialog = SongEditorDialog(AlphaEntitlementProvider())
     qtbot.addWidget(dialog)
+    epic_row = next(
+        row for row, song in enumerate(dialog.filtered_songs)
+        if song.song_id == "epic-montage-1"
+    )
+    dialog._load_selected(epic_row)
     dialog.current.readonly = False
     dialog._set_editable(True)
     dialog.cut_markers.select_row(3)
@@ -378,4 +491,3 @@ def test_splash_screen(qtbot):
     
     # The splash screen should start visible
     assert splash.isVisible()
-

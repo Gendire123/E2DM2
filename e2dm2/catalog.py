@@ -17,7 +17,6 @@ LOGGER = logging.getLogger(__name__)
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
-REPOSITORY_ROOT = PACKAGE_ROOT.parent
 BUILTIN_SONG_ROOT = PACKAGE_ROOT / "assets" / "songs"
 
 
@@ -27,13 +26,14 @@ class FullLengthTrack:
     title: str
     description: str
     path: Path
+    duration_seconds: float
 
 
 FULL_LENGTH_TRACKS = (
-    FullLengthTrack("drone-music-1", "Relaxing Piano", "Piano, relaxing, easy listening", REPOSITORY_ROOT / "dronemusic1.m4a"),
-    FullLengthTrack("drone-music-2", "Interstellar Theme", "Expansive cinematic theme", REPOSITORY_ROOT / "dronemusic2.m4a"),
-    FullLengthTrack("drone-music-3", "Inception Theme", "Dramatic cinematic theme", REPOSITORY_ROOT / "dronemusic3.m4a"),
-    FullLengthTrack("drone-music-4", "Relaxing Strings", "Calm orchestral strings", REPOSITORY_ROOT / "dronemusic4.m4a"),
+    FullLengthTrack("drone-music-1", "Relaxing Piano", "Piano, relaxing, easy listening", BUILTIN_SONG_ROOT / "drone-music-1" / "dronemusic1.m4a", 3626.446077),
+    FullLengthTrack("drone-music-2", "Interstellar Theme", "Expansive cinematic theme", BUILTIN_SONG_ROOT / "drone-music-2" / "dronemusic2.m4a", 3724.921905),
+    FullLengthTrack("drone-music-3", "Inception Theme", "Dramatic cinematic theme", BUILTIN_SONG_ROOT / "drone-music-3" / "dronemusic3.m4a", 3768.735188),
+    FullLengthTrack("drone-music-4", "Relaxing Strings", "Calm orchestral strings", BUILTIN_SONG_ROOT / "drone-music-4" / "dronemusic4.m4a", 2356.707667),
 )
 
 
@@ -237,9 +237,6 @@ def duplicate_song(song: SongManifest, song_id: str, title: str, library_root: P
 
 
 def full_length_track(track_id: str) -> FullLengthTrack:
-    for track in FULL_LENGTH_TRACKS:
-        if track.track_id == track_id:
-            return track
     try:
         songs = load_song_catalog()
         for song in songs:
@@ -252,4 +249,7 @@ def full_length_track(track_id: str) -> FullLengthTrack:
                 )
     except Exception:
         pass
+    for track in FULL_LENGTH_TRACKS:
+        if track.track_id == track_id:
+            return track
     raise KeyError(f"Unknown full-length soundtrack: {track_id}")

@@ -24,18 +24,22 @@ def test_builtin_catalog_and_filters():
     epic_2 = next(song for song in songs if song.song_id == "epic-montage-2")
     assert filter_songs(songs, mood="heartbeat") == [epic_2]
     assert filter_songs(songs, text="montage 1") == [epic_1]
-    assert filter_songs(songs, energy="high") == songs
+    assert epic_1 in filter_songs(songs, energy="high")
+    assert epic_2 in filter_songs(songs, energy="high")
 
 
 def test_epic_two_heartbeat_manifest():
-    song = load_song_catalog(custom_root=Path("missing-library"))[1]
+    song = next(
+        song for song in load_song_catalog(custom_root=Path("missing-library"))
+        if song.song_id == "epic-montage-2"
+    )
     assert song.heartbeat.opacity == pytest.approx(0.3)
     assert song.heartbeat.fade_seconds == pytest.approx(0.5)
     assert song.heartbeat.timestamps == []
 
 
 def test_duplicate_builtin_creates_editable_manifest(tmp_path):
-    original = load_song_catalog(custom_root=tmp_path)[0]
+    original = next(song for song in load_song_catalog(custom_root=tmp_path) if song.song_id == "epic-montage-1")
     duplicate = duplicate_song(original, "my-epic-song", "My Epic Song", tmp_path)
     assert duplicate.readonly
     assert duplicate.audio_path.is_file()
@@ -52,7 +56,10 @@ def test_malformed_manifest_is_rejected(tmp_path):
 
 
 def test_manifest_validation_rejects_timing_errors():
-    song = load_song_catalog(custom_root=Path("missing-library"))[0]
+    song = next(
+        song for song in load_song_catalog(custom_root=Path("missing-library"))
+        if song.song_id == "epic-montage-1"
+    )
     song.cut_timestamps = [1, 0, 1]
     errors = validate_song_manifest(song)
     assert any("begin at 0" in error for error in errors)
@@ -70,7 +77,7 @@ def test_save_builtin_song_is_allowed(tmp_path):
     import shutil
     from e2dm2.catalog import save_custom_song
     
-    song = load_song_catalog(custom_root=tmp_path)[0]
+    song = next(song for song in load_song_catalog(custom_root=tmp_path) if song.song_id == "epic-montage-1")
     temp_manifest_dir = tmp_path / "fake-builtin"
     temp_manifest_dir.mkdir()
     temp_manifest = temp_manifest_dir / "preset.json"
@@ -106,13 +113,15 @@ def test_song_manifest_effects_flow():
     assert any("number of effects must match" in error for error in errors)
     
     songs = load_song_catalog(custom_root=Path("missing-library"))
-    assert len(songs[0].effects) == 29
-    assert songs[0].effects[18] == "slow_fade_out"
-    assert songs[0].effects[19] == "flash"
-    assert songs[0].effects.count("none") == 27
-    
-    assert len(songs[1].effects) == 86
-    assert songs[1].effects.count("heartbeat") == 0
+    epic_1 = next(song for song in songs if song.song_id == "epic-montage-1")
+    epic_2 = next(song for song in songs if song.song_id == "epic-montage-2")
+    assert len(epic_1.effects) == 29
+    assert epic_1.effects[18] == "slow_fade_out"
+    assert epic_1.effects[19] == "flash"
+    assert epic_1.effects.count("none") == 27
+
+    assert len(epic_2.effects) == 86
+    assert epic_2.effects.count("heartbeat") == 0
 
 
 def test_delete_current_song(monkeypatch, tmp_path, qtbot):
@@ -125,7 +134,7 @@ def test_delete_current_song(monkeypatch, tmp_path, qtbot):
     library_dir.mkdir()
     
     songs = load_song_catalog(custom_root=library_dir)
-    original = songs[0]
+    original = next(song for song in songs if song.song_id == "epic-montage-1")
     duplicate = duplicate_song(original, "dup-song", "Duplicate Title", library_root=library_dir)
     
     dialog = SongEditorDialog(AlphaEntitlementProvider())
@@ -153,7 +162,7 @@ def test_rename_song_id(monkeypatch, tmp_path, qtbot):
     library_dir.mkdir()
     
     songs = load_song_catalog(custom_root=library_dir)
-    original = songs[0]
+    original = next(song for song in songs if song.song_id == "epic-montage-1")
     duplicate = duplicate_song(original, "dup-song", "Duplicate Title", library_root=library_dir)
     
     dialog = SongEditorDialog(AlphaEntitlementProvider())
@@ -259,4 +268,57 @@ def test_real_estate_song_dialog_workflow(monkeypatch, tmp_path, qtbot):
     assert dialog.current.artist == "E2DM2 Library"
 
 
+def test_filtered_library_locks_new_song_to_full_length(monkeypatch, tmp_path, qtbot):
+    from e2dm2.editor import SongEditorDialog, WorkflowSelectionDialog
+    from e2dm2.ui import AlphaEntitlementProvider
+    from e2dm2.models import WorkflowMode
+    from PySide6.QtWidgets import QDialog, QFileDialog
 
+    monkeypatch.setattr(
+        "e2dm2.editor.load_song_catalog",
+        lambda: load_song_catalog(custom_root=tmp_path / "missing-library"),
+    )
+    dialog = SongEditorDialog(AlphaEntitlementProvider(), workflow_filter=WorkflowMode.FULL_LENGTH)
+    qtbot.addWidget(dialog)
+    assert dialog.song_list.count() == 4
+    assert [song.song_id for song in dialog.filtered_songs] == [
+        "drone-music-1", "drone-music-2", "drone-music-3", "drone-music-4",
+    ]
+    assert all(dialog.song_list.item(row).text().endswith("  [built-in]") for row in range(4))
+    assert dialog.current.song_id == "drone-music-1"
+    assert dialog.audio_edit.text().endswith("e2dm2\\assets\\songs\\drone-music-1\\dronemusic1.m4a")
+    assert dialog.save_button.isEnabled()
+    assert dialog.title_edit.isEnabled()
+    assert dialog.artist_edit.isEnabled()
+    assert dialog.id_edit.isEnabled()
+    assert dialog.moods_edit.isEnabled()
+    assert dialog.energy_combo.isEnabled()
+    assert dialog.bpm_spin.isEnabled()
+    assert dialog.audio_edit.isEnabled()
+    assert dialog.audio_button.isEnabled()
+    assert dialog.total_spin.isEnabled()
+    assert dialog.minimum_source_spin.isEnabled()
+    assert dialog.opening_spin.isEnabled()
+    assert dialog.cuts_end_spin.isEnabled()
+    assert dialog.fade_out_spin.isEnabled()
+    assert dialog.escalation_spin.isEnabled()
+    assert dialog.transition_spin.isEnabled()
+    assert dialog.hard_cut_spin.isEnabled()
+    assert dialog.short_threshold_spin.isEnabled()
+    assert dialog.short_advance_spin.isEnabled()
+    assert not dialog.delete_button.isEnabled()
+    monkeypatch.setattr(dialog, "load_waveform", lambda *_args: None)
+    test_audio = tmp_path / "full_length_music.mp3"
+    test_audio.write_bytes(b"mock audio data")
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *args: (str(test_audio), "Audio"))
+
+    def accept_locked_workflow(workflow_dialog):
+        assert workflow_dialog.combo.currentData() == WorkflowMode.FULL_LENGTH.value
+        assert not workflow_dialog.combo.isEnabled()
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(WorkflowSelectionDialog, "exec", accept_locked_workflow)
+    dialog.new_song()
+
+    assert dialog.current is not None
+    assert dialog.current.workflow is WorkflowMode.FULL_LENGTH

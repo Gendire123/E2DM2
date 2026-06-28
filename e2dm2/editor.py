@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
 
 from .catalog import (
     BUILTIN_SONG_ROOT,
+    FULL_LENGTH_TRACKS,
     duplicate_song,
     load_song_catalog,
     probe_audio_duration,
@@ -401,6 +402,7 @@ class SongEditorDialog(QDialog):
         self.resize(1220, 700)
         self.entitlement = entitlement
         self.songs: list[SongManifest] = []
+        self.legacy_full_length_ids: set[str] = set()
         self.current: SongManifest | None = None
         self.audio_source: Path | None = None
         self.waveform_source = ""
@@ -591,12 +593,45 @@ class SongEditorDialog(QDialog):
             return [s for s in self.songs if s.workflow == self.workflow_filter]
         return self.songs
 
+    def _is_builtin_full_length(self, song: SongManifest) -> bool:
+        manifest_folder = song.manifest_path.parent.name if song.manifest_path else ""
+        return song.workflow == WorkflowMode.FULL_LENGTH and (
+            song.song_id in self.legacy_full_length_ids or manifest_folder in self.legacy_full_length_ids
+        )
+
     def reload_catalog(self, select_id: str | None = None) -> None:
         try:
             self.songs = load_song_catalog()
         except ValueError as exc:
             QMessageBox.critical(self, "Library error", str(exc))
             self.songs = []
+
+        self.legacy_full_length_ids = {track.track_id for track in FULL_LENGTH_TRACKS}
+        if self.workflow_filter == WorkflowMode.FULL_LENGTH:
+            catalog_ids = {song.song_id for song in self.songs}
+            for track in FULL_LENGTH_TRACKS:
+                if track.track_id in catalog_ids or (track.path.parent / "preset.json").is_file():
+                    continue
+                self.songs.append(SongManifest(
+                    schema_version=1,
+                    song_id=track.track_id,
+                    title=track.title,
+                    artist="E2DM2 built-in library",
+                    audio_file=str(track.path),
+                    moods=[track.description],
+                    bpm=None,
+                    energy=EnergyLevel.MEDIUM,
+                    total_duration_seconds=track.duration_seconds,
+                    minimum_source_duration_seconds=track.duration_seconds,
+                    opening_fade_seconds=0,
+                    cuts_end_seconds=track.duration_seconds,
+                    fade_out_seconds=0,
+                    escalation_seconds=0,
+                    cut_timestamps=[0],
+                    effects=["none"],
+                    workflow=WorkflowMode.FULL_LENGTH,
+                    readonly=True,
+                ))
             
         self.song_list.clear()
         selected_row = 0
@@ -614,7 +649,10 @@ class SongEditorDialog(QDialog):
             return
         song = songs[row]
         self.current = song
-        if not (song.manifest_path is None and hasattr(self, "audio_source") and self.audio_source and self.audio_source.is_absolute()):
+        is_legacy_full_length = self._is_builtin_full_length(song)
+        if is_legacy_full_length:
+            self.audio_source = song.audio_path
+        elif not (song.manifest_path is None and hasattr(self, "audio_source") and self.audio_source and self.audio_source.is_absolute()):
             self.audio_source = song.audio_path
         self.title_edit.setText(song.title)
         self.artist_edit.setText(song.artist)
@@ -623,7 +661,9 @@ class SongEditorDialog(QDialog):
         self.energy_combo.setCurrentText(song.energy.value.title())
         self.bpm_spin.setValue(song.bpm or 0)
         
-        if song.manifest_path is None:
+        if is_legacy_full_length:
+            display_path = song.audio_path
+        elif song.manifest_path is None:
             # Predict the target path to show in the UI
             from .catalog import BUILTIN_SONG_ROOT, custom_library_root
             root = BUILTIN_SONG_ROOT if song.readonly else custom_library_root()
@@ -644,11 +684,20 @@ class SongEditorDialog(QDialog):
         self.short_advance_spin.setValue(song.source_progression.short_cut_advance_seconds)
         self.cut_markers.set_values_and_effects(song.cut_timestamps, song.effects)
         self.player.setSource(QUrl.fromLocalFile(str(song.audio_path)))
-        self.load_waveform(song.audio_path)
+        if is_legacy_full_length:
+            self.waveform_source = ""
+            self.waveform.set_error("Cut markers are not used by built-in full-length tracks.")
+        else:
+            self.load_waveform(song.audio_path)
         # For now, built-in songs CAN be edited (cuts, effects values, etc.)
-        can_edit = self.entitlement.has_feature(PRESET_EDITOR_FEATURE)
-        self._set_editable(can_edit)
-        self.status_label.setText("Built-in preset (Editable for now)" if song.readonly else "Custom preset")
+        allowed = self.entitlement.has_feature(PRESET_EDITOR_FEATURE)
+        self._set_editable(allowed)
+        self.duplicate_button.setEnabled(allowed and not is_legacy_full_length)
+        self.delete_button.setEnabled(allowed and not is_legacy_full_length)
+        if is_legacy_full_length:
+            self.status_label.setText("Built-in full-length track (Editable for now)")
+        else:
+            self.status_label.setText("Built-in preset (Editable for now)" if song.readonly else "Custom preset")
 
     def _set_editable(self, editable: bool) -> None:
         controls = [
@@ -699,6 +748,10 @@ class SongEditorDialog(QDialog):
             return
         
         wf_dialog = WorkflowSelectionDialog(self)
+        if self.workflow_filter is not None:
+            workflow_index = wf_dialog.combo.findData(self.workflow_filter.value)
+            wf_dialog.combo.setCurrentIndex(max(0, workflow_index))
+            wf_dialog.combo.setEnabled(False)
         if wf_dialog.exec() != QDialog.DialogCode.Accepted:
             return
         
@@ -933,7 +986,12 @@ class SongEditorDialog(QDialog):
             return
         try:
             old_manifest_path = None
-            if self.current and self.current.manifest_path and self.current.song_id != song.song_id:
+            if (
+                self.current
+                and self.current.manifest_path
+                and self.current.song_id != song.song_id
+                and not self._is_builtin_full_length(self.current)
+            ):
                 old_manifest_path = self.current.manifest_path
                 song.manifest_path = None
             

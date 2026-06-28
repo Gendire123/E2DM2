@@ -57,7 +57,10 @@ def test_epic_two_filter_contains_all_heartbeat_effects():
 
 
 def test_too_little_source_is_rejected():
-    song = load_song_catalog(custom_root=Path("missing-library"))[1]
+    song = next(
+        song for song in load_song_catalog(custom_root=Path("missing-library"))
+        if song.song_id == "epic-montage-2"
+    )
     with pytest.raises(ValueError, match="too short"):
         build_montage_segment_plan(200, song)
 

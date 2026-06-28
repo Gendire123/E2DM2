@@ -4,8 +4,34 @@ import logging
 import shutil
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QSize, QThread, QTimer, Qt, QUrl, Signal, Slot
-from PySide6.QtGui import QCloseEvent, QCursor, QDesktopServices, QGuiApplication, QPixmap, QShowEvent
+from PySide6.QtCore import (
+    QEasingCurve,
+    QPointF,
+    QPropertyAnimation,
+    QRectF,
+    QObject,
+    QSize,
+    QThread,
+    QTimer,
+    Qt,
+    QUrl,
+    Signal,
+    Slot,
+)
+from PySide6.QtGui import (
+    QCloseEvent,
+    QColor,
+    QCursor,
+    QDesktopServices,
+    QGuiApplication,
+    QIcon,
+    QMouseEvent,
+    QPainter,
+    QPixmap,
+    QPolygonF,
+    QShowEvent,
+)
+from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -27,9 +53,11 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
+    QSlider,
     QSplitter,
     QStackedWidget,
     QStyle,
+    QStyleOptionSlider,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -64,6 +92,201 @@ LOGGER = logging.getLogger(__name__)
 def _duration(value: float) -> str:
     minutes = int(value // 60)
     return f"{minutes}:{value - minutes * 60:05.2f}"
+
+
+def _song_transport_icon(stopping: bool) -> QIcon:
+    pixmap = QPixmap(24, 24)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor("#ffffff"))
+    if stopping:
+        painter.drawRoundedRect(QRectF(6, 6, 12, 12), 1.5, 1.5)
+    else:
+        painter.drawPolygon(QPolygonF([QPointF(7, 4), QPointF(19, 12), QPointF(7, 20)]))
+    painter.end()
+    return QIcon(pixmap)
+
+
+class ClickSeekSlider(QSlider):
+    position_requested = Signal(int)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() != Qt.MouseButton.LeftButton:
+            super().mousePressEvent(event)
+            return
+
+        option = QStyleOptionSlider()
+        self.initStyleOption(option)
+        handle = self.style().subControlRect(
+            QStyle.ComplexControl.CC_Slider,
+            option,
+            QStyle.SubControl.SC_SliderHandle,
+            self,
+        )
+        if handle.contains(event.position().toPoint()):
+            super().mousePressEvent(event)
+            return
+
+        if self.orientation() == Qt.Orientation.Horizontal:
+            offset = round(event.position().x())
+            span = max(1, self.width())
+        else:
+            offset = round(event.position().y())
+            span = max(1, self.height())
+        value = QStyle.sliderValueFromPosition(
+            self.minimum(), self.maximum(), offset, span, option.upsideDown,
+        )
+        self.setValue(value)
+        self.position_requested.emit(value)
+        event.accept()
+
+
+class SongPreviewCell(QWidget):
+    play_requested = Signal()
+    seek_requested = Signal(int)
+
+    def __init__(self, title: str, duration_seconds: float, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("songPreviewCell")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self._playing = False
+        self._selected = False
+        self._transport_visible = False
+        self._animation_direction: str | None = None
+        self._progress_animation = QPropertyAnimation(self)
+        self._progress_animation.setTargetObject(None)
+        self.title_label = QLabel(title)
+        self.play_button = QToolButton()
+        self.play_button.setFixedSize(34, 34)
+        self.play_button.setIconSize(QSize(24, 24))
+        self.play_button.setToolTip("Play")
+        self.play_button.setAccessibleName(f"Play {title}")
+        self.play_button.setIcon(_song_transport_icon(False))
+        self.play_button.clicked.connect(self.play_requested.emit)
+
+        self.progress_slider = ClickSeekSlider(Qt.Orientation.Horizontal)
+        self.progress_slider.setRange(0, max(1, round(duration_seconds * 1000)))
+        self.progress_slider.setMinimumHeight(26)
+        self.progress_slider.setToolTip("Song position")
+        self.progress_slider.setVisible(False)
+        self.progress_slider.setStyleSheet(
+            "QSlider::groove:horizontal { height: 6px; background: #dce5df; border-radius: 3px; }"
+            "QSlider::sub-page:horizontal { background: #1870c8; border-radius: 3px; }"
+            "QSlider::add-page:horizontal { background: #dce5df; border-radius: 3px; }"
+            "QSlider::handle:horizontal { width: 18px; height: 18px; margin: -6px 0; background: #ffffff; "
+            "border: 2px solid #0e54a9; border-radius: 9px; }"
+        )
+        self.progress_slider.sliderMoved.connect(self.seek_requested.emit)
+        self.progress_slider.position_requested.connect(self.seek_requested.emit)
+        self._progress_animation.setTargetObject(self.progress_slider)
+        self._progress_animation.setPropertyName(b"maximumWidth")
+        self._progress_animation.setDuration(240)
+        self._progress_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._progress_animation.finished.connect(self._progress_expansion_finished)
+        self._progress_animation.valueChanged.connect(lambda _value: self.update())
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setSpacing(7)
+        layout.addWidget(self.title_label)
+        layout.addWidget(self.play_button)
+        layout.addWidget(self.progress_slider, 1)
+        self._apply_colors()
+
+    def set_playing(self, playing: bool, animate: bool = True) -> None:
+        was_playing = self._playing
+        self._playing = playing
+        action = "Stop" if playing else "Play"
+        self.play_button.setIcon(_song_transport_icon(playing))
+        self.play_button.setToolTip(action)
+        self.play_button.setAccessibleName(f"{action} {self.title_label.text()}")
+        if playing and not was_playing:
+            self._animate_progress_expansion()
+        elif not playing and was_playing and animate:
+            self._animate_progress_collapse()
+        elif not playing:
+            self._progress_animation.stop()
+            self._animation_direction = None
+            self._transport_visible = False
+            self.progress_slider.setVisible(False)
+            self.progress_slider.setMaximumWidth(16777215)
+        self._apply_colors()
+
+    def _animate_progress_expansion(self) -> None:
+        self._progress_animation.stop()
+        start_width = self.progress_slider.width() if self.progress_slider.isVisible() else 0
+        self._transport_visible = True
+        self.progress_slider.setMaximumWidth(16777215)
+        self.progress_slider.setVisible(True)
+        if self.layout() is not None:
+            self.layout().activate()
+        target_width = max(self.progress_slider.sizeHint().width(), self.progress_slider.width())
+        self.progress_slider.setMaximumWidth(start_width)
+        if self.layout() is not None:
+            self.layout().activate()
+        self._animation_direction = "expand"
+        self._progress_animation.setStartValue(start_width)
+        self._progress_animation.setEndValue(target_width)
+        self._progress_animation.start()
+
+    def _animate_progress_collapse(self) -> None:
+        self._progress_animation.stop()
+        self._transport_visible = True
+        self.progress_slider.setVisible(True)
+        current_width = self.progress_slider.width()
+        self.progress_slider.setMaximumWidth(current_width)
+        self._animation_direction = "collapse"
+        self._progress_animation.setStartValue(current_width)
+        self._progress_animation.setEndValue(0)
+        self._progress_animation.start()
+
+    def _progress_expansion_finished(self) -> None:
+        direction = self._animation_direction
+        self._animation_direction = None
+        if direction == "expand" and self._playing:
+            self.progress_slider.setMaximumWidth(16777215)
+        elif direction == "collapse" and not self._playing:
+            self.progress_slider.setVisible(False)
+            self.progress_slider.setMaximumWidth(16777215)
+            self._transport_visible = False
+            self.update()
+
+    def set_position(self, position: int) -> None:
+        if not self.progress_slider.isSliderDown():
+            self.progress_slider.setValue(position)
+
+    def set_duration(self, duration: int) -> None:
+        if duration > 0:
+            self.progress_slider.setMaximum(duration)
+
+    def set_selected(self, selected: bool) -> None:
+        self._selected = selected
+        self._apply_colors()
+
+    def _apply_colors(self) -> None:
+        background = "#0e54a9" if self._selected else "#fcfcfc"
+        foreground = "#ffffff" if self._selected else "#18342a"
+        button = "#1870c8" if self._playing else "#0e54a9"
+        button_hover = "#0d5fae" if self._playing else "#083d7d"
+        border = "#f5faf7" if self._selected and not self._playing else "#b9c8c0"
+        self.setStyleSheet(f"QWidget#songPreviewCell {{ background: {background}; }}")
+        self.title_label.setStyleSheet(f"background: transparent; color: {foreground}; font-weight: 500;")
+        self.play_button.setStyleSheet(
+            f"QToolButton {{ border: 2px solid {border}; border-radius: 17px; background: {button}; padding: 3px; }}"
+            f"QToolButton:hover {{ background: {button_hover}; border-color: #ffffff; }}"
+            f"QToolButton:pressed {{ background: {button_hover}; }}"
+        )
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        if self._transport_visible:
+            transport_left = max(0, self.play_button.geometry().left() - 5)
+            painter = QPainter(self)
+            painter.fillRect(transport_left, 0, self.width() - transport_left, self.height(), QColor("#fcfcfc"))
+            painter.end()
 
 
 class CompactPageStack(QStackedWidget):
@@ -340,6 +563,17 @@ class WorkspacePage(QWidget):
         self.worker: QObject | None = None
         self.cancellation: CancellationToken | None = None
         self.entitlement = AlphaEntitlementProvider()
+        self.song_preview_player = QMediaPlayer(self)
+        self.song_preview_audio = QAudioOutput(self)
+        self.song_preview_audio.setVolume(0.7)
+        self.song_preview_player.setAudioOutput(self.song_preview_audio)
+        self.song_preview_player.positionChanged.connect(self._song_preview_position_changed)
+        self.song_preview_player.durationChanged.connect(self._song_preview_duration_changed)
+        self.song_preview_player.mediaStatusChanged.connect(self._song_preview_status_changed)
+        self.song_preview_player.errorOccurred.connect(self._song_preview_failed)
+        self.active_song_preview_id: str | None = None
+        self.active_song_preview_cell: SongPreviewCell | None = None
+        self.home_requested.connect(self.stop_song_preview)
         self._build_ui()
         self.refresh_catalog()
 
@@ -568,6 +802,7 @@ class WorkspacePage(QWidget):
         self.song_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.song_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.song_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.song_table.verticalHeader().setDefaultSectionSize(42)
         self.song_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         for column in range(1, 4):
             self.song_table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
@@ -580,10 +815,35 @@ class WorkspacePage(QWidget):
 
     def _full_panel(self) -> QWidget:
         panel = QWidget()
-        self.track_combo = QComboBox()
-        layout = QFormLayout(panel)
-        layout.setContentsMargins(0, 18, 0, 8)
-        layout.addRow("Soundtrack", self.track_combo)
+        self.full_song_search = QLineEdit()
+        self.full_song_search.setPlaceholderText("Search songs, artists, or moods")
+        self.full_song_search.textChanged.connect(self.apply_song_filters)
+        self.full_mood_filter = QComboBox()
+        self.full_energy_filter = QComboBox()
+        self.full_mood_filter.currentIndexChanged.connect(self.apply_song_filters)
+        self.full_energy_filter.addItems(["All energies", "Low", "Medium", "High"])
+        self.full_energy_filter.currentIndexChanged.connect(self.apply_song_filters)
+        manage = QPushButton("Manage Library")
+        manage.clicked.connect(self.open_library)
+        filters = QHBoxLayout()
+        filters.addWidget(self.full_song_search, 1)
+        filters.addWidget(self.full_mood_filter)
+        filters.addWidget(self.full_energy_filter)
+        filters.addWidget(manage)
+        self.full_song_table = QTableWidget(0, 4)
+        self.full_song_table.setHorizontalHeaderLabels(["Song", "Mood", "Cuts", "Length"])
+        self.full_song_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.full_song_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.full_song_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.full_song_table.verticalHeader().setDefaultSectionSize(42)
+        self.full_song_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for column in range(1, 4):
+            self.full_song_table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        self.full_song_table.itemSelectionChanged.connect(self.song_selected)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 8, 0, 8)
+        layout.addLayout(filters)
+        layout.addWidget(self.full_song_table)
         return panel
 
     def _real_estate_panel(self) -> QWidget:
@@ -608,6 +868,7 @@ class WorkspacePage(QWidget):
         self.re_song_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.re_song_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.re_song_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.re_song_table.verticalHeader().setDefaultSectionSize(42)
         self.re_song_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         for column in range(1, 4):
             self.re_song_table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
@@ -624,8 +885,6 @@ class WorkspacePage(QWidget):
         self.project_path.setText(str(project.path))
         workflow_index = self.workflow_combo.findData(project.settings.workflow)
         self.workflow_combo.setCurrentIndex(max(0, workflow_index))
-        track_index = self.track_combo.findData(project.settings.full_length_track_id)
-        self.track_combo.setCurrentIndex(max(0, track_index))
         self.source_export.setChecked(ExportSize.SOURCE in project.settings.exports)
         self.hd_export.setChecked(ExportSize.HD_1080 in project.settings.exports)
         self.refresh_media()
@@ -660,25 +919,113 @@ class WorkspacePage(QWidget):
         self.media_total.setText(f"{len(media)} clips | {_duration(total_duration)} | {total_size / 1024 ** 3:.2f} GB ")
         self.media_total.setMinimumWidth(self.media_total.sizeHint().width())
 
+    def _install_song_preview(
+        self,
+        table: QTableWidget,
+        row: int,
+        song_id: str,
+        title: str,
+        audio_path: Path,
+        duration_seconds: float,
+    ) -> None:
+        cell = SongPreviewCell(title, duration_seconds, table)
+        cell.play_requested.connect(
+            lambda: self.toggle_song_preview(song_id, audio_path, cell, table, row)
+        )
+        cell.seek_requested.connect(lambda position: self.seek_song_preview(song_id, position))
+        table.setCellWidget(row, 0, cell)
+
+    def toggle_song_preview(
+        self,
+        song_id: str,
+        audio_path: Path,
+        cell: SongPreviewCell,
+        table: QTableWidget,
+        row: int,
+    ) -> None:
+        table.selectRow(row)
+        if self.active_song_preview_id == song_id and self.active_song_preview_cell is cell:
+            if cell._playing:
+                self.song_preview_player.stop()
+                cell.set_position(0)
+                cell.set_playing(False)
+                self.active_song_preview_id = None
+                self.active_song_preview_cell = None
+            else:
+                cell.set_playing(True)
+                self.song_preview_player.play()
+            return
+
+        self.stop_song_preview()
+        if not audio_path.is_file():
+            self.status_label.setText(f"Song file is missing: {audio_path}")
+            return
+        self.active_song_preview_id = song_id
+        self.active_song_preview_cell = cell
+        cell.set_position(0)
+        cell.set_playing(True)
+        self.song_preview_player.setSource(QUrl.fromLocalFile(str(audio_path)))
+        self.song_preview_player.play()
+
+    def seek_song_preview(self, song_id: str, position: int) -> None:
+        if song_id == self.active_song_preview_id:
+            self.song_preview_player.setPosition(position)
+            if self.song_preview_player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
+                if self.active_song_preview_cell is not None:
+                    self.active_song_preview_cell.set_playing(True)
+                self.song_preview_player.play()
+
+    def stop_song_preview(self, animate: bool = False) -> None:
+        self.song_preview_player.stop()
+        if self.active_song_preview_cell is not None:
+            try:
+                self.active_song_preview_cell.set_playing(False, animate=animate)
+                self.active_song_preview_cell.set_position(0)
+            except RuntimeError:
+                pass
+        self.active_song_preview_id = None
+        self.active_song_preview_cell = None
+
+    def _song_preview_position_changed(self, position: int) -> None:
+        if self.active_song_preview_cell is not None:
+            try:
+                self.active_song_preview_cell.set_position(position)
+            except RuntimeError:
+                self.active_song_preview_cell = None
+
+    def _song_preview_duration_changed(self, duration: int) -> None:
+        if self.active_song_preview_cell is not None:
+            try:
+                self.active_song_preview_cell.set_duration(duration)
+            except RuntimeError:
+                self.active_song_preview_cell = None
+
+    def _song_preview_status_changed(self, status: QMediaPlayer.MediaStatus) -> None:
+        if status == QMediaPlayer.MediaStatus.EndOfMedia and self.active_song_preview_cell is not None:
+            self.active_song_preview_cell.set_position(0)
+            self.active_song_preview_cell.set_playing(False)
+
+    def _song_preview_failed(self, *_args) -> None:
+        message = self.song_preview_player.errorString() or "The song could not be played."
+        if hasattr(self, "status_label"):
+            self.status_label.setText(message)
+        self.stop_song_preview()
+
+    @staticmethod
+    def _update_preview_selection(table: QTableWidget) -> None:
+        current_row = table.currentRow()
+        for row in range(table.rowCount()):
+            cell = table.cellWidget(row, 0)
+            if isinstance(cell, SongPreviewCell):
+                cell.set_selected(row == current_row)
+
     def refresh_catalog(self, selected_id: str | None = None) -> None:
+        self.stop_song_preview()
         try:
             self.songs = load_song_catalog()
         except ValueError as exc:
             self.songs = []
-            QMessageBox.critical(self, "Epic library error", str(exc))
-            
-        if hasattr(self, "track_combo"):
-            current_track_id = self.track_combo.currentData()
-            self.track_combo.blockSignals(True)
-            self.track_combo.clear()
-            for track in FULL_LENGTH_TRACKS:
-                self.track_combo.addItem(f"{track.title} - {track.description}", track.track_id)
-            full_length_presets = [s for s in self.songs if s.workflow == WorkflowMode.FULL_LENGTH]
-            for song in full_length_presets:
-                self.track_combo.addItem(f"{song.title} - {song.artist}", song.song_id)
-            index = self.track_combo.findData(current_track_id)
-            self.track_combo.setCurrentIndex(max(0, index))
-            self.track_combo.blockSignals(False)
+            QMessageBox.critical(self, "Music library error", str(exc))
 
         # Epic Montage moods & filter
         moods = sorted({mood for song in self.songs if song.workflow == WorkflowMode.EPIC_MONTAGE for mood in song.moods}, key=str.casefold)
@@ -692,6 +1039,19 @@ class WorkspacePage(QWidget):
             index = self.mood_filter.findText(current_mood)
             self.mood_filter.setCurrentIndex(max(0, index))
             self.mood_filter.blockSignals(False)
+
+        # Full-length Video moods & filter
+        full_moods = sorted({mood for song in self.songs if song.workflow == WorkflowMode.FULL_LENGTH for mood in song.moods}, key=str.casefold)
+        current_full_mood = self.full_mood_filter.currentText() if hasattr(self, "full_mood_filter") else "All moods"
+        if hasattr(self, "full_mood_filter"):
+            self.full_mood_filter.blockSignals(True)
+            self.full_mood_filter.clear()
+            self.full_mood_filter.addItem("All moods", "")
+            for mood in full_moods:
+                self.full_mood_filter.addItem(mood.title(), mood)
+            index = self.full_mood_filter.findText(current_full_mood)
+            self.full_mood_filter.setCurrentIndex(max(0, index))
+            self.full_mood_filter.blockSignals(False)
             
         # Real Estate Showcase moods & filter
         re_moods = sorted({mood for song in self.songs if song.workflow == WorkflowMode.REAL_ESTATE for mood in song.moods}, key=str.casefold)
@@ -729,6 +1089,9 @@ class WorkspacePage(QWidget):
                         item.setData(Qt.ItemDataRole.UserRole, song.song_id)
                         item.setToolTip(f"{song.artist}\nMinimum footage: {_duration(song.minimum_source_duration_seconds)}")
                     self.song_table.setItem(row, column, item)
+                self._install_song_preview(
+                    self.song_table, row, song.song_id, song.title, song.audio_path, song.total_duration_seconds,
+                )
                 if song.song_id == current_id:
                     selected_row = row
             if selected_row < 0 and filtered:
@@ -736,7 +1099,56 @@ class WorkspacePage(QWidget):
             if selected_row >= 0:
                 self.song_table.selectRow(selected_row)
 
-        # 2. Real Estate Showcase filter
+        # 2. Full-length Video filter. Legacy tracks remain available beside
+        # songs added through the managed catalog.
+        if hasattr(self, "full_mood_filter"):
+            selected_track_id = (
+                self.project.settings.full_length_track_id if self.project else "drone-music-1"
+            )
+            full_mood = self.full_mood_filter.currentData() or ""
+            full_energy = "" if self.full_energy_filter.currentIndex() == 0 else self.full_energy_filter.currentText().lower()
+            text = self.full_song_search.text().strip().casefold()
+            rows: list[tuple[str, str, str, str, str, Path, float]] = []
+            full_songs = [s for s in self.songs if s.workflow == WorkflowMode.FULL_LENGTH]
+            managed_ids = {song.song_id for song in full_songs}
+            if not full_mood and not full_energy:
+                for track in FULL_LENGTH_TRACKS:
+                    if track.track_id in managed_ids or (track.path.parent / "preset.json").is_file():
+                        continue
+                    if not text or text in f"{track.title} {track.description}".casefold():
+                        rows.append((
+                            track.track_id, track.title, track.description, "Full video",
+                            _duration(track.duration_seconds), track.path, track.duration_seconds,
+                        ))
+            for song in filter_songs(full_songs, self.full_song_search.text(), full_mood, full_energy):
+                rows.append((
+                    song.song_id,
+                    song.title,
+                    ", ".join(song.moods),
+                    str(len(song.cut_timestamps)),
+                    _duration(song.total_duration_seconds),
+                    song.audio_path,
+                    song.total_duration_seconds,
+                ))
+            self.full_song_table.setRowCount(len(rows))
+            selected_full_row = -1
+            for row, (track_id, title, mood, cuts, length, audio_path, duration_seconds) in enumerate(rows):
+                for column, value in enumerate((title, mood, cuts, length)):
+                    item = QTableWidgetItem(value)
+                    if column == 0:
+                        item.setData(Qt.ItemDataRole.UserRole, track_id)
+                    self.full_song_table.setItem(row, column, item)
+                self._install_song_preview(
+                    self.full_song_table, row, track_id, title, audio_path, duration_seconds,
+                )
+                if track_id == selected_track_id:
+                    selected_full_row = row
+            if selected_full_row < 0 and rows:
+                selected_full_row = 0
+            if selected_full_row >= 0:
+                self.full_song_table.selectRow(selected_full_row)
+
+        # 3. Real Estate Showcase filter
         if hasattr(self, "re_mood_filter"):
             re_mood = self.re_mood_filter.currentData() or ""
             re_energy = "" if self.re_energy_filter.currentIndex() == 0 else self.re_energy_filter.currentText().lower()
@@ -752,6 +1164,9 @@ class WorkspacePage(QWidget):
                         item.setData(Qt.ItemDataRole.UserRole, song.song_id)
                         item.setToolTip(f"{song.artist}\nMinimum footage: {_duration(song.minimum_source_duration_seconds)}")
                     self.re_song_table.setItem(row, column, item)
+                self._install_song_preview(
+                    self.re_song_table, row, song.song_id, song.title, song.audio_path, song.total_duration_seconds,
+                )
                 if song.song_id == current_id:
                     selected_re_row = row
             if selected_re_row < 0 and re_filtered:
@@ -760,9 +1175,11 @@ class WorkspacePage(QWidget):
                 self.re_song_table.selectRow(selected_re_row)
 
     def song_selected(self) -> None:
+        sender = self.sender()
+        if sender in (self.song_table, self.full_song_table, self.re_song_table):
+            self._update_preview_selection(sender)
         if not self.project:
             return
-        sender = self.sender()
         if sender == self.song_table:
             row = self.song_table.currentRow()
             item = self.song_table.item(row, 0) if row >= 0 else None
@@ -773,8 +1190,14 @@ class WorkspacePage(QWidget):
             item = self.re_song_table.item(row, 0) if row >= 0 else None
             if item:
                 self.project.settings.song_id = item.data(Qt.ItemDataRole.UserRole)
+        elif sender == self.full_song_table:
+            row = self.full_song_table.currentRow()
+            item = self.full_song_table.item(row, 0) if row >= 0 else None
+            if item:
+                self.project.settings.full_length_track_id = item.data(Qt.ItemDataRole.UserRole)
 
     def workflow_changed(self) -> None:
+        self.stop_song_preview()
         workflow = self.workflow_combo.currentData()
         if workflow == WorkflowMode.EPIC_MONTAGE:
             self.mode_stack.setCurrentIndex(0)
@@ -887,9 +1310,10 @@ class WorkspacePage(QWidget):
 
     def open_library(self) -> None:
         dialog = SongEditorDialog(self.entitlement, self, workflow_filter=self.workflow_combo.currentData())
-        dialog.catalog_changed.connect(lambda: self.refresh_catalog(self.project.settings.song_id if self.project else None))
+        selected_id = self.project.settings.song_id if self.project else None
+        dialog.catalog_changed.connect(lambda: self.refresh_catalog(selected_id))
         dialog.exec()
-        self.refresh_catalog(self.project.settings.song_id if self.project else None)
+        self.refresh_catalog(selected_id)
 
     def selected_exports(self) -> list[ExportSize]:
         exports = []
@@ -922,10 +1346,9 @@ class WorkspacePage(QWidget):
             QMessageBox.warning(self, "Missing song", msg)
             return
         self.project.settings.workflow = workflow
-        self.project.settings.full_length_track_id = self.track_combo.currentData()
         self.project.settings.exports = exports
         save_project(self.project.path, self.project.settings)
-        request = RenderRequest(workflow, exports, song_id, self.track_combo.currentData())
+        request = RenderRequest(workflow, exports, song_id, self.project.settings.full_length_track_id)
         self.cancellation = CancellationToken()
         worker = RenderWorker(self.project, request, self.cancellation)
         thread = QThread(self)
@@ -1172,6 +1595,9 @@ QLineEdit, QComboBox, QTableWidget, QListWidget, QDoubleSpinBox {
     background: #fcfcfc; border: 1px solid #c8cec9; border-radius: 4px; padding: 5px;
 }
 QAbstractItemView { background-color: #fcfcfc; alternate-background-color: #f7f8f6; }
+QAbstractItemView::item:selected { background: #0e54a9; color: #ffffff; }
+QAbstractItemView::item:selected:active { background: #0e54a9; color: #ffffff; }
+QAbstractItemView::item:selected:!active { background: #0e54a9; color: #ffffff; }
 QTableWidget { gridline-color: #e0e4e0; }
 QHeaderView::section { background: #e7ebe7; color: #354039; border: 0; border-bottom: 1px solid #c8cec9; padding: 7px; }
 QPushButton, QToolButton { background: #fcfcfc; border: 1px solid #b8c0ba; border-radius: 5px; padding: 7px 12px; }
