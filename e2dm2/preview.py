@@ -41,6 +41,9 @@ def format_timecode(milliseconds: int) -> str:
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{millis:03d}"
 
 
+PLAYBACK_LATENCY_MS = 300
+
+
 def parse_timecode(value: str) -> int:
     text = value.strip()
     try:
@@ -449,10 +452,13 @@ class ClipPreviewDialog(QDialog):
     def position_changed(self, position: int) -> None:
         if self._hover_warming and self._pending_hover_position is not None:
             position = self._pending_hover_position
-        position = max(0, min(position, self.duration_ms))
-        self.timeline.set_playhead(position)
-        frame = min(max(1, round(position * self.media.fps / 1000) + 1), max(1, round(self.media.duration * self.media.fps)))
-        self.time_label.setText(f"{format_timecode(position)} / {format_timecode(self.duration_ms)}  |  Frame {frame}")
+        corrected_position = position
+        if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            corrected_position = max(0, position - PLAYBACK_LATENCY_MS)
+        corrected_position = max(0, min(corrected_position, self.duration_ms))
+        self.timeline.set_playhead(corrected_position)
+        frame = min(max(1, round(corrected_position * self.media.fps / 1000) + 1), max(1, round(self.media.duration * self.media.fps)))
+        self.time_label.setText(f"{format_timecode(corrected_position)} / {format_timecode(self.duration_ms)}  |  Frame {frame}")
 
     def preview_position(self, position: int) -> None:
         position = max(0, min(position, self.duration_ms))

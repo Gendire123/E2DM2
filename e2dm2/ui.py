@@ -92,6 +92,7 @@ from .logging_setup import log_file_path
 
 
 LOGGER = logging.getLogger(__name__)
+PLAYBACK_LATENCY_MS = 300
 SHOW_SPLASH_SETTING = "startup/show_splash_screen"
 APP_ICON_PATH = Path(__file__).parent / "assets" / "icons" / "app-icon.ico"
 
@@ -1128,7 +1129,10 @@ class WorkspacePage(QWidget):
     def _song_preview_position_changed(self, position: int) -> None:
         if self.active_song_preview_cell is not None:
             try:
-                self.active_song_preview_cell.set_position(position)
+                corrected_position = position
+                if self.song_preview_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+                    corrected_position = max(0, position - PLAYBACK_LATENCY_MS)
+                self.active_song_preview_cell.set_position(corrected_position)
             except RuntimeError:
                 self.active_song_preview_cell = None
 

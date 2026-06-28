@@ -65,6 +65,9 @@ def _seconds_text(milliseconds: int) -> str:
     return f"{minutes}:{seconds - minutes * 60:06.3f}"
 
 
+PLAYBACK_LATENCY_MS = 300
+
+
 def _spin(maximum: float = 100000.0, decimals: int = 3) -> QDoubleSpinBox:
     control = QDoubleSpinBox()
     control.setRange(0, maximum)
@@ -663,7 +666,7 @@ class SongEditorDialog(QDialog):
         self.waveform_zoom.addItem("Full song", None)
         self.waveform_zoom.setCurrentIndex(1)
         self.add_playhead_button = QPushButton("Add cut at playhead")
-        self.add_playhead_button.clicked.connect(lambda: self.add_cut_timestamp(self.player.position() / 1000))
+        self.add_playhead_button.clicked.connect(lambda: self.add_cut_timestamp(self._current_playback_time()))
         controls.addWidget(self.play_button)
         controls.addWidget(self.position_label)
         controls.addWidget(self.position_slider, 1)
@@ -695,10 +698,19 @@ class SongEditorDialog(QDialog):
         )
 
     def _position_changed(self, position: int) -> None:
-        self.position_label.setText(_seconds_text(position))
-        self.waveform.set_position(position / 1000)
+        corrected_position = position
+        if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            corrected_position = max(0, position - PLAYBACK_LATENCY_MS)
+        self.position_label.setText(_seconds_text(corrected_position))
+        self.waveform.set_position(corrected_position / 1000)
         if not self.position_slider.isSliderDown():
-            self.position_slider.setValue(position)
+            self.position_slider.setValue(corrected_position)
+
+    def _current_playback_time(self) -> float:
+        position = self.player.position()
+        if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            position = max(0, position - PLAYBACK_LATENCY_MS)
+        return position / 1000
 
     @property
     def filtered_songs(self) -> list[SongManifest]:
