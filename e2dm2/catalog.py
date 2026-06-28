@@ -31,7 +31,7 @@ class FullLengthTrack:
 
 FULL_LENGTH_TRACKS = (
     FullLengthTrack("drone-music-1", "Relaxing Piano", "Piano, relaxing, easy listening", BUILTIN_SONG_ROOT / "drone-music-1" / "dronemusic1.m4a", 3626.446077),
-    FullLengthTrack("drone-music-2", "Interstellar Theme", "Expansive cinematic theme", BUILTIN_SONG_ROOT / "drone-music-2" / "dronemusic2.m4a", 3724.921905),
+    FullLengthTrack("drone-music-2", "Interstellar Theme", "Expansive cinematic theme", BUILTIN_SONG_ROOT / "drone-music-2" / "dronemusic2.m4a", 3531.476463),
     FullLengthTrack("drone-music-3", "Inception Theme", "Dramatic cinematic theme", BUILTIN_SONG_ROOT / "drone-music-3" / "dronemusic3.m4a", 3768.735188),
     FullLengthTrack("drone-music-4", "Relaxing Strings", "Calm orchestral strings", BUILTIN_SONG_ROOT / "drone-music-4" / "dronemusic4.m4a", 2356.707667),
 )
@@ -245,7 +245,8 @@ def full_length_track(track_id: str) -> FullLengthTrack:
                     track_id=song.song_id,
                     title=song.title,
                     description=song.artist,
-                    path=song.audio_path
+                    path=song.audio_path,
+                    duration_seconds=song.total_duration_seconds,
                 )
     except Exception:
         pass

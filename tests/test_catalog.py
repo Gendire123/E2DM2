@@ -6,6 +6,7 @@ import pytest
 from e2dm2.catalog import (
     duplicate_song,
     filter_songs,
+    full_length_track,
     load_song_catalog,
     load_song_manifest,
     validate_song_manifest,
@@ -26,6 +27,17 @@ def test_builtin_catalog_and_filters():
     assert filter_songs(songs, text="montage 1") == [epic_1]
     assert epic_1 in filter_songs(songs, energy="high")
     assert epic_2 in filter_songs(songs, energy="high")
+
+
+def test_full_length_song_two_matches_its_audio_metadata():
+    song = next(song for song in load_song_catalog() if song.song_id == "drone-music-2")
+    track = full_length_track("drone-music-2")
+
+    assert song.title == track.title == "Interstellar Theme"
+    assert song.total_duration_seconds == pytest.approx(3531.476463)
+    assert song.minimum_source_duration_seconds == pytest.approx(3531.476463)
+    assert song.cuts_end_seconds == pytest.approx(3531.476463)
+    assert track.duration_seconds == pytest.approx(3531.476463)
 
 
 def test_epic_two_heartbeat_manifest():

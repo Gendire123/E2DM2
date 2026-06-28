@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "song_id": "drone-music-2",
-  "title": "TeST Theme",
+  "title": "Immersed in Motion",
   "artist": "E2DM2 Library",
   "audio_file": "dronemusic2.m4a",
   "moods": [
@@ -10,10 +10,10 @@
   ],
   "bpm": null,
   "energy": "medium",
-  "total_duration_seconds": 3724.922,
-  "minimum_source_duration_seconds": 3724.922,
+  "total_duration_seconds": 3531.476,
+  "minimum_source_duration_seconds": 3531.476,
   "opening_fade_seconds": 0.0,
-  "cuts_end_seconds": 3724.922,
+  "cuts_end_seconds": 3531.476,
   "fade_out_seconds": 0.0,
   "escalation_seconds": 0.0,
   "cut_timestamps": [
