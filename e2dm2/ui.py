@@ -199,10 +199,117 @@ class SoundtrackComboBox(QComboBox):
 class SmoothTableWidget(QTableWidget):
     """QTableWidget subclass with smooth pixel-based scrolling instead of line-based scrolling."""
 
+    filesDropped = Signal(list)
+    deleteRequested = Signal()
+    clickedEmpty = Signal()
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.setAcceptDrops(True)
+        
+        # Load footage icon for drag & drop placeholder
+        icon_path = Path(__file__).parent / "assets" / "icons" / "footage.svg"
+        self._placeholder_icon = QIcon(str(icon_path))
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        if event.mimeData().hasUrls():
+            paths = []
+            for url in event.mimeData().urls():
+                local_path = url.toLocalFile()
+                if local_path:
+                    path_obj = Path(local_path)
+                    if path_obj.is_file() and path_obj.suffix.lower() in [".mp4", ".mov", ".m4v"]:
+                        paths.append(path_obj)
+                    elif path_obj.is_dir():
+                        for p in path_obj.rglob("*"):
+                            if p.is_file() and p.suffix.lower() in [".mp4", ".mov", ".m4v"]:
+                                paths.append(p)
+            if paths:
+                self.filesDropped.emit(paths)
+            event.acceptProposedAction()
+        else:
+            super().dropEvent(event)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self.rowCount() == 0:
+            from PySide6.QtGui import QFont, QFontMetrics
+            from PySide6.QtCore import QRect
+            
+            # Draw placeholder overlay
+            painter = QPainter(self.viewport())
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            
+            # Viewport dimensions
+            w = self.viewport().width()
+            h = self.viewport().height()
+            
+            # Center coordinates
+            cx = w // 2
+            cy = h // 2
+            
+            # Draw a beautiful dashed border container
+            margin = 24
+            rect = QRectF(margin, margin, w - 2 * margin, h - 2 * margin)
+            pen = QPen(QColor("#CDD8DC"), 2, Qt.PenStyle.DashLine)
+            painter.setPen(pen)
+            painter.setBrush(QColor("#F8FAFB")) # extremely light, subtle background inside
+            painter.drawRoundedRect(rect, 12, 12)
+            
+            # Draw the footage icon in the center
+            icon_size = 48
+            icon_rect = QRect(cx - icon_size // 2, cy - icon_size - 10, icon_size, icon_size)
+            self._placeholder_icon.paint(painter, icon_rect)
+            
+            # Draw text lines
+            font_title = QFont("Segoe UI", 11, QFont.Weight.Bold)
+            font_subtitle = QFont("Segoe UI", 9.5, QFont.Weight.Normal)
+            
+            # Draw main text
+            painter.setFont(font_title)
+            painter.setPen(QColor("#142033"))
+            title_text = "Drag & drop video files here"
+            title_metrics = QFontMetrics(font_title)
+            title_w = title_metrics.horizontalAdvance(title_text)
+            painter.drawText(cx - title_w // 2, cy + 15, title_text)
+            
+            # Draw helper text
+            painter.setFont(font_subtitle)
+            painter.setPen(QColor("#66758A"))
+            sub_text = "Supports MP4, MOV, and M4V files"
+            sub_metrics = QFontMetrics(font_subtitle)
+            sub_w = sub_metrics.horizontalAdvance(sub_text)
+            painter.drawText(cx - sub_w // 2, cy + 38, sub_text)
+            
+            painter.end()
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+            self.deleteRequested.emit()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
+    def mousePressEvent(self, event) -> None:
+        if self.rowCount() == 0 and event.button() == Qt.MouseButton.LeftButton:
+            self.clickedEmpty.emit()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
 
 
 class ClickableLabel(QLabel):
@@ -241,6 +348,7 @@ class SongPreviewCell(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._playing = False
         self._selected = False
+        self._bg_color_str = "#FFFFFF"
         self._transport_visible = False
         self._animation_direction: str | None = None
         self._progress_animation = QPropertyAnimation(self)
@@ -261,7 +369,7 @@ class SongPreviewCell(QWidget):
         self.progress_slider.setVisible(False)
         self.progress_slider.setStyleSheet(
             "QSlider::groove:horizontal { height: 6px; background: #DDE5EF; border-radius: 3px; }"
-            "QSlider::sub-page:horizontal { background: #0E56AA; border-radius: 3px; }"
+            "QSlider::sub-page:horizontal { background: #084481; border-radius: 3px; }"
             "QSlider::add-page:horizontal { background: #DDE5EF; border-radius: 3px; }"
             "QSlider::handle:horizontal { width: 18px; height: 18px; margin: -6px 0; background: #ffffff; "
             "border: 2px solid #084481; border-radius: 9px; }"
@@ -356,12 +464,12 @@ class SongPreviewCell(QWidget):
         self._apply_colors()
 
     def _apply_colors(self) -> None:
-        background = "#EAF2FC" if self._selected else "#FFFFFF"
+        self._bg_color_str = "#EAF2FC" if self._selected else "#FFFFFF"
         foreground = "#0E56AA" if self._selected else "#142033"
         button = "#0E56AA" if self._playing else "#66758A"
         button_hover = "#084481" if self._playing else "#526173"
         border = "#0E56AA" if self._selected else "#CDD8DC"
-        self.setStyleSheet(f"QWidget#songPreviewCell {{ background: {background}; }}")
+        self.setStyleSheet(f"QWidget#songPreviewCell {{ background: {self._bg_color_str}; }}")
         self.title_label.setStyleSheet(f"background: transparent; color: {foreground}; font-weight: 500;")
         self.play_button.setStyleSheet(
             f"QToolButton {{ border: 2px solid {border}; border-radius: 17px; background: {button}; padding: 3px; }}"
@@ -375,7 +483,7 @@ class SongPreviewCell(QWidget):
         if self._transport_visible:
             transport_left = max(0, self.play_button.geometry().left() - 5)
             painter = QPainter(self)
-            painter.fillRect(transport_left, 0, self.width() - transport_left, self.height(), QColor("#ffffff"))
+            painter.fillRect(transport_left, 0, self.width() - transport_left, self.height(), QColor(self._bg_color_str))
             painter.end()
 
 
@@ -1233,11 +1341,14 @@ class WorkspacePage(QWidget):
         columns_btn.setIcon(QIcon(str(Path(__file__).parent / "assets" / "icons" / "columns.svg")))
 
         columns_menu = QMenu(self)
+        self._column_actions = []
         for col_idx in range(9):
             col_name = ["#", "Clip", "Marks", "Duration", "Resolution", "FPS", "Codec", "Size", "Action"][col_idx]
             action = columns_menu.addAction(col_name)
             action.setCheckable(True)
-            action.setChecked(True)
+            is_default_unchecked = col_idx in (5, 6) # FPS (5) and Codec (6)
+            action.setChecked(not is_default_unchecked)
+            self._column_actions.append((action, col_idx))
             def toggle_col(checked, idx=col_idx):
                 self.media_table.setColumnHidden(idx, not checked)
             action.triggered.connect(toggle_col)
@@ -1271,6 +1382,9 @@ class WorkspacePage(QWidget):
         self.media_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.media_table.setItemDelegate(FullRowSelectionDelegate(self.media_table))
         self.media_table.cellDoubleClicked.connect(lambda *_: self.open_preview())
+        self.media_table.filesDropped.connect(self.start_import)
+        self.media_table.deleteRequested.connect(self.remove_selected)
+        self.media_table.clickedEmpty.connect(self.add_files)
 
         header = self.media_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
@@ -1278,6 +1392,9 @@ class WorkspacePage(QWidget):
         for column in range(2, 8):
             header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(8, QHeaderView.ResizeMode.ResizeToContents)
+
+        for action, idx in self._column_actions:
+            self.media_table.setColumnHidden(idx, not action.isChecked())
 
         card_layout.addWidget(self.media_table, 1)
 
@@ -1385,6 +1502,7 @@ class WorkspacePage(QWidget):
         self.custom_panel = self._custom_panel()
 
         self.mode_stack = QStackedWidget()
+        self.mode_stack.setObjectName("modeStack")
         self.mode_stack.addWidget(self.epic_panel)
         self.mode_stack.addWidget(self.full_panel)
         self.mode_stack.addWidget(self.real_estate_panel)
@@ -1558,7 +1676,6 @@ class WorkspacePage(QWidget):
         filters = QHBoxLayout()
         filters.addWidget(self.song_search, 1)
         filters.addWidget(self.mood_filter)
-        filters.addWidget(self.energy_filter)
         filters.addWidget(manage)
         self.song_table = SmoothTableWidget(0, 4)
         self.song_table.setHorizontalHeaderLabels(["Song", "Mood", "Cuts", "Length"])
@@ -1592,7 +1709,6 @@ class WorkspacePage(QWidget):
         filters = QHBoxLayout()
         filters.addWidget(self.full_song_search, 1)
         filters.addWidget(self.full_mood_filter)
-        filters.addWidget(self.full_energy_filter)
         filters.addWidget(manage)
         self.full_song_table = SmoothTableWidget(0, 4)
         self.full_song_table.setHorizontalHeaderLabels(["Song", "Mood", "Cuts", "Length"])
@@ -1626,7 +1742,6 @@ class WorkspacePage(QWidget):
         filters = QHBoxLayout()
         filters.addWidget(self.re_song_search, 1)
         filters.addWidget(self.re_mood_filter)
-        filters.addWidget(self.re_energy_filter)
         filters.addWidget(manage)
         self.re_song_table = SmoothTableWidget(0, 4)
         self.re_song_table.setHorizontalHeaderLabels(["Song", "Mood", "Cuts", "Length"])
@@ -1660,7 +1775,6 @@ class WorkspacePage(QWidget):
         filters = QHBoxLayout()
         filters.addWidget(self.custom_song_search, 1)
         filters.addWidget(self.custom_mood_filter)
-        filters.addWidget(self.custom_energy_filter)
         filters.addWidget(manage)
         self.custom_song_table = SmoothTableWidget(0, 4)
         self.custom_song_table.setHorizontalHeaderLabels(["Song", "Mood", "Cuts", "Length"])
@@ -2411,8 +2525,8 @@ class WorkspacePage(QWidget):
         try:
             copied_path.resolve().relative_to(source_root)
             copied_path.unlink(missing_ok=True)
-        except ValueError:
-            pass
+        except (ValueError, Exception) as exc:
+            LOGGER.warning("Could not delete file %s: %s", copied_path, exc)
         save_project(self.project.path, self.project.settings)
         self.refresh_media()
 
@@ -3191,10 +3305,12 @@ QScrollArea, QScrollArea > QWidget, QScrollArea > QWidget > QWidget {
 
 /* Scrollbar Custom Styling */
 QScrollBar:vertical {
-    border: none;
+    border: 1px solid transparent;
     background: #F5F7F8;
     width: 10px;
     margin: 0px;
+    border-top-right-radius: 11px;
+    border-bottom-right-radius: 11px;
 }
 
 QScrollBar::handle:vertical {
@@ -3218,10 +3334,12 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
 }
 
 QScrollBar:horizontal {
-    border: none;
+    border: 1px solid transparent;
     background: #F5F7F8;
     height: 10px;
     margin: 0px;
+    border-bottom-left-radius: 11px;
+    border-bottom-right-radius: 11px;
 }
 
 QScrollBar::handle:horizontal {
@@ -3273,6 +3391,9 @@ QComboBox QAbstractItemView {
 QStackedWidget, QStackedWidget > QWidget {
     background: #F5F7F8;
 }
+QStackedWidget#modeStack, QStackedWidget#modeStack > QWidget {
+    background: transparent;
+}
 
 QSplitter, QSplitter > QWidget {
     background: #F5F7F8;
@@ -3282,7 +3403,13 @@ QTableWidget, QTableWidget > QWidget {
     background: #FFFFFF;
 }
 
-QHeaderView, QHeaderView::section {
+QHeaderView {
+    background: #F7FAFA;
+    border: 1px solid transparent;
+    border-top-left-radius: 11px;
+    border-top-right-radius: 11px;
+}
+QHeaderView::section {
     background: #F7FAFA;
 }
 
@@ -3348,7 +3475,7 @@ QTableWidget::item:selected {
 QHeaderView::section:horizontal {
     background: #F7FAFA;
     color: #526173;
-    border: 0;
+    border: 1px solid transparent;
     border-bottom: 1px solid #DDE5E7;
     padding: 12px 10px;
     font-weight: 700;
@@ -3357,10 +3484,30 @@ QHeaderView::section:horizontal {
 QHeaderView::section:vertical {
     background: #F7FAFA;
     color: #526173;
-    border: 0;
+    border: 1px solid transparent;
     border-right: 1px solid #DDE5E7;
     padding: 2px 8px;
     font-weight: 700;
+}
+
+QTableCornerButton::section {
+    background: #F7FAFA;
+    border: 1px solid transparent;
+    border-bottom: 1px solid #DDE5E7;
+    border-right: 1px solid #DDE5E7;
+    border-top-left-radius: 11px;
+}
+
+QHeaderView::section:horizontal:last {
+    border-top-right-radius: 11px;
+    border: 1px solid transparent;
+    border-bottom: 1px solid #DDE5E7;
+}
+
+QHeaderView::section:vertical:last {
+    border-bottom-left-radius: 11px;
+    border: 1px solid transparent;
+    border-right: 1px solid #DDE5E7;
 }
 
 QPushButton, QToolButton {
@@ -3452,18 +3599,19 @@ QToolButton#rowMenuButton:hover {
 }
 
 QProgressBar {
-    background: #E6ECEE;
-    color: #FFFFFF;
-    border: 0;
-    border-radius: 8px;
+    background: #EEF2F6;
+    color: #000000;
+    border: 1px solid #CDD8DC;
+    border-radius: 6px;
     height: 18px;
     text-align: center;
-    font-weight: 700;
+    font-weight: bold;
+    font-size: 9pt;
 }
 
 QProgressBar::chunk {
-    background: #0E56AA;
-    border-radius: 8px;
+    background: #90CAF9;
+    border-radius: 5px;
 }
 
 QPlainTextEdit#backendLog {
@@ -3618,7 +3766,7 @@ QSlider::groove:horizontal {
     border-radius: 3px;
 }
 QSlider::sub-page:horizontal {
-    background: #0E56AA;
+    background: #084481;
     border-radius: 3px;
 }
 QSlider::add-page:horizontal {
@@ -3632,6 +3780,52 @@ QSlider::handle:horizontal {
     background: #ffffff;
     border: 2px solid #084481;
     border-radius: 9px;
+}
+
+/* Custom QMenu/Popup styling to ensure readability */
+QMenu {
+    background-color: #FFFFFF;
+    color: #142033;
+    border: 1px solid #DDE5E7;
+    padding: 4px 0px;
+}
+
+QMenu::item {
+    background-color: transparent;
+    padding: 6px 28px 6px 12px;
+    color: #142033;
+}
+
+QMenu::item:selected {
+    background-color: #EAF2FC;
+    color: #0E56AA;
+}
+
+QMenu::separator {
+    height: 1px;
+    background: #E1E8EA;
+    margin: 4px 0px;
+}
+
+QMenu::indicator {
+    width: 14px;
+    height: 14px;
+    border: 1px solid #CDD8DC;
+    border-radius: 3px;
+    background-color: #FFFFFF;
+    margin-left: 10px;
+}
+
+QMenu::indicator:checked {
+    background-color: #0E56AA;
+    border-color: #0E56AA;
+    image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIzIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxwb2x5bGluZSBwb2ludHM9IjIwIDYgOSAxNyA0IDEyIj48L3BvbHlsaW5lPjwvc3ZnPg==");
+}
+
+QMenu::indicator:unchecked {
+    background-color: #FFFFFF;
+    border-color: #CDD8DC;
+    image: none;
 }
 """
 

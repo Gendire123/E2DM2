@@ -68,7 +68,7 @@ def test_tab_strip_matches_window_background(qtbot):
     assert background.name() == "#f5f7f8"
 
 
-def test_progress_percentage_text_is_white(qtbot):
+def test_progress_percentage_text_is_black(qtbot):
     progress = QProgressBar()
     qtbot.addWidget(progress)
     progress.setStyleSheet(STYLESHEET)
@@ -76,7 +76,7 @@ def test_progress_percentage_text_is_white(qtbot):
     progress.show()
 
     text_color = progress.palette().color(QPalette.ColorRole.Text)
-    assert text_color.name() == "#ffffff"
+    assert text_color.name() == "#000000"
 
 
 def test_import_status_does_not_repeat_progress_percentage(qtbot):
@@ -537,7 +537,7 @@ def test_song_row_preview_toggles_play_pause_and_progress(qtbot):
     transport_sample = rendered_cell.pixelColor(
         min(rendered_cell.width() - 1, cell.play_button.geometry().right() + 6), 2,
     )
-    assert transport_sample.name() == "#ffffff"
+    assert transport_sample.name() == "#eaf2fc"
     assert rendered_cell.pixelColor(2, 2).name() == "#eaf2fc"
 
     qtbot.mouseClick(
@@ -1052,6 +1052,92 @@ def test_clip_preview_dialog_redesign(qtbot, tmp_path):
     # Verify inner layout widgets for Exclude and Required tools
     assert dialog.exclude_title_label.text() == "Exclude"
     assert dialog.required_title_label.text() == "Required"
+
+
+def test_smooth_table_widget_drag_drop(qtbot):
+    from PySide6.QtCore import QMimeData, QUrl, Qt, QPoint
+    from PySide6.QtGui import QDropEvent
+    from e2dm2.ui import SmoothTableWidget
+    import tempfile
+    
+    table = SmoothTableWidget(0, 9)
+    qtbot.addWidget(table)
+    
+    assert table.acceptDrops()
+    
+    # Create temp files
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f1, \
+         tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f2:
+        path1 = Path(f1.name)
+        path2 = Path(f2.name)
+        
+    try:
+        # Simulate drop event
+        mime = QMimeData()
+        mime.setUrls([QUrl.fromLocalFile(str(path1)), QUrl.fromLocalFile(str(path2))])
+        
+        dropped_paths = []
+        table.filesDropped.connect(dropped_paths.extend)
+        
+        # Trigger dropEvent
+        event = QDropEvent(QPoint(10, 10), Qt.DropAction.CopyAction, mime, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+        table.dropEvent(event)
+        
+        # Only the .mp4 file should be imported
+        assert len(dropped_paths) == 1
+        assert dropped_paths[0] == path1
+    finally:
+        if path1.exists():
+            path1.unlink()
+        if path2.exists():
+            path2.unlink()
+
+
+def test_smooth_table_widget_delete_keys(qtbot):
+    from PySide6.QtCore import Qt
+    from e2dm2.ui import SmoothTableWidget
+    
+    table = SmoothTableWidget(0, 9)
+    qtbot.addWidget(table)
+    
+    delete_called = 0
+    def on_delete():
+        nonlocal delete_called
+        delete_called += 1
+        
+    table.deleteRequested.connect(on_delete)
+    
+    # Send Delete key event
+    qtbot.keyClick(table, Qt.Key.Key_Delete)
+    assert delete_called == 1
+    
+    # Send Backspace key event
+    qtbot.keyClick(table, Qt.Key.Key_Backspace)
+    assert delete_called == 2
+
+
+def test_smooth_table_widget_clicked_empty(qtbot):
+    from PySide6.QtCore import Qt, QPoint
+    from PySide6.QtGui import QMouseEvent
+    from e2dm2.ui import SmoothTableWidget
+    
+    table = SmoothTableWidget(0, 9)
+    qtbot.addWidget(table)
+    
+    clicked_called = 0
+    def on_clicked():
+        nonlocal clicked_called
+        clicked_called += 1
+        
+    table.clickedEmpty.connect(on_clicked)
+    
+    # Simulate mouse click on the empty viewport
+    event = QMouseEvent(QMouseEvent.Type.MouseButtonPress, QPoint(10, 10), Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    table.mousePressEvent(event)
+    assert clicked_called == 1
+
+
+
 
 
 
