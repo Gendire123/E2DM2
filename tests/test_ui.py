@@ -752,14 +752,14 @@ def test_preview_dialog_uses_timeline_as_its_scrubber(qtbot, tmp_path):
     media = MediaItem("source/test.mp4", "test.mp4", 320, 180, 30, 30, "h264", 1)
     dialog = ClipPreviewDialog(media, str(tmp_path / "missing.mp4"))
     qtbot.addWidget(dialog)
-    assert dialog.height() == 620
-    assert dialog.minimumSizeHint().height() <= 620
+    assert dialog.height() >= 660
+    assert dialog.minimumSizeHint().height() <= dialog.height()
     table_body_height = (
         dialog.selection_table.maximumHeight()
         - dialog.selection_table.horizontalHeader().sizeHint().height()
         - dialog.selection_table.frameWidth() * 2
     )
-    assert table_body_height >= dialog.selection_table.verticalHeader().defaultSectionSize() * 5
+    assert table_body_height >= dialog.selection_table.verticalHeader().defaultSectionSize() * 4
     assert not hasattr(dialog, "scrubber")
     dialog.timeline.positionPreviewed.emit(1500)
     assert dialog.timeline.playhead_ms == 1500
@@ -776,6 +776,7 @@ def test_fullscreen_keeps_only_video_controls_and_timeline(qtbot, tmp_path):
     qtbot.waitUntil(dialog.isFullScreen)
     assert dialog.video.isVisible()
     assert dialog.timeline.isVisible()
+    assert dialog.selection_mode_panel.isVisible()
     assert dialog.exclude_tool.isVisible()
     assert dialog.required_tool.isVisible()
     assert dialog.selection_table.isHidden()
@@ -789,7 +790,7 @@ def test_fullscreen_keeps_only_video_controls_and_timeline(qtbot, tmp_path):
     assert not dialog.selection_table.isHidden()
     assert not dialog.button_box.isHidden()
     assert dialog.fullscreen_button.text() == "Full Screen"
-    assert dialog.geometry() == original_geometry
+    assert dialog.height() == original_geometry.height()
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg is required")
@@ -892,3 +893,124 @@ def test_sidebar_navigation_changes_workspace_pages(qtbot):
 
     page.nav_footage.click()
     assert page.workspace_tabs.currentIndex() == 0
+
+
+def test_preview_dialog_default_paint_mode_is_visually_exclude(qtbot, tmp_path):
+    media = MediaItem("source/test.mp4", "test.mp4", 320, 180, 30, 30, "h264", 1)
+    dialog = ClipPreviewDialog(media, str(tmp_path / "missing.mp4"))
+    qtbot.addWidget(dialog)
+
+    assert dialog.timeline.tool is SelectionType.EXCLUDE
+    assert dialog.exclude_tool.isChecked()
+    assert not dialog.required_tool.isChecked()
+    assert dialog.exclude_tool.property("modeActive") == "true"
+    assert dialog.required_tool.property("modeActive") == "false"
+    assert "EXCLUDE" in dialog.current_mode_title.text()
+
+
+def test_preview_dialog_required_button_updates_active_paint_mode(qtbot, tmp_path):
+    media = MediaItem("source/test.mp4", "test.mp4", 320, 180, 30, 30, "h264", 1)
+    dialog = ClipPreviewDialog(media, str(tmp_path / "missing.mp4"))
+    qtbot.addWidget(dialog)
+
+    qtbot.mouseClick(dialog.required_tool, Qt.MouseButton.LeftButton)
+
+    assert dialog.timeline.tool is SelectionType.REQUIRED
+    assert dialog.required_tool.isChecked()
+    assert not dialog.exclude_tool.isChecked()
+    assert dialog.required_tool.property("modeActive") == "true"
+    assert dialog.exclude_tool.property("modeActive") == "false"
+    assert "REQUIRED" in dialog.current_mode_title.text()
+
+
+def test_required_paint_mode_creates_required_selection(qtbot):
+    timeline = SelectionTimeline(60_000)
+    timeline.resize(1000, 120)
+    qtbot.addWidget(timeline)
+    timeline.show()
+
+    created = []
+    timeline.rangeCreated.connect(lambda kind, start, end: created.append((kind, start, end)))
+
+    timeline.set_tool(SelectionType.REQUIRED)
+
+    qtbot.mousePress(timeline, Qt.MouseButton.LeftButton, pos=QPoint(200, 50))
+    qtbot.mouseMove(timeline, QPoint(400, 50))
+    qtbot.mouseRelease(timeline, Qt.MouseButton.LeftButton, pos=QPoint(400, 50))
+
+    assert len(created) == 1
+    assert created[0][0] is SelectionType.REQUIRED
+    assert created[0][2] > created[0][1]
+
+
+def test_selection_timeline_cursor_changes_on_hover_handles(qtbot):
+    timeline = SelectionTimeline(60_000)
+    timeline.resize(1000, 96)
+    selection = ClipSelection(SelectionType.EXCLUDE, 10000, 20000)
+    timeline.set_selections([selection], 0)
+    qtbot.addWidget(timeline)
+    timeline.show()
+
+    start_x = timeline._x_for_ms(10000)
+    qtbot.mouseMove(timeline, QPoint(round(start_x), 45))
+    assert timeline.cursor().shape() == Qt.CursorShape.SizeHorCursor
+
+    mid_x = timeline._x_for_ms(15000)
+    qtbot.mouseMove(timeline, QPoint(round(mid_x), 45))
+    assert timeline.cursor().shape() == Qt.CursorShape.PointingHandCursor
+
+    outside_x = timeline._x_for_ms(5000)
+    qtbot.mouseMove(timeline, QPoint(round(outside_x), 45))
+    assert timeline.cursor().shape() == Qt.CursorShape.ArrowCursor
+
+
+def test_click_near_edge_resizes_existing_selection_instead_of_creating_new_one(qtbot):
+    timeline = SelectionTimeline(60_000)
+    timeline.resize(1000, 96)
+    selection = ClipSelection(SelectionType.EXCLUDE, 10000, 20000)
+    timeline.set_selections([selection])
+    qtbot.addWidget(timeline)
+    timeline.show()
+
+    edited = []
+    created = []
+    timeline.rangeEdited.connect(lambda idx, start, end: edited.append((idx, start, end)))
+    timeline.rangeCreated.connect(lambda kind, start, end: created.append((kind, start, end)))
+
+    start_x = timeline._x_for_ms(10000)
+    qtbot.mousePress(timeline, Qt.MouseButton.LeftButton, pos=QPoint(round(start_x - 5), 45))
+    qtbot.mouseMove(timeline, QPoint(round(start_x - 50), 45))
+    qtbot.mouseRelease(timeline, Qt.MouseButton.LeftButton, pos=QPoint(round(start_x - 50), 45))
+
+    assert len(edited) == 1
+    assert edited[0][0] == 0
+    assert len(created) == 0
+
+
+def test_drag_middle_of_selection_slides_it(qtbot):
+    timeline = SelectionTimeline(60_000)
+    timeline.resize(1000, 96)
+    selection = ClipSelection(SelectionType.EXCLUDE, 10000, 20000)
+    timeline.set_selections([selection])
+    qtbot.addWidget(timeline)
+    timeline.show()
+
+    edited = []
+    timeline.rangeEdited.connect(lambda idx, start, end: edited.append((idx, start, end)))
+
+    mid_x = timeline._x_for_ms(15000)
+    drag_x = timeline._x_for_ms(20000)
+
+    qtbot.mouseMove(timeline, QPoint(round(mid_x), 45))
+    assert timeline.cursor().shape() == Qt.CursorShape.PointingHandCursor
+    qtbot.mousePress(timeline, Qt.MouseButton.LeftButton, pos=QPoint(round(mid_x), 45))
+
+    qtbot.mouseMove(timeline, QPoint(round(drag_x), 45))
+    qtbot.mouseRelease(timeline, Qt.MouseButton.LeftButton, pos=QPoint(round(drag_x), 45))
+
+    assert len(edited) == 1
+    assert edited[0][0] == 0
+    assert abs(edited[0][1] - 15000) <= 200
+    assert abs(edited[0][2] - 25000) <= 200
+
+

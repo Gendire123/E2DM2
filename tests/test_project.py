@@ -108,8 +108,6 @@ def test_selection_validation_limits_and_overlap_rules():
         ClipSelection(SelectionType.REQUIRED, 1000, 21_000),
     ]
     assert validate_clip_selections(touching, 30) == touching
-    with pytest.raises(ValueError, match="20 seconds"):
-        validate_clip_selections([ClipSelection(SelectionType.REQUIRED, 0, 20_001)], 30)
     with pytest.raises(ValueError, match="overlap"):
         validate_clip_selections([
             ClipSelection(SelectionType.EXCLUDE, 0, 1001),

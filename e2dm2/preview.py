@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QProcess, QRectF, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QEvent, QProcess, QRectF, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QKeySequence, QMouseEvent, QPainter, QPen, QShortcut
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
@@ -11,12 +11,15 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QDialog,
     QDialogButtonBox,
+    QFrame,
+    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -24,7 +27,6 @@ from PySide6.QtWidgets import (
 )
 
 from .models import (
-    MAX_REQUIRED_SELECTION_MS,
     ClipSelection,
     MediaItem,
     SelectionType,
@@ -42,6 +44,112 @@ def format_timecode(milliseconds: int) -> str:
 
 
 PLAYBACK_LATENCY_MS = 300
+
+EXCLUDE_COLOR = "#D92D20"
+EXCLUDE_COLOR_DARK = "#B42318"
+EXCLUDE_COLOR_LIGHT = "#FEF3F2"
+
+REQUIRED_COLOR = "#2EAD4A"
+REQUIRED_COLOR_DARK = "#1F7A35"
+REQUIRED_COLOR_LIGHT = "#ECFDF3"
+
+PLAYHEAD_COLOR = "#1976D2"
+TEXT_DARK = "#142033"
+TEXT_MUTED = "#66758A"
+BORDER_COLOR = "#DDE5E7"
+CARD_BACKGROUND = "#FFFFFF"
+
+PREVIEW_DIALOG_STYLES = f"""
+QFrame#selectionModePanel {{
+    background: #FFFFFF;
+    border: 1px solid {BORDER_COLOR};
+    border-radius: 10px;
+}}
+
+QLabel#selectionModeHeader {{
+    color: #526173;
+    font-size: 8.5pt;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+}}
+
+QPushButton#excludeModeButton,
+QPushButton#requiredModeButton {{
+    background: #FFFFFF;
+    color: {TEXT_DARK};
+    border: 1px solid #CDD8DC;
+    border-radius: 10px;
+    padding: 6px 12px;
+    font-size: 9.5pt;
+    font-weight: 800;
+    text-align: left;
+}}
+
+QPushButton#excludeModeButton:hover {{
+    background: {EXCLUDE_COLOR_LIGHT};
+    border-color: {EXCLUDE_COLOR};
+}}
+
+QPushButton#requiredModeButton:hover {{
+    background: {REQUIRED_COLOR_LIGHT};
+    border-color: {REQUIRED_COLOR};
+}}
+
+QPushButton#excludeModeButton[modeActive="true"] {{
+    background: {EXCLUDE_COLOR};
+    color: #FFFFFF;
+    border: 2px solid {EXCLUDE_COLOR_DARK};
+}}
+
+QPushButton#requiredModeButton[modeActive="true"] {{
+    background: {REQUIRED_COLOR};
+    color: #FFFFFF;
+    border: 2px solid {REQUIRED_COLOR_DARK};
+}}
+
+QFrame#currentModeCard,
+QFrame#modeLegendCard {{
+    background: #FFFFFF;
+    border: 1px solid {BORDER_COLOR};
+    border-radius: 8px;
+}}
+
+QFrame#currentModeCard[mode="exclude"] {{
+    background: {EXCLUDE_COLOR_LIGHT};
+    border: 1px solid {EXCLUDE_COLOR};
+}}
+
+QFrame#currentModeCard[mode="required"] {{
+    background: {REQUIRED_COLOR_LIGHT};
+    border: 1px solid {REQUIRED_COLOR};
+}}
+
+QLabel#currentModeTitle {{
+    color: {TEXT_DARK};
+    font-weight: 700;
+    font-size: 9pt;
+}}
+
+QLabel#currentModeInstruction {{
+    color: #526173;
+    font-size: 8.5pt;
+}}
+
+QLabel#excludeLegendDot {{
+    color: {EXCLUDE_COLOR};
+    font-size: 11pt;
+}}
+
+QLabel#requiredLegendDot {{
+    color: {REQUIRED_COLOR};
+    font-size: 11pt;
+}}
+
+QLabel#timelineHelpLabel {{
+    color: {TEXT_MUTED};
+    font-size: 8.5pt;
+}}
+"""
 
 
 def parse_timecode(value: str) -> int:
@@ -66,6 +174,7 @@ class SelectionTimeline(QWidget):
     rangeCreated = Signal(object, int, int)
     rangeEdited = Signal(int, int, int)
     positionPreviewed = Signal(int)
+    toolChanged = Signal(object)
 
     HANDLE_WIDTH = 7
 
@@ -77,12 +186,13 @@ class SelectionTimeline(QWidget):
         self.tool = SelectionType.EXCLUDE
         self._drag_mode: str | None = None
         self._drag_index = -1
+        self._drag_offset_ms = 0
         self._anchor_ms = 0
         self._preview_start: int | None = None
         self._preview_end: int | None = None
         self.playhead_ms = 0
         self.hover_ms: int | None = None
-        self.setMinimumHeight(78)
+        self.setMinimumHeight(86)
         self.setMouseTracking(True)
 
     def set_selections(self, selections: list[ClipSelection], selected_index: int = -1) -> None:
@@ -91,14 +201,18 @@ class SelectionTimeline(QWidget):
         self.update()
 
     def set_tool(self, selection_type: SelectionType) -> None:
+        if self.tool is selection_type:
+            return
         self.tool = selection_type
+        self.toolChanged.emit(selection_type)
+        self.update()
 
     def set_playhead(self, position_ms: int) -> None:
         self.playhead_ms = max(0, min(position_ms, self.duration_ms))
         self.update()
 
     def _track_rect(self) -> QRectF:
-        return QRectF(10, 20, max(1, self.width() - 20), 34)
+        return QRectF(14, 26, max(1, self.width() - 28), 30)
 
     def _x_for_ms(self, value: int) -> float:
         rect = self._track_rect()
@@ -127,11 +241,15 @@ class SelectionTimeline(QWidget):
             x = rect.left() + rect.width() * tick / 10
             painter.drawLine(round(x), round(rect.top() - 5), round(x), round(rect.bottom() + 5))
         for index, selection in enumerate(self.selections):
-            color = QColor("#0E56AA") if selection.type is SelectionType.REQUIRED else QColor("#d84a4a")
+            if index == self.selected_index and self._preview_start is not None and self._preview_end is not None:
+                start, end = sorted((self._preview_start, self._preview_end))
+            else:
+                start, end = selection.start_ms, selection.end_ms
+            color = QColor(REQUIRED_COLOR) if selection.type is SelectionType.REQUIRED else QColor(EXCLUDE_COLOR)
             color.setAlpha(205)
             selection_rect = QRectF(
-                self._x_for_ms(selection.start_ms), rect.top(),
-                max(2, self._x_for_ms(selection.end_ms) - self._x_for_ms(selection.start_ms)), rect.height(),
+                self._x_for_ms(start), rect.top(),
+                max(2, self._x_for_ms(end) - self._x_for_ms(start)), rect.height(),
             )
             painter.fillRect(selection_rect, color)
             if index == self.selected_index:
@@ -139,16 +257,16 @@ class SelectionTimeline(QWidget):
                 painter.drawRect(selection_rect)
                 painter.fillRect(QRectF(selection_rect.left() - 2, rect.top(), 5, rect.height()), QColor("#fcfcfc"))
                 painter.fillRect(QRectF(selection_rect.right() - 2, rect.top(), 5, rect.height()), QColor("#fcfcfc"))
-        if self._preview_start is not None and self._preview_end is not None:
+        if self._preview_start is not None and self._preview_end is not None and self._drag_mode == "create":
             start, end = sorted((self._preview_start, self._preview_end))
-            color = QColor("#0E56AA") if self.tool is SelectionType.REQUIRED else QColor("#d84a4a")
+            color = QColor(REQUIRED_COLOR) if self.tool is SelectionType.REQUIRED else QColor(EXCLUDE_COLOR)
             color.setAlpha(130)
             painter.fillRect(
                 QRectF(self._x_for_ms(start), rect.top(), max(2, self._x_for_ms(end) - self._x_for_ms(start)), rect.height()),
                 color,
             )
         playhead_x = self._x_for_ms(self.playhead_ms)
-        painter.setPen(QPen(QColor("#1976d2"), 2))
+        painter.setPen(QPen(QColor(PLAYHEAD_COLOR), 2))
         painter.drawLine(round(playhead_x), round(rect.top() - 4), round(playhead_x), round(rect.bottom() + 4))
         if self.hover_ms is not None:
             hover_x = self._x_for_ms(self.hover_ms)
@@ -171,18 +289,35 @@ class SelectionTimeline(QWidget):
         position = self._ms_for_x(x)
         self.hover_ms = position
         self.positionPreviewed.emit(position)
+
+        # Check if clicking near the edge handle of any existing selection
+        for index, selection in enumerate(self.selections):
+            start_x = self._x_for_ms(selection.start_ms)
+            end_x = self._x_for_ms(selection.end_ms)
+            if abs(x - start_x) <= self.HANDLE_WIDTH:
+                self.selected_index = index
+                self.selectionChanged.emit(index)
+                self._drag_mode = "start"
+                self._drag_index = index
+                self.update()
+                return
+            elif abs(x - end_x) <= self.HANDLE_WIDTH:
+                self.selected_index = index
+                self.selectionChanged.emit(index)
+                self._drag_mode = "end"
+                self._drag_index = index
+                self.update()
+                return
+
         selected = self._selection_at(x)
         if selected >= 0:
             self.selected_index = selected
             self.selectionChanged.emit(selected)
-            selection = self.selections[selected]
-            if abs(x - self._x_for_ms(selection.start_ms)) <= self.HANDLE_WIDTH:
-                self._drag_mode = "start"
-            elif abs(x - self._x_for_ms(selection.end_ms)) <= self.HANDLE_WIDTH:
-                self._drag_mode = "end"
-            else:
-                self._drag_mode = None
+            self._drag_mode = "move"
             self._drag_index = selected
+            self._drag_offset_ms = position - self.selections[selected].start_ms
+            self._preview_start = self.selections[selected].start_ms
+            self._preview_end = self.selections[selected].end_ms
             self.update()
             return
         self.selected_index = -1
@@ -193,24 +328,56 @@ class SelectionTimeline(QWidget):
         self._preview_end = self._anchor_ms
         self.update()
 
+    def _update_cursor(self, x: float) -> None:
+        near_handle = False
+        inside_selection = False
+        if self._drag_mode in {"start", "end"}:
+            near_handle = True
+        elif self._drag_mode == "move":
+            inside_selection = True
+        elif not self._drag_mode:
+            for selection in self.selections:
+                start_x = self._x_for_ms(selection.start_ms)
+                end_x = self._x_for_ms(selection.end_ms)
+                if abs(x - start_x) <= self.HANDLE_WIDTH or abs(x - end_x) <= self.HANDLE_WIDTH:
+                    near_handle = True
+                    break
+            if not near_handle:
+                value = self._ms_for_x(x)
+                for selection in self.selections:
+                    if selection.start_ms <= value <= selection.end_ms:
+                        inside_selection = True
+                        break
+
+        if near_handle:
+            self.setCursor(Qt.CursorShape.SizeHorCursor)
+        elif inside_selection:
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+        else:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt API
-        value = self._ms_for_x(event.position().x())
+        x = event.position().x()
+        value = self._ms_for_x(x)
         self.hover_ms = value
         self.positionPreviewed.emit(value)
+        self._update_cursor(x)
         if not self._drag_mode:
             self.update()
             return
         if self._drag_mode == "create":
-            if self.tool is SelectionType.REQUIRED and abs(value - self._anchor_ms) > MAX_REQUIRED_SELECTION_MS:
-                value = self._anchor_ms + (MAX_REQUIRED_SELECTION_MS if value > self._anchor_ms else -MAX_REQUIRED_SELECTION_MS)
             self._preview_end = value
+        elif self._drag_mode == "move":
+            if 0 <= self._drag_index < len(self.selections):
+                selection = self.selections[self._drag_index]
+                duration = selection.end_ms - selection.start_ms
+                new_start = value - self._drag_offset_ms
+                new_start = max(0, min(new_start, self.duration_ms - duration))
+                new_end = new_start + duration
+                self._preview_start = new_start
+                self._preview_end = new_end
         elif 0 <= self._drag_index < len(self.selections):
             selection = self.selections[self._drag_index]
-            if selection.type is SelectionType.REQUIRED:
-                if self._drag_mode == "start":
-                    value = max(value, selection.end_ms - MAX_REQUIRED_SELECTION_MS)
-                else:
-                    value = min(value, selection.start_ms + MAX_REQUIRED_SELECTION_MS)
             self._preview_start = value if self._drag_mode == "start" else selection.start_ms
             self._preview_end = value if self._drag_mode == "end" else selection.end_ms
         self.update()
@@ -218,22 +385,23 @@ class SelectionTimeline(QWidget):
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt API
         if event.button() != Qt.MouseButton.LeftButton or not self._drag_mode:
             return
-        value = self._ms_for_x(event.position().x())
+        x = event.position().x()
+        value = self._ms_for_x(x)
         self.hover_ms = value
         self.positionPreviewed.emit(value)
         if self._drag_mode == "create":
-            if self.tool is SelectionType.REQUIRED and abs(value - self._anchor_ms) > MAX_REQUIRED_SELECTION_MS:
-                value = self._anchor_ms + (MAX_REQUIRED_SELECTION_MS if value > self._anchor_ms else -MAX_REQUIRED_SELECTION_MS)
             start, end = sorted((self._anchor_ms, value))
             if start != end:
                 self.rangeCreated.emit(self.tool, start, end)
+        elif self._drag_mode == "move" and 0 <= self._drag_index < len(self.selections):
+            selection = self.selections[self._drag_index]
+            duration = selection.end_ms - selection.start_ms
+            new_start = value - self._drag_offset_ms
+            new_start = max(0, min(new_start, self.duration_ms - duration))
+            new_end = new_start + duration
+            self.rangeEdited.emit(self._drag_index, new_start, new_end)
         elif 0 <= self._drag_index < len(self.selections):
             selection = self.selections[self._drag_index]
-            if selection.type is SelectionType.REQUIRED:
-                if self._drag_mode == "start":
-                    value = max(value, selection.end_ms - MAX_REQUIRED_SELECTION_MS)
-                else:
-                    value = min(value, selection.start_ms + MAX_REQUIRED_SELECTION_MS)
             start = value if self._drag_mode == "start" else selection.start_ms
             end = value if self._drag_mode == "end" else selection.end_ms
             self.rangeEdited.emit(self._drag_index, start, end)
@@ -241,10 +409,12 @@ class SelectionTimeline(QWidget):
         self._drag_index = -1
         self._preview_start = None
         self._preview_end = None
+        self._update_cursor(x)
         self.update()
 
     def leaveEvent(self, event) -> None:  # noqa: N802 - Qt API
         self.hover_ms = None
+        self.setCursor(Qt.CursorShape.ArrowCursor)
         self.update()
         super().leaveEvent(event)
 
@@ -256,6 +426,35 @@ class PreviewVideoWidget(QVideoWidget):
             event.accept()
             return
         super().keyPressEvent(event)
+class AspectWidget(QWidget):
+    def __init__(self, child: QWidget, ratio: float = 16.0 / 9.0, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.child = child
+        self.ratio = ratio
+        child.setParent(self)
+
+    def sizeHint(self) -> QSize:
+        return QSize(round(260 * self.ratio), 260)
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(round(260 * self.ratio), 260)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt API
+        super().resizeEvent(event)
+        w = self.width()
+        h = self.height()
+        if h <= 0 or w <= 0:
+            return
+        if w / h > self.ratio:
+            new_h = h
+            new_w = round(h * self.ratio)
+        else:
+            new_w = w
+            new_h = round(w / self.ratio)
+        x = (w - new_w) // 2
+        y = (h - new_h) // 2
+        self.child.setGeometry(x, y, new_w, new_h)
+
 
 
 class ClipPreviewDialog(QDialog):
@@ -283,10 +482,10 @@ class ClipPreviewDialog(QDialog):
         self.hover_seek_timer.setInterval(25)
         self.hover_seek_timer.timeout.connect(self.perform_hover_seek)
         self.setWindowTitle(f"Preview / Edit - {media.original_name}")
-        self.resize(1000, 620)
+        self.resize(1240, 780)
 
         self.video = PreviewVideoWidget()
-        self.video.setMinimumHeight(200)
+        self.video.setMinimumHeight(260)
         self.audio = QAudioOutput(self)
         self.audio.setVolume(0.75)
         self.player = QMediaPlayer(self)
@@ -304,29 +503,19 @@ class ClipPreviewDialog(QDialog):
         controls.addWidget(self.time_label)
         controls.addWidget(self.fullscreen_button)
 
-        self.exclude_tool = QPushButton("Red: Exclude")
-        self.required_tool = QPushButton("Green: Required")
-        self.exclude_tool.setCheckable(True)
-        self.required_tool.setCheckable(True)
-        self.exclude_tool.setChecked(True)
-        tools = QButtonGroup(self)
-        tools.setExclusive(True)
-        tools.addButton(self.exclude_tool)
-        tools.addButton(self.required_tool)
         self.timeline = SelectionTimeline(self.duration_ms)
-        self.timeline.setToolTip("Hover to preview a frame. Choose Red or Green, then drag to mark a range.")
-        self.exclude_tool.clicked.connect(lambda: self.timeline.set_tool(SelectionType.EXCLUDE))
-        self.required_tool.clicked.connect(lambda: self.timeline.set_tool(SelectionType.REQUIRED))
+        self.timeline.setToolTip("Hover to preview a frame. Choose a paint mode, then drag to mark a range.")
+
+        self.selection_mode_panel = self.build_selection_mode_panel()
+
+        self.exclude_tool.clicked.connect(lambda: self.set_selection_tool(SelectionType.EXCLUDE))
+        self.required_tool.clicked.connect(lambda: self.set_selection_tool(SelectionType.REQUIRED))
+        self.timeline.toolChanged.connect(self.update_selection_mode_ui)
         self.timeline.selectionChanged.connect(self.select_selection)
         self.timeline.rangeCreated.connect(self.create_selection)
         self.timeline.rangeEdited.connect(self.edit_range)
         self.timeline.positionPreviewed.connect(self.preview_position)
-        tool_row = QHBoxLayout()
-        tool_row.setSpacing(6)
-        tool_row.addWidget(self.exclude_tool)
-        tool_row.addWidget(self.required_tool)
-        tool_row.addWidget(QLabel("Hover to preview • Drag to mark"))
-        tool_row.addStretch()
+
         self.selection_table = QTableWidget(0, 4)
         self.selection_table.setHorizontalHeaderLabels(["Type", "Start", "End", "Duration"])
         self.selection_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -335,7 +524,7 @@ class ClipPreviewDialog(QDialog):
         self.selection_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         selection_table_height = (
             self.selection_table.horizontalHeader().sizeHint().height()
-            + self.selection_table.verticalHeader().defaultSectionSize() * 5
+            + self.selection_table.verticalHeader().defaultSectionSize() * 4
             + self.selection_table.frameWidth() * 2
             + 4
         )
@@ -361,13 +550,44 @@ class ClipPreviewDialog(QDialog):
         self.button_box.accepted.connect(self.save_and_accept)
         self.button_box.rejected.connect(self.reject)
 
+        self.setStyleSheet(PREVIEW_DIALOG_STYLES)
+
+        self.video_container = AspectWidget(self.video, 16.0 / 9.0)
+
+        right_container = QWidget()
+        right_layout = QVBoxLayout(right_container)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(6)
+        right_layout.addWidget(self.video_container, 1)
+        right_layout.addLayout(controls)
+
+        top_split = QHBoxLayout()
+        top_split.setSpacing(10)
+        top_split.addWidget(self.selection_mode_panel, 1)
+        top_split.addWidget(right_container, 1)
+
+        legend_row = QHBoxLayout()
+        legend_row.setContentsMargins(14, 0, 14, 0)
+        legend_row.setSpacing(16)
+
+        red_dot = QLabel(f'<span style="color:{EXCLUDE_COLOR};">■</span>  Red = Excluded from final video')
+        red_dot.setTextFormat(Qt.TextFormat.RichText)
+        red_dot.setStyleSheet("font-size: 8.5pt; color: #526173;")
+
+        green_dot = QLabel(f'<span style="color:{REQUIRED_COLOR};">■</span>  Green = Must keep in final video')
+        green_dot.setTextFormat(Qt.TextFormat.RichText)
+        green_dot.setStyleSheet("font-size: 8.5pt; color: #526173;")
+
+        legend_row.addWidget(red_dot)
+        legend_row.addWidget(green_dot)
+        legend_row.addStretch()
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(6)
-        layout.addWidget(self.video, 1)
-        layout.addLayout(controls)
-        layout.addLayout(tool_row)
+        layout.addLayout(top_split)
         layout.addWidget(self.timeline)
+        layout.addLayout(legend_row)
         layout.addWidget(self.selection_table, 1)
         layout.addWidget(self.proxy_status)
         layout.addWidget(self.proxy_progress)
@@ -394,8 +614,125 @@ class ClipPreviewDialog(QDialog):
         self.delete_shortcut.activated.connect(self.delete_selection)
         self.backspace_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Backspace), self)
         self.backspace_shortcut.activated.connect(self.delete_selection)
+
+        self.exclude_shortcut = QShortcut(QKeySequence("E"), self)
+        self.exclude_shortcut.activated.connect(lambda: self.set_selection_tool(SelectionType.EXCLUDE))
+        self.required_shortcut = QShortcut(QKeySequence("R"), self)
+        self.required_shortcut.activated.connect(lambda: self.set_selection_tool(SelectionType.REQUIRED))
+
         self.refresh_selections()
         self.position_changed(0)
+        self.set_selection_tool(SelectionType.EXCLUDE)
+
+    def build_selection_mode_panel(self) -> QFrame:
+        panel = QFrame()
+        panel.setObjectName("selectionModePanel")
+
+        outer = QVBoxLayout(panel)
+        outer.setContentsMargins(12, 8, 12, 8)
+        outer.setSpacing(6)
+
+        header = QLabel("SELECTION MODE  (Paint on timeline)")
+        header.setObjectName("selectionModeHeader")
+        outer.addWidget(header)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+
+        self.exclude_tool = QPushButton("⊖  Exclude\nRemove from final video")
+        self.exclude_tool.setObjectName("excludeModeButton")
+        self.exclude_tool.setCheckable(True)
+        self.exclude_tool.setMinimumHeight(48)
+        self.exclude_tool.setMinimumWidth(180)
+        self.exclude_tool.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.exclude_tool.setAccessibleName("Exclude mode")
+        self.exclude_tool.setAccessibleDescription("Remove painted timeline sections from the final video.")
+
+        self.required_tool = QPushButton("✓  Required\nKeep in final video")
+        self.required_tool.setObjectName("requiredModeButton")
+        self.required_tool.setCheckable(True)
+        self.required_tool.setMinimumHeight(48)
+        self.required_tool.setMinimumWidth(180)
+        self.required_tool.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.required_tool.setAccessibleName("Required mode")
+        self.required_tool.setAccessibleDescription("Keep painted timeline sections in the final video.")
+
+        tools = QButtonGroup(self)
+        tools.setExclusive(True)
+        tools.addButton(self.exclude_tool)
+        tools.addButton(self.required_tool)
+
+        self.current_mode_card = QFrame()
+        self.current_mode_card.setObjectName("currentModeCard")
+        current_layout = QVBoxLayout(self.current_mode_card)
+        current_layout.setContentsMargins(12, 6, 12, 6)
+        current_layout.setSpacing(2)
+
+        self.current_mode_title = QLabel()
+        self.current_mode_title.setObjectName("currentModeTitle")
+        self.current_mode_title.setTextFormat(Qt.TextFormat.RichText)
+
+        self.current_mode_instruction = QLabel()
+        self.current_mode_instruction.setObjectName("currentModeInstruction")
+        self.current_mode_instruction.setWordWrap(True)
+
+        current_layout.addWidget(self.current_mode_title)
+        current_layout.addWidget(self.current_mode_instruction)
+
+
+
+        btn_row.addWidget(self.exclude_tool)
+        btn_row.addWidget(self.required_tool)
+
+        outer.addLayout(btn_row)
+        outer.addWidget(self.current_mode_card)
+
+        self.timeline_help_label = QLabel(
+            "Drag left or right on the timeline to paint. Press E for Exclude, R for Required."
+        )
+        self.timeline_help_label.setObjectName("timelineHelpLabel")
+        outer.addWidget(self.timeline_help_label)
+
+        return panel
+
+    def set_selection_tool(self, selection_type: SelectionType) -> None:
+        self.timeline.set_tool(selection_type)
+        self.update_selection_mode_ui(selection_type)
+
+    def update_selection_mode_ui(self, selection_type: SelectionType | None = None) -> None:
+        selection_type = selection_type or self.timeline.tool
+
+        exclude_active = selection_type is SelectionType.EXCLUDE
+        required_active = selection_type is SelectionType.REQUIRED
+
+        self.exclude_tool.setChecked(exclude_active)
+        self.required_tool.setChecked(required_active)
+
+        self.exclude_tool.setProperty("modeActive", "true" if exclude_active else "false")
+        self.required_tool.setProperty("modeActive", "true" if required_active else "false")
+
+        self._repolish(self.exclude_tool)
+        self._repolish(self.required_tool)
+
+        if exclude_active:
+            self.current_mode_title.setText(
+                f'Current mode: <span style="color:{EXCLUDE_COLOR}; font-weight:800;">EXCLUDE</span>'
+            )
+            self.current_mode_instruction.setText("⊖ Drag on the timeline to paint red excluded segments.")
+            self.current_mode_card.setProperty("mode", "exclude")
+        else:
+            self.current_mode_title.setText(
+                f'Current mode: <span style="color:{REQUIRED_COLOR}; font-weight:800;">REQUIRED</span>'
+            )
+            self.current_mode_instruction.setText("✓ Drag on the timeline to paint green required segments.")
+            self.current_mode_card.setProperty("mode", "required")
+
+        self._repolish(self.current_mode_card)
+
+    def _repolish(self, widget: QWidget) -> None:
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
+        widget.update()
 
     def exit_fullscreen(self) -> None:
         if not self.isFullScreen():
@@ -647,14 +984,14 @@ class ClipPreviewDialog(QDialog):
         self.selection_table.setRowCount(len(self.draft))
         for row, selection in enumerate(self.draft):
             values = [
-                "Required" if selection.type is SelectionType.REQUIRED else "Exclude",
+                "✓ Required" if selection.type is SelectionType.REQUIRED else "⊖ Exclude",
                 format_timecode(selection.start_ms), format_timecode(selection.end_ms),
                 format_timecode(selection.duration_ms),
             ]
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 if column == 0:
-                    item.setForeground(QColor("#0E56AA") if selection.type is SelectionType.REQUIRED else QColor("#bd2f2f"))
+                    item.setForeground(QColor(REQUIRED_COLOR) if selection.type is SelectionType.REQUIRED else QColor(EXCLUDE_COLOR))
                 self.selection_table.setItem(row, column, item)
         if 0 <= self.selected_index < len(self.draft):
             self.selection_table.selectRow(self.selected_index)

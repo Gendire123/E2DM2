@@ -30,9 +30,6 @@ class SelectionType(str, Enum):
     REQUIRED = "required"
 
 
-MAX_REQUIRED_SELECTION_MS = 20_000
-
-
 @dataclass(slots=True)
 class ClipSelection:
     type: SelectionType
@@ -65,8 +62,6 @@ def validate_clip_selections(selections: list[ClipSelection], clip_duration_seco
             raise ValueError("Selection times must stay within the source clip.")
         if selection.start_ms >= selection.end_ms:
             raise ValueError("Selection end time must be after its start time.")
-        if selection.type is SelectionType.REQUIRED and selection.duration_ms > MAX_REQUIRED_SELECTION_MS:
-            raise ValueError("Required selections cannot be longer than 20 seconds.")
         if previous is not None and selection.start_ms < previous.end_ms:
             raise ValueError("Selections cannot overlap.")
         previous = selection

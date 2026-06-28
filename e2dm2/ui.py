@@ -3345,12 +3345,21 @@ QTableWidget::item:selected {
     color: #142033;
 }
 
-QHeaderView::section {
+QHeaderView::section:horizontal {
     background: #F7FAFA;
     color: #526173;
     border: 0;
     border-bottom: 1px solid #DDE5E7;
     padding: 12px 10px;
+    font-weight: 700;
+}
+
+QHeaderView::section:vertical {
+    background: #F7FAFA;
+    color: #526173;
+    border: 0;
+    border-right: 1px solid #DDE5E7;
+    padding: 2px 8px;
     font-weight: 700;
 }
 
