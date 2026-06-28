@@ -884,7 +884,9 @@ class WorkspacePage(QWidget):
         self.project_title.setText(project.settings.name)
         self.project_path.setText(str(project.path))
         workflow_index = self.workflow_combo.findData(project.settings.workflow)
+        self.workflow_combo.blockSignals(True)
         self.workflow_combo.setCurrentIndex(max(0, workflow_index))
+        self.workflow_combo.blockSignals(False)
         self.source_export.setChecked(ExportSize.SOURCE in project.settings.exports)
         self.hd_export.setChecked(ExportSize.HD_1080 in project.settings.exports)
         self.refresh_media()
@@ -1098,6 +1100,7 @@ class WorkspacePage(QWidget):
                 selected_row = 0
             if selected_row >= 0:
                 self.song_table.selectRow(selected_row)
+                self._update_preview_selection(self.song_table)
 
         # 2. Full-length Video filter. Legacy tracks remain available beside
         # songs added through the managed catalog.
@@ -1147,6 +1150,7 @@ class WorkspacePage(QWidget):
                 selected_full_row = 0
             if selected_full_row >= 0:
                 self.full_song_table.selectRow(selected_full_row)
+                self._update_preview_selection(self.full_song_table)
 
         # 3. Real Estate Showcase filter
         if hasattr(self, "re_mood_filter"):
@@ -1173,12 +1177,20 @@ class WorkspacePage(QWidget):
                 selected_re_row = 0
             if selected_re_row >= 0:
                 self.re_song_table.selectRow(selected_re_row)
+                self._update_preview_selection(self.re_song_table)
 
     def song_selected(self) -> None:
         sender = self.sender()
         if sender in (self.song_table, self.full_song_table, self.re_song_table):
             self._update_preview_selection(sender)
         if not self.project:
+            return
+        table_workflows = {
+            self.song_table: WorkflowMode.EPIC_MONTAGE,
+            self.full_song_table: WorkflowMode.FULL_LENGTH,
+            self.re_song_table: WorkflowMode.REAL_ESTATE,
+        }
+        if table_workflows.get(sender) != self.workflow_combo.currentData():
             return
         if sender == self.song_table:
             row = self.song_table.currentRow()
@@ -1201,10 +1213,32 @@ class WorkspacePage(QWidget):
         workflow = self.workflow_combo.currentData()
         if workflow == WorkflowMode.EPIC_MONTAGE:
             self.mode_stack.setCurrentIndex(0)
+            table = self.song_table
         elif workflow == WorkflowMode.FULL_LENGTH:
             self.mode_stack.setCurrentIndex(1)
+            table = self.full_song_table
         elif workflow == WorkflowMode.REAL_ESTATE:
             self.mode_stack.setCurrentIndex(2)
+            table = self.re_song_table
+        else:
+            return
+
+        if table.rowCount() == 0:
+            return
+        if workflow in {WorkflowMode.FULL_LENGTH, WorkflowMode.REAL_ESTATE} or table.currentRow() < 0:
+            table.selectRow(0)
+        self._update_preview_selection(table)
+
+        if not self.project:
+            return
+        item = table.item(table.currentRow(), 0)
+        if item is None:
+            return
+        selected_id = item.data(Qt.ItemDataRole.UserRole)
+        if workflow == WorkflowMode.FULL_LENGTH:
+            self.project.settings.full_length_track_id = selected_id
+        else:
+            self.project.settings.song_id = selected_id
 
     def add_files(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(self, "Import drone footage", "", "Video (*.mp4 *.mov *.m4v)")

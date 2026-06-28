@@ -120,6 +120,36 @@ def test_full_length_workflow_uses_library_table_and_tracks_selection(qtbot, tmp
     assert project.settings.full_length_track_id == "drone-music-2"
 
 
+def test_new_project_and_workflow_changes_select_default_songs(qtbot, tmp_path):
+    page = WorkspacePage()
+    qtbot.addWidget(page)
+    project = create_project("Default Songs", tmp_path / "projects")
+    page.set_project(project)
+
+    assert project.settings.song_id == "epic-montage-1"
+    assert page.song_table.currentRow() == 0
+    assert page.song_table.item(0, 0).data(Qt.ItemDataRole.UserRole) == "epic-montage-1"
+    epic_cell = page.song_table.cellWidget(0, 0)
+    assert "background: #0e54a9" in epic_cell.styleSheet()
+    assert "color: #ffffff" in epic_cell.title_label.styleSheet()
+
+    page.workflow_combo.setCurrentIndex(page.workflow_combo.findData(WorkflowMode.FULL_LENGTH))
+    first_full_length_id = page.full_song_table.item(0, 0).data(Qt.ItemDataRole.UserRole)
+    assert page.full_song_table.currentRow() == 0
+    assert project.settings.full_length_track_id == first_full_length_id
+    full_cell = page.full_song_table.cellWidget(0, 0)
+    assert "background: #0e54a9" in full_cell.styleSheet()
+    assert "color: #ffffff" in full_cell.title_label.styleSheet()
+
+    page.workflow_combo.setCurrentIndex(page.workflow_combo.findData(WorkflowMode.REAL_ESTATE))
+    first_real_estate_id = page.re_song_table.item(0, 0).data(Qt.ItemDataRole.UserRole)
+    assert page.re_song_table.currentRow() == 0
+    assert project.settings.song_id == first_real_estate_id
+    real_estate_cell = page.re_song_table.cellWidget(0, 0)
+    assert "background: #0e54a9" in real_estate_cell.styleSheet()
+    assert "color: #ffffff" in real_estate_cell.title_label.styleSheet()
+
+
 def test_song_row_preview_toggles_play_pause_and_progress(qtbot):
     from PySide6.QtMultimedia import QMediaPlayer
 
