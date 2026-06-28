@@ -959,7 +959,7 @@ class WorkspacePage(QWidget):
             return
         tabs_y = self.workspace_tabs.y()
         logo_bottom = 24 + self.sidebar_logo_label.height()
-        spacing = max(0, tabs_y - logo_bottom)
+        spacing = max(0, tabs_y - logo_bottom - 30)
         self.sidebar_logo_spacer.setFixedHeight(spacing)
 
     def _metric_item(self, value_label: QLabel, caption: str, icon: QIcon | None = None) -> QWidget:
@@ -2675,6 +2675,16 @@ class OptionsDialog(QDialog):
         subtitle.setObjectName("optionsSubtitle")
         subtitle.setWordWrap(True)
 
+        # Setup Tab Widget
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setObjectName("optionsTabWidget")
+
+        # Tab 1: General
+        general_tab = QWidget()
+        general_layout = QVBoxLayout(general_tab)
+        general_layout.setContentsMargins(0, 0, 0, 0)
+        general_layout.setSpacing(0)
+
         card = QFrame()
         card.setObjectName("optionsCard")
         card_layout = QVBoxLayout(card)
@@ -2735,6 +2745,108 @@ class OptionsDialog(QDialog):
         card_layout.addSpacing(4)
         card_layout.addLayout(output_row)
 
+        general_layout.addWidget(card)
+        self.tab_widget.addTab(general_tab, "General")
+
+        # Tab 2: Codec Settings
+        codec_tab = QWidget()
+        codec_layout = QVBoxLayout(codec_tab)
+        codec_layout.setContentsMargins(0, 0, 0, 0)
+        codec_layout.setSpacing(0)
+
+        codec_card = QFrame()
+        codec_card.setObjectName("optionsCard")
+        codec_card_layout = QVBoxLayout(codec_card)
+        codec_card_layout.setContentsMargins(20, 18, 20, 18)
+        codec_card_layout.setSpacing(8)
+
+        codec_section = QLabel("VIDEO ENCODING")
+        codec_section.setObjectName("optionsSection")
+        
+        codec_lbl = QLabel("Video Codec")
+        codec_lbl.setObjectName("optionTitle")
+        codec_desc = QLabel("Select the video format and encoder to use for rendering.")
+        codec_desc.setObjectName("optionDescription")
+        codec_desc.setWordWrap(True)
+        
+        self.codec_combo = SoundtrackComboBox()
+        self.codec_combo.addItems(["H.264 (AVC)", "H.265 (HEVC)"])
+        self.codec_combo.setCurrentText(self.settings.value("codec", "H.264 (AVC)"))
+        self.codec_combo.currentTextChanged.connect(self._save_codec_preferences)
+        
+        codec_card_layout.addWidget(codec_section)
+        codec_card_layout.addWidget(codec_lbl)
+        codec_card_layout.addWidget(codec_desc)
+        codec_card_layout.addSpacing(4)
+        codec_card_layout.addWidget(self.codec_combo)
+        
+        codec_card_layout.addSpacing(16)
+        
+        quality_section = QLabel("COMPRESSION & QUALITY")
+        quality_section.setObjectName("optionsSection")
+        quality_lbl = QLabel("Target Quality")
+        quality_lbl.setObjectName("optionTitle")
+        quality_desc = QLabel("Higher percentage yields better visual details but larger file sizes.")
+        quality_desc.setObjectName("optionDescription")
+        quality_desc.setWordWrap(True)
+        
+        quality_row = QHBoxLayout()
+        self.quality_slider = QSlider(Qt.Orientation.Horizontal)
+        self.quality_slider.setMinimumHeight(28)
+        self.quality_slider.setRange(10, 100)
+        self.quality_slider.setSingleStep(5)
+        self.quality_slider.setPageStep(10)
+        
+        initial_quality = int(self.settings.value("quality", 80))
+        self.quality_slider.setValue(initial_quality)
+        
+        self.quality_val_label = QLabel(f"{initial_quality}%")
+        self.quality_val_label.setFixedWidth(40)
+        self.quality_val_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.quality_val_label.setStyleSheet("font-weight: bold; color: #142033; background: transparent;")
+        
+        self.quality_slider.valueChanged.connect(self._on_quality_slider_changed)
+        
+        quality_row.addWidget(self.quality_slider, 1)
+        quality_row.addWidget(self.quality_val_label)
+        
+        codec_card_layout.addWidget(quality_section)
+        codec_card_layout.addWidget(quality_lbl)
+        codec_card_layout.addWidget(quality_desc)
+        codec_card_layout.addSpacing(4)
+        codec_card_layout.addLayout(quality_row)
+        
+        codec_card_layout.addSpacing(16)
+        
+        compression_lbl = QLabel("Compression Speed / Preset")
+        compression_lbl.setObjectName("optionTitle")
+        compression_desc = QLabel("Balances encoding duration against compression efficiency.")
+        compression_desc.setObjectName("optionDescription")
+        compression_desc.setWordWrap(True)
+        
+        self.compression_combo = SoundtrackComboBox()
+        self.compression_combo.addItems(["Low (Fast render, larger file)", "Medium (Standard)", "High (Slow render, smaller file)"])
+        self.compression_combo.setCurrentText(self.settings.value("compression", "Medium (Standard)"))
+        self.compression_combo.currentTextChanged.connect(self._save_codec_preferences)
+        
+        codec_card_layout.addWidget(compression_lbl)
+        codec_card_layout.addWidget(compression_desc)
+        codec_card_layout.addSpacing(4)
+        codec_card_layout.addWidget(self.compression_combo)
+        
+        codec_card_layout.addSpacing(16)
+        
+        self.hw_accel_checkbox = VisibleCheckBox("Use GPU hardware acceleration when available")
+        self.hw_accel_checkbox.setObjectName("hwAccelOption")
+        self.hw_accel_checkbox.setChecked(self.settings.value("hardware_acceleration", True, type=bool))
+        self.hw_accel_checkbox.toggled.connect(self._save_codec_preferences)
+        
+        codec_card_layout.addWidget(self.hw_accel_checkbox)
+
+        codec_layout.addWidget(codec_card)
+        self.tab_widget.addTab(codec_tab, "Codec Settings")
+
+        # Dialog main elements
         hint = QLabel("Changes are saved automatically and take effect the next time you launch E2DM2.")
         hint.setObjectName("optionsHint")
         hint.setWordWrap(True)
@@ -2747,7 +2859,7 @@ class OptionsDialog(QDialog):
         layout.setSpacing(14)
         layout.addWidget(title)
         layout.addWidget(subtitle)
-        layout.addWidget(card)
+        layout.addWidget(self.tab_widget)
         layout.addWidget(hint)
         layout.addWidget(buttons)
 
@@ -2768,6 +2880,17 @@ class OptionsDialog(QDialog):
     def _clear_output_folder(self) -> None:
         self.output_edit.clear()
         self.settings.remove("custom_output_folder")
+        self.settings.sync()
+
+    def _on_quality_slider_changed(self, value: int) -> None:
+        self.quality_val_label.setText(f"{value}%")
+        self._save_codec_preferences()
+
+    def _save_codec_preferences(self, *args) -> None:
+        self.settings.setValue("codec", self.codec_combo.currentText())
+        self.settings.setValue("quality", self.quality_slider.value())
+        self.settings.setValue("compression", self.compression_combo.currentText())
+        self.settings.setValue("hardware_acceleration", self.hw_accel_checkbox.isChecked())
         self.settings.sync()
 
 
@@ -3158,8 +3281,21 @@ QTabWidget::pane {
     border-radius: 12px;
 }
 
+QTabWidget#optionsTabWidget::pane {
+    border: 0;
+    background: transparent;
+}
+
+QTabWidget#optionsTabWidget::tab-bar {
+    left: 0px;
+}
+
 QTabWidget > QWidget, QTabWidget > QStackedWidget > QWidget {
     background: #FFFFFF;
+}
+
+QTabWidget#optionsTabWidget > QWidget, QTabWidget#optionsTabWidget > QStackedWidget > QWidget {
+    background: transparent;
 }
 
 QTabWidget > QTabBar {
@@ -3448,6 +3584,29 @@ QAbstractItemView::item:selected:active {
 QAbstractItemView::item:selected:!active {
     background: #EAF2FC;
     color: #142033;
+}
+
+/* Custom QSlider Styling */
+QSlider::groove:horizontal {
+    height: 6px;
+    background: #DDE5EF;
+    border-radius: 3px;
+}
+QSlider::sub-page:horizontal {
+    background: #0E56AA;
+    border-radius: 3px;
+}
+QSlider::add-page:horizontal {
+    background: #DDE5EF;
+    border-radius: 3px;
+}
+QSlider::handle:horizontal {
+    width: 18px;
+    height: 18px;
+    margin: -6px 0;
+    background: #ffffff;
+    border: 2px solid #084481;
+    border-radius: 9px;
 }
 """
 

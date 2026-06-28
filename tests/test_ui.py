@@ -252,6 +252,32 @@ def test_options_dialog_persists_splash_screen_preference(qtbot, tmp_path):
     assert dialog.output_edit.text() == ""
     assert settings.value("custom_output_folder", "") == ""
 
+    # Verify tabs exist and are correctly named
+    assert dialog.tab_widget.count() == 2
+    assert dialog.tab_widget.tabText(0) == "General"
+    assert dialog.tab_widget.tabText(1) == "Codec Settings"
+
+    # Verify initial Codec Settings tab values
+    assert dialog.codec_combo.currentText() == "H.264 (AVC)"
+    assert dialog.quality_slider.value() == 80
+    assert dialog.quality_val_label.text() == "80%"
+    assert dialog.compression_combo.currentText() == "Medium (Standard)"
+    assert dialog.hw_accel_checkbox.isChecked() is True
+
+    # Test changing codec settings and verification of settings persistence
+    dialog.codec_combo.setCurrentText("H.265 (HEVC)")
+    assert settings.value("codec") == "H.265 (HEVC)"
+
+    dialog.quality_slider.setValue(90)
+    assert int(settings.value("quality")) == 90
+    assert dialog.quality_val_label.text() == "90%"
+
+    dialog.compression_combo.setCurrentText("High (Slow render, smaller file)")
+    assert settings.value("compression") == "High (Slow render, smaller file)"
+
+    dialog.hw_accel_checkbox.setChecked(False)
+    assert settings.value("hardware_acceleration") in (False, "false")
+
 
 def test_background_import_worker_is_retained(qtbot, tmp_path):
     source = tmp_path / "worker-test.mp4"
