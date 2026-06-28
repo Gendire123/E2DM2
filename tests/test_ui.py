@@ -10,7 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QAbstractAnimation, QObject, QPoint, QSettings, QSize, Qt, Signal, Slot
 from PySide6.QtGui import QPalette
-from PySide6.QtWidgets import QLabel, QMessageBox, QProgressBar, QProgressDialog, QTabWidget, QTableWidget, QTableWidgetItem, QWidget
+from PySide6.QtWidgets import QLabel, QMessageBox, QProgressBar, QProgressDialog, QTabWidget, QTableWidget, QTableWidgetItem, QWidget, QDialogButtonBox
 
 from e2dm2.models import ClipSelection, MediaItem, RenderResult, SelectionType, WorkflowMode
 from e2dm2.preview import ClipPreviewDialog, SelectionTimeline, format_timecode, parse_timecode
@@ -1012,5 +1012,46 @@ def test_drag_middle_of_selection_slides_it(qtbot):
     assert edited[0][0] == 0
     assert abs(edited[0][1] - 15000) <= 200
     assert abs(edited[0][2] - 25000) <= 200
+
+
+def test_clip_preview_dialog_redesign(qtbot, tmp_path):
+    media = MediaItem(
+        "source/test.mp4", "test.mp4", 320, 180, 30, 30, "h264", 1,
+        [ClipSelection(SelectionType.EXCLUDE, 1000, 2000)],
+    )
+    dialog = ClipPreviewDialog(media, str(tmp_path / "missing.mp4"))
+    qtbot.addWidget(dialog)
+    dialog.show()
+
+    # Verify column count and headers
+    assert dialog.selection_table.columnCount() == 5
+    headers = [dialog.selection_table.horizontalHeaderItem(i).text() for i in range(5)]
+    assert headers == ["#", "Type", "Start", "End", "Duration"]
+
+    # Verify table content population (row index centered, icon set)
+    num_item = dialog.selection_table.item(0, 0)
+    assert num_item.text() == "1"
+    assert num_item.textAlignment() == Qt.AlignmentFlag.AlignCenter
+
+    type_item = dialog.selection_table.item(0, 1)
+    assert type_item.text() == "Exclude"
+    assert not type_item.icon().isNull()
+
+    # Verify timeline help text contains circled info icon
+    assert "ⓘ" in dialog.timeline_help_label.text()
+
+    # Verify buttons have correct objectNames
+    assert dialog.play_button.objectName() == "playButton"
+    assert dialog.fullscreen_button.objectName() == "fullscreenButton"
+
+    save_btn = dialog.button_box.button(QDialogButtonBox.StandardButton.Save)
+    cancel_btn = dialog.button_box.button(QDialogButtonBox.StandardButton.Cancel)
+    assert save_btn.objectName() == "saveButton"
+    assert cancel_btn.objectName() == "cancelButton"
+
+    # Verify inner layout widgets for Exclude and Required tools
+    assert dialog.exclude_title_label.text() == "Exclude"
+    assert dialog.required_title_label.text() == "Required"
+
 
 

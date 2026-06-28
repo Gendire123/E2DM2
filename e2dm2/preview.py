@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QProcess, QRectF, QSize, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QColor, QKeySequence, QMouseEvent, QPainter, QPen, QShortcut
+from PySide6.QtCore import QEvent, QPoint, QPointF, QProcess, QRectF, QSize, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QBrush, QColor, QIcon, QKeySequence, QMouseEvent, QPainter, QPen, QPixmap, QShortcut
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
@@ -67,10 +67,9 @@ QFrame#selectionModePanel {{
 }}
 
 QLabel#selectionModeHeader {{
-    color: #526173;
-    font-size: 8.5pt;
+    color: #142033;
+    font-size: 13.5pt;
     font-weight: 800;
-    letter-spacing: 0.5px;
 }}
 
 QPushButton#excludeModeButton,
@@ -79,7 +78,7 @@ QPushButton#requiredModeButton {{
     color: {TEXT_DARK};
     border: 1px solid #CDD8DC;
     border-radius: 10px;
-    padding: 6px 12px;
+    padding: 2px;
     font-size: 9.5pt;
     font-weight: 800;
     text-align: left;
@@ -148,6 +147,84 @@ QLabel#requiredLegendDot {{
 QLabel#timelineHelpLabel {{
     color: {TEXT_MUTED};
     font-size: 8.5pt;
+}}
+
+QPushButton#playButton {{
+    background: #FFFFFF;
+    border: 1px solid #CDD8DC;
+    border-radius: 6px;
+    min-width: 32px;
+    max-width: 32px;
+    min-height: 32px;
+    max-height: 32px;
+    padding: 0;
+}}
+QPushButton#playButton:hover {{
+    background: #F7FAFA;
+    border-color: #AEBEC4;
+}}
+QPushButton#playButton:pressed {{
+    background: #EEF2F3;
+}}
+
+QPushButton#fullscreenButton {{
+    background: #FFFFFF;
+    border: 1px solid #CDD8DC;
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-weight: 600;
+    font-size: 9.5pt;
+    height: 20px;
+}}
+QPushButton#fullscreenButton:hover {{
+    background: #F7FAFA;
+    border-color: #AEBEC4;
+}}
+QPushButton#fullscreenButton:pressed {{
+    background: #EEF2F3;
+}}
+
+QPushButton#saveButton {{
+    background: #2F80ED;
+    color: #FFFFFF;
+    border: 1px solid #1B6FD1;
+    border-radius: 8px;
+    padding: 8px 20px;
+    font-size: 9.5pt;
+    font-weight: 800;
+    min-width: 90px;
+}}
+QPushButton#saveButton:hover {{
+    background: #1B6FD1;
+}}
+QPushButton#cancelButton {{
+    background: #FFFFFF;
+    color: #526173;
+    border: 1px solid #CDD8DC;
+    border-radius: 8px;
+    padding: 8px 20px;
+    font-size: 9.5pt;
+    font-weight: 800;
+    min-width: 90px;
+}}
+QPushButton#cancelButton:hover {{
+    background: #F5F7F8;
+    border-color: #B0BEC5;
+}}
+
+QProgressBar {{
+    background-color: #EEF2F6;
+    border: 1px solid #CDD8DC;
+    border-radius: 6px;
+    text-align: center;
+    color: #000000;
+    font-weight: bold;
+    font-size: 9pt;
+}}
+
+QProgressBar::chunk {{
+    background-color: #90CAF9;
+    border-radius: 5px;
 }}
 """
 
@@ -431,6 +508,7 @@ class AspectWidget(QWidget):
         super().__init__(parent)
         self.child = child
         self.ratio = ratio
+        self.on_resize_callback = None
         child.setParent(self)
 
     def sizeHint(self) -> QSize:
@@ -454,10 +532,171 @@ class AspectWidget(QWidget):
         x = (w - new_w) // 2
         y = (h - new_h) // 2
         self.child.setGeometry(x, y, new_w, new_h)
+        if self.on_resize_callback:
+            self.on_resize_callback(x, new_w)
 
 
 
 class ClipPreviewDialog(QDialog):
+    def create_exclude_table_icon(self) -> QIcon:
+        pixmap = QPixmap(64, 64)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        pixmap.setDevicePixelRatio(4.0)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setBrush(QColor(EXCLUDE_COLOR))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(QRectF(1.0, 1.0, 14.0, 14.0))
+        painter.setPen(QPen(Qt.GlobalColor.white, 2.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.drawLine(QPointF(4.0, 8.0), QPointF(12.0, 8.0))
+        painter.end()
+        return QIcon(pixmap)
+
+    def create_required_table_icon(self) -> QIcon:
+        pixmap = QPixmap(64, 64)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        pixmap.setDevicePixelRatio(4.0)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(QColor(REQUIRED_COLOR), 2.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        painter.drawLine(QPointF(4.0, 8.0), QPointF(7.0, 11.0))
+        painter.drawLine(QPointF(7.0, 11.0), QPointF(12.0, 4.0))
+        painter.end()
+        return QIcon(pixmap)
+
+    def create_exclude_button_icons(self) -> tuple[QPixmap, QPixmap]:
+        # Inactive: red circle, white minus
+        pixmap_inactive = QPixmap(128, 128)
+        pixmap_inactive.fill(Qt.GlobalColor.transparent)
+        pixmap_inactive.setDevicePixelRatio(4.0)
+        painter = QPainter(pixmap_inactive)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setBrush(QColor(EXCLUDE_COLOR))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(QRectF(1.0, 1.0, 30.0, 30.0))
+        painter.setPen(QPen(Qt.GlobalColor.white, 3.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.drawLine(QPointF(8.0, 16.0), QPointF(24.0, 16.0))
+        painter.end()
+
+        # Active: white circle, red minus
+        pixmap_active = QPixmap(128, 128)
+        pixmap_active.fill(Qt.GlobalColor.transparent)
+        pixmap_active.setDevicePixelRatio(4.0)
+        painter = QPainter(pixmap_active)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setBrush(Qt.GlobalColor.white)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(QRectF(1.0, 1.0, 30.0, 30.0))
+        painter.setPen(QPen(QColor(EXCLUDE_COLOR), 3.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.drawLine(QPointF(8.0, 16.0), QPointF(24.0, 16.0))
+        painter.end()
+
+        return pixmap_inactive, pixmap_active
+
+    def create_required_button_icons(self) -> tuple[QPixmap, QPixmap]:
+        # Inactive: white circle with gray border, green checkmark
+        pixmap_inactive = QPixmap(128, 128)
+        pixmap_inactive.fill(Qt.GlobalColor.transparent)
+        pixmap_inactive.setDevicePixelRatio(4.0)
+        painter = QPainter(pixmap_inactive)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(QColor("#CDD8DC"), 1.5))
+        painter.setBrush(Qt.GlobalColor.white)
+        painter.drawEllipse(QRectF(1.0, 1.0, 30.0, 30.0))
+        painter.setPen(QPen(QColor(REQUIRED_COLOR), 3.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        painter.drawLine(QPointF(9.0, 16.0), QPointF(14.0, 21.0))
+        painter.drawLine(QPointF(14.0, 21.0), QPointF(22.0, 10.0))
+        painter.end()
+
+        # Active: white circle, green checkmark
+        pixmap_active = QPixmap(128, 128)
+        pixmap_active.fill(Qt.GlobalColor.transparent)
+        pixmap_active.setDevicePixelRatio(4.0)
+        painter = QPainter(pixmap_active)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(Qt.GlobalColor.white, 1.5))
+        painter.setBrush(Qt.GlobalColor.white)
+        painter.drawEllipse(QRectF(1.0, 1.0, 30.0, 30.0))
+        painter.setPen(QPen(QColor(REQUIRED_COLOR), 3.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        painter.drawLine(QPointF(9.0, 16.0), QPointF(14.0, 21.0))
+        painter.drawLine(QPointF(14.0, 21.0), QPointF(22.0, 10.0))
+        painter.end()
+
+        return pixmap_inactive, pixmap_active
+
+    def create_exclude_card_icon(self) -> QPixmap:
+        pixmap = QPixmap(96, 96)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        pixmap.setDevicePixelRatio(4.0)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setBrush(QColor(EXCLUDE_COLOR))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(QRectF(1.0, 1.0, 22.0, 22.0))
+        painter.setPen(QPen(Qt.GlobalColor.white, 3.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.drawLine(QPointF(6.0, 12.0), QPointF(18.0, 12.0))
+        painter.end()
+        return pixmap
+
+    def create_required_card_icon(self) -> QPixmap:
+        pixmap = QPixmap(96, 96)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        pixmap.setDevicePixelRatio(4.0)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(QColor(REQUIRED_COLOR), 2.0))
+        painter.setBrush(Qt.GlobalColor.white)
+        painter.drawEllipse(QRectF(1.0, 1.0, 22.0, 22.0))
+        painter.setPen(QPen(QColor(REQUIRED_COLOR), 3.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        painter.drawLine(QPointF(6.0, 12.0), QPointF(10.0, 16.0))
+        painter.drawLine(QPointF(10.0, 16.0), QPointF(18.0, 7.0))
+        painter.end()
+        return pixmap
+
+    def create_play_icon(self) -> QIcon:
+        pixmap = QPixmap(64, 64)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        pixmap.setDevicePixelRatio(4.0)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setBrush(QColor("#142033"))
+        painter.setPen(Qt.PenStyle.NoPen)
+        points = [QPointF(4.0, 3.0), QPointF(4.0, 13.0), QPointF(13.0, 8.0)]
+        painter.drawPolygon(points)
+        painter.end()
+        return QIcon(pixmap)
+
+    def create_pause_icon(self) -> QIcon:
+        pixmap = QPixmap(64, 64)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        pixmap.setDevicePixelRatio(4.0)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setBrush(QColor("#142033"))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRect(QRectF(4.0, 3.0, 3.0, 10.0))
+        painter.drawRect(QRectF(9.0, 3.0, 3.0, 10.0))
+        painter.end()
+        return QIcon(pixmap)
+
+    def create_fullscreen_icon(self) -> QIcon:
+        pixmap = QPixmap(64, 64)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        pixmap.setDevicePixelRatio(4.0)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(QColor("#142033"), 1.8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.FlatCap, Qt.PenJoinStyle.MiterJoin))
+        painter.drawLine(QPointF(3.0, 6.0), QPointF(3.0, 3.0))
+        painter.drawLine(QPointF(3.0, 3.0), QPointF(6.0, 3.0))
+        painter.drawLine(QPointF(10.0, 3.0), QPointF(13.0, 3.0))
+        painter.drawLine(QPointF(13.0, 3.0), QPointF(13.0, 6.0))
+        painter.drawLine(QPointF(3.0, 10.0), QPointF(3.0, 13.0))
+        painter.drawLine(QPointF(3.0, 13.0), QPointF(6.0, 13.0))
+        painter.drawLine(QPointF(10.0, 13.0), QPointF(13.0, 13.0))
+        painter.drawLine(QPointF(13.0, 13.0), QPointF(13.0, 10.0))
+        painter.end()
+        return QIcon(pixmap)
+
     def __init__(
         self, media: MediaItem, media_path: str, parent: QWidget | None = None, proxy_path: str | None = None,
     ) -> None:
@@ -492,16 +731,30 @@ class ClipPreviewDialog(QDialog):
         self.player.setAudioOutput(self.audio)
         self.player.setVideoOutput(self.video)
 
-        self.play_button = QPushButton("Play")
+        self.play_icon = self.create_play_icon()
+        self.pause_icon = self.create_pause_icon()
+        self.fullscreen_icon = self.create_fullscreen_icon()
+
+        self.play_button = QPushButton()
+        self.play_button.setObjectName("playButton")
+        self.play_button.setIcon(self.play_icon)
+        self.play_button.setIconSize(QSize(16, 16))
         self.play_button.clicked.connect(self.toggle_playback)
+
         self.time_label = QLabel()
+
         self.fullscreen_button = QPushButton("Full Screen")
+        self.fullscreen_button.setObjectName("fullscreenButton")
+        self.fullscreen_button.setIcon(self.fullscreen_icon)
+        self.fullscreen_button.setIconSize(QSize(14, 14))
         self.fullscreen_button.clicked.connect(self.toggle_fullscreen)
-        controls = QHBoxLayout()
-        controls.addWidget(self.play_button)
-        controls.addStretch(1)
-        controls.addWidget(self.time_label)
-        controls.addWidget(self.fullscreen_button)
+
+        self.controls_layout = QHBoxLayout()
+        self.controls_layout.addWidget(self.play_button)
+        self.controls_layout.addStretch(1)
+        self.controls_layout.addWidget(self.time_label)
+        self.controls_layout.addStretch(1)
+        self.controls_layout.addWidget(self.fullscreen_button)
 
         self.timeline = SelectionTimeline(self.duration_ms)
         self.timeline.setToolTip("Hover to preview a frame. Choose a paint mode, then drag to mark a range.")
@@ -516,12 +769,26 @@ class ClipPreviewDialog(QDialog):
         self.timeline.rangeEdited.connect(self.edit_range)
         self.timeline.positionPreviewed.connect(self.preview_position)
 
-        self.selection_table = QTableWidget(0, 4)
-        self.selection_table.setHorizontalHeaderLabels(["Type", "Start", "End", "Duration"])
+        self.exclude_table_icon = self.create_exclude_table_icon()
+        self.required_table_icon = self.create_required_table_icon()
+
+        self.selection_table = QTableWidget(0, 5)
+        self.selection_table.setObjectName("selectionTable")
+        self.selection_table.setHorizontalHeaderLabels(["#", "Type", "Start", "End", "Duration"])
+        self.selection_table.verticalHeader().setVisible(False)
         self.selection_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.selection_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.selection_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.selection_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+
+        header = self.selection_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        self.selection_table.setColumnWidth(0, 50)
+        self.selection_table.setColumnWidth(1, 150)
+
         selection_table_height = (
             self.selection_table.horizontalHeader().sizeHint().height()
             + self.selection_table.verticalHeader().defaultSectionSize() * 4
@@ -546,20 +813,28 @@ class ClipPreviewDialog(QDialog):
         self.proxy_progress.setFormat("Preparing fast preview… %p%")
         self.proxy_progress.setMaximumHeight(18)
         self.proxy_progress.setVisible(False)
+
         self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        save_btn = self.button_box.button(QDialogButtonBox.StandardButton.Save)
+        if save_btn:
+            save_btn.setObjectName("saveButton")
+        cancel_btn = self.button_box.button(QDialogButtonBox.StandardButton.Cancel)
+        if cancel_btn:
+            cancel_btn.setObjectName("cancelButton")
         self.button_box.accepted.connect(self.save_and_accept)
         self.button_box.rejected.connect(self.reject)
 
         self.setStyleSheet(PREVIEW_DIALOG_STYLES)
 
         self.video_container = AspectWidget(self.video, 16.0 / 9.0)
+        self.video_container.on_resize_callback = self.adjust_controls_margins
 
         right_container = QWidget()
         right_layout = QVBoxLayout(right_container)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(6)
         right_layout.addWidget(self.video_container, 1)
-        right_layout.addLayout(controls)
+        right_layout.addLayout(self.controls_layout)
 
         top_split = QHBoxLayout()
         top_split.setSpacing(10)
@@ -624,49 +899,188 @@ class ClipPreviewDialog(QDialog):
         self.position_changed(0)
         self.set_selection_tool(SelectionType.EXCLUDE)
 
+    def create_shortcut_badge(self, key: str, action: str) -> QWidget:
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        
+        key_label = QLabel(key)
+        key_label.setStyleSheet("""
+            QLabel {
+                border: 1px solid #CDD8DC;
+                border-radius: 4px;
+                background: #FFFFFF;
+                color: #526173;
+                padding: 2px 6px;
+                font-size: 8.5pt;
+                font-weight: bold;
+            }
+        """)
+        
+        action_label = QLabel(action)
+        action_label.setStyleSheet("color: #526173; font-size: 9pt; font-weight: 500;")
+        
+        layout.addWidget(key_label, alignment=Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(action_label, alignment=Qt.AlignmentFlag.AlignVCenter)
+        return container
+
     def build_selection_mode_panel(self) -> QFrame:
         panel = QFrame()
         panel.setObjectName("selectionModePanel")
 
         outer = QVBoxLayout(panel)
-        outer.setContentsMargins(12, 8, 12, 8)
-        outer.setSpacing(6)
+        outer.setContentsMargins(16, 16, 16, 16)
+        outer.setSpacing(12)
 
-        header = QLabel("SELECTION MODE  (Paint on timeline)")
-        header.setObjectName("selectionModeHeader")
-        outer.addWidget(header)
+        # Top row: title + subtitle on the left, shortcut badges on the right
+        top_row = QHBoxLayout()
+        top_row.setContentsMargins(0, 0, 0, 0)
+        
+        # Left side: Title + Subtitle
+        title_container = QWidget()
+        title_layout = QVBoxLayout(title_container)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(2)
+        
+        title_label = QLabel("Selection Mode")
+        title_label.setStyleSheet("font-size: 16pt; font-weight: 800; color: #142033;")
+        
+        subtitle_label = QLabel("Paint on timeline")
+        subtitle_label.setStyleSheet("font-size: 9.5pt; color: #526173; font-weight: 500;")
+        
+        title_layout.addWidget(title_label)
+        title_layout.addWidget(subtitle_label)
+        
+        # Right side: Shortcut badges
+        badge_layout = QHBoxLayout()
+        badge_layout.setContentsMargins(0, 0, 0, 0)
+        badge_layout.setSpacing(12)
+        badge_layout.addWidget(self.create_shortcut_badge("E", "Exclude"), alignment=Qt.AlignmentFlag.AlignVCenter)
+        badge_layout.addWidget(self.create_shortcut_badge("R", "Required"), alignment=Qt.AlignmentFlag.AlignVCenter)
+        badge_layout.addWidget(self.create_shortcut_badge("Delete", "Remove"), alignment=Qt.AlignmentFlag.AlignVCenter)
+        
+        top_row.addWidget(title_container)
+        top_row.addStretch(1)
+        top_row.addLayout(badge_layout)
+        
+        outer.addLayout(top_row)
+
+        # Timeline help text below title row
+        self.timeline_help_label = QLabel(
+            "ⓘ  Drag left or right on the timeline to paint segments."
+        )
+        self.timeline_help_label.setObjectName("timelineHelpLabel")
+        self.timeline_help_label.setStyleSheet("color: #526173; font-size: 9.5pt;")
+        self.timeline_help_label.setWordWrap(True)
+        outer.addWidget(self.timeline_help_label)
+        outer.addStretch(1)
 
         btn_row = QHBoxLayout()
-        btn_row.setSpacing(10)
+        btn_row.setSpacing(24)
 
-        self.exclude_tool = QPushButton("⊖  Exclude\nRemove from final video")
+        # Generate Exclude and Required button icons
+        self.exclude_btn_inactive, self.exclude_btn_active = self.create_exclude_button_icons()
+        self.required_btn_inactive, self.required_btn_active = self.create_required_button_icons()
+        
+        # Current Mode Card status icons
+        self.exclude_card_icon_pixmap = self.create_exclude_card_icon()
+        self.required_card_icon_pixmap = self.create_required_card_icon()
+
+        # Exclude Mode Button setup
+        self.exclude_tool = QPushButton()
         self.exclude_tool.setObjectName("excludeModeButton")
         self.exclude_tool.setCheckable(True)
-        self.exclude_tool.setMinimumHeight(48)
-        self.exclude_tool.setMinimumWidth(180)
-        self.exclude_tool.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.exclude_tool.setMinimumHeight(68)
+        self.exclude_tool.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.exclude_tool.setAccessibleName("Exclude mode")
         self.exclude_tool.setAccessibleDescription("Remove painted timeline sections from the final video.")
 
-        self.required_tool = QPushButton("✓  Required\nKeep in final video")
+        exclude_layout = QHBoxLayout(self.exclude_tool)
+        exclude_layout.setContentsMargins(16, 8, 16, 8)
+        exclude_layout.setSpacing(12)
+
+        self.exclude_icon_label = QLabel()
+        self.exclude_icon_label.setFixedSize(32, 32)
+        self.exclude_icon_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+        exclude_text_layout = QVBoxLayout()
+        exclude_text_layout.setContentsMargins(0, 0, 0, 0)
+        exclude_text_layout.setSpacing(1)
+
+        self.exclude_title_label = QLabel("Exclude")
+        self.exclude_title_label.setObjectName("excludeTitleLabel")
+        self.exclude_title_label.setStyleSheet("font-weight: 800; font-size: 11.5pt; background: transparent;")
+        self.exclude_title_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+        self.exclude_subtitle_label = QLabel("Remove from final video")
+        self.exclude_subtitle_label.setObjectName("excludeSubtitleLabel")
+        self.exclude_subtitle_label.setStyleSheet("font-weight: 400; font-size: 9.5pt; background: transparent;")
+        self.exclude_subtitle_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+        exclude_text_layout.addWidget(self.exclude_title_label)
+        exclude_text_layout.addWidget(self.exclude_subtitle_label)
+
+        exclude_layout.addWidget(self.exclude_icon_label)
+        exclude_layout.addLayout(exclude_text_layout)
+        exclude_layout.addStretch()
+
+        # Required Mode Button setup
+        self.required_tool = QPushButton()
         self.required_tool.setObjectName("requiredModeButton")
         self.required_tool.setCheckable(True)
-        self.required_tool.setMinimumHeight(48)
-        self.required_tool.setMinimumWidth(180)
-        self.required_tool.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.required_tool.setMinimumHeight(68)
+        self.required_tool.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.required_tool.setAccessibleName("Required mode")
         self.required_tool.setAccessibleDescription("Keep painted timeline sections in the final video.")
+
+        required_layout = QHBoxLayout(self.required_tool)
+        required_layout.setContentsMargins(16, 8, 16, 8)
+        required_layout.setSpacing(12)
+
+        self.required_icon_label = QLabel()
+        self.required_icon_label.setFixedSize(32, 32)
+        self.required_icon_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+        required_text_layout = QVBoxLayout()
+        required_text_layout.setContentsMargins(0, 0, 0, 0)
+        required_text_layout.setSpacing(1)
+
+        self.required_title_label = QLabel("Required")
+        self.required_title_label.setObjectName("requiredTitleLabel")
+        self.required_title_label.setStyleSheet("font-weight: 800; font-size: 11.5pt; background: transparent;")
+        self.required_title_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+        self.required_subtitle_label = QLabel("Keep in final video")
+        self.required_subtitle_label.setObjectName("requiredSubtitleLabel")
+        self.required_subtitle_label.setStyleSheet("font-weight: 400; font-size: 9.5pt; background: transparent;")
+        self.required_subtitle_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+        required_text_layout.addWidget(self.required_title_label)
+        required_text_layout.addWidget(self.required_subtitle_label)
+
+        required_layout.addWidget(self.required_icon_label)
+        required_layout.addLayout(required_text_layout)
+        required_layout.addStretch()
 
         tools = QButtonGroup(self)
         tools.setExclusive(True)
         tools.addButton(self.exclude_tool)
         tools.addButton(self.required_tool)
 
+        # Current Mode Card
         self.current_mode_card = QFrame()
         self.current_mode_card.setObjectName("currentModeCard")
-        current_layout = QVBoxLayout(self.current_mode_card)
-        current_layout.setContentsMargins(12, 6, 12, 6)
-        current_layout.setSpacing(2)
+        current_layout = QHBoxLayout(self.current_mode_card)
+        current_layout.setContentsMargins(12, 10, 12, 10)
+        current_layout.setSpacing(12)
+
+        self.current_mode_icon = QLabel()
+        self.current_mode_icon.setFixedSize(24, 24)
+
+        text_layout = QVBoxLayout()
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(2)
 
         self.current_mode_title = QLabel()
         self.current_mode_title.setObjectName("currentModeTitle")
@@ -676,10 +1090,11 @@ class ClipPreviewDialog(QDialog):
         self.current_mode_instruction.setObjectName("currentModeInstruction")
         self.current_mode_instruction.setWordWrap(True)
 
-        current_layout.addWidget(self.current_mode_title)
-        current_layout.addWidget(self.current_mode_instruction)
+        text_layout.addWidget(self.current_mode_title)
+        text_layout.addWidget(self.current_mode_instruction)
 
-
+        current_layout.addWidget(self.current_mode_icon)
+        current_layout.addLayout(text_layout, 1)
 
         btn_row.addWidget(self.exclude_tool)
         btn_row.addWidget(self.required_tool)
@@ -687,13 +1102,10 @@ class ClipPreviewDialog(QDialog):
         outer.addLayout(btn_row)
         outer.addWidget(self.current_mode_card)
 
-        self.timeline_help_label = QLabel(
-            "Drag left or right on the timeline to paint. Press E for Exclude, R for Required."
-        )
-        self.timeline_help_label.setObjectName("timelineHelpLabel")
-        outer.addWidget(self.timeline_help_label)
-
         return panel
+
+    def adjust_controls_margins(self, x_offset: int, width: int) -> None:
+        self.controls_layout.setContentsMargins(x_offset, 0, x_offset, 0)
 
     def set_selection_tool(self, selection_type: SelectionType) -> None:
         self.timeline.set_tool(selection_type)
@@ -715,16 +1127,34 @@ class ClipPreviewDialog(QDialog):
         self._repolish(self.required_tool)
 
         if exclude_active:
+            self.exclude_icon_label.setPixmap(self.exclude_btn_active)
+            self.exclude_title_label.setStyleSheet("font-weight: 800; font-size: 11.5pt; background: transparent; color: #FFFFFF;")
+            self.exclude_subtitle_label.setStyleSheet("font-weight: 400; font-size: 9.5pt; background: transparent; color: #FFFFFF;")
+
+            self.required_icon_label.setPixmap(self.required_btn_inactive)
+            self.required_title_label.setStyleSheet("font-weight: 800; font-size: 11.5pt; background: transparent; color: #142033;")
+            self.required_subtitle_label.setStyleSheet("font-weight: 400; font-size: 9.5pt; background: transparent; color: #526173;")
+
+            self.current_mode_icon.setPixmap(self.exclude_card_icon_pixmap)
             self.current_mode_title.setText(
                 f'Current mode: <span style="color:{EXCLUDE_COLOR}; font-weight:800;">EXCLUDE</span>'
             )
-            self.current_mode_instruction.setText("⊖ Drag on the timeline to paint red excluded segments.")
+            self.current_mode_instruction.setText("Drag on the timeline to paint red excluded segments.")
             self.current_mode_card.setProperty("mode", "exclude")
         else:
+            self.exclude_icon_label.setPixmap(self.exclude_btn_inactive)
+            self.exclude_title_label.setStyleSheet("font-weight: 800; font-size: 11.5pt; background: transparent; color: #142033;")
+            self.exclude_subtitle_label.setStyleSheet("font-weight: 400; font-size: 9.5pt; background: transparent; color: #526173;")
+
+            self.required_icon_label.setPixmap(self.required_btn_active)
+            self.required_title_label.setStyleSheet("font-weight: 800; font-size: 11.5pt; background: transparent; color: #FFFFFF;")
+            self.required_subtitle_label.setStyleSheet("font-weight: 400; font-size: 9.5pt; background: transparent; color: #FFFFFF;")
+
+            self.current_mode_icon.setPixmap(self.required_card_icon_pixmap)
             self.current_mode_title.setText(
                 f'Current mode: <span style="color:{REQUIRED_COLOR}; font-weight:800;">REQUIRED</span>'
             )
-            self.current_mode_instruction.setText("✓ Drag on the timeline to paint green required segments.")
+            self.current_mode_instruction.setText("Drag on the timeline to paint green required segments.")
             self.current_mode_card.setProperty("mode", "required")
 
         self._repolish(self.current_mode_card)
@@ -784,7 +1214,10 @@ class ClipPreviewDialog(QDialog):
             self.player.play()
 
     def playback_state_changed(self, state: QMediaPlayer.PlaybackState) -> None:
-        self.play_button.setText("Pause" if state is QMediaPlayer.PlaybackState.PlayingState else "Play")
+        if state is QMediaPlayer.PlaybackState.PlayingState:
+            self.play_button.setIcon(self.pause_icon)
+        else:
+            self.play_button.setIcon(self.play_icon)
 
     def position_changed(self, position: int) -> None:
         if self._hover_warming and self._pending_hover_position is not None:
@@ -983,16 +1416,35 @@ class ClipPreviewDialog(QDialog):
         self.selection_table.blockSignals(True)
         self.selection_table.setRowCount(len(self.draft))
         for row, selection in enumerate(self.draft):
+            # Column 0: Index centered
+            num_item = QTableWidgetItem(str(row + 1))
+            num_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.selection_table.setItem(row, 0, num_item)
+
+            # Column 1: Type (with icon + text)
+            is_required = selection.type is SelectionType.REQUIRED
+            type_text = "Required" if is_required else "Exclude"
+            type_item = QTableWidgetItem(type_text)
+            
+            # Icon
+            icon = self.required_table_icon if is_required else self.exclude_table_icon
+            type_item.setIcon(icon)
+            
+            # Color
+            color_str = REQUIRED_COLOR if is_required else EXCLUDE_COLOR
+            type_item.setForeground(QColor(color_str))
+            self.selection_table.setItem(row, 1, type_item)
+
+            # Column 2-4: Start, End, Duration
             values = [
-                "✓ Required" if selection.type is SelectionType.REQUIRED else "⊖ Exclude",
-                format_timecode(selection.start_ms), format_timecode(selection.end_ms),
+                format_timecode(selection.start_ms),
+                format_timecode(selection.end_ms),
                 format_timecode(selection.duration_ms),
             ]
-            for column, value in enumerate(values):
+            for column, value in enumerate(values, start=2):
                 item = QTableWidgetItem(value)
-                if column == 0:
-                    item.setForeground(QColor(REQUIRED_COLOR) if selection.type is SelectionType.REQUIRED else QColor(EXCLUDE_COLOR))
                 self.selection_table.setItem(row, column, item)
+
         if 0 <= self.selected_index < len(self.draft):
             self.selection_table.selectRow(self.selected_index)
         self.selection_table.blockSignals(False)
