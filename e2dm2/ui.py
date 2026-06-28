@@ -11,6 +11,7 @@ from PySide6.QtCore import (
     QRectF,
     QObject,
     QSize,
+    QSettings,
     QThread,
     QTimer,
     Qt,
@@ -27,6 +28,7 @@ from PySide6.QtGui import (
     QIcon,
     QMouseEvent,
     QPainter,
+    QPen,
     QPixmap,
     QPolygonF,
     QShowEvent,
@@ -57,6 +59,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QStackedWidget,
     QStyle,
+    QStyleOptionButton,
     QStyleOptionSlider,
     QTabWidget,
     QTableWidget,
@@ -87,6 +90,12 @@ from .logging_setup import log_file_path
 
 
 LOGGER = logging.getLogger(__name__)
+SHOW_SPLASH_SETTING = "startup/show_splash_screen"
+
+
+def splash_screen_enabled(settings: QSettings | None = None) -> bool:
+    settings = settings or QSettings()
+    return settings.value(SHOW_SPLASH_SETTING, True, type=bool)
 
 
 def _duration(value: float) -> str:
@@ -1530,6 +1539,95 @@ class AppSplashScreen(QWidget):
             self.move(geo.topLeft())
 
 
+class VisibleCheckBox(QCheckBox):
+    """Checkbox with a consistently visible indicator across Qt styles."""
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        indicator = self.style().subElementRect(QStyle.SubElement.SE_CheckBoxIndicator, option, self)
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        enabled = self.isEnabled()
+        checked = self.isChecked()
+        border_color = QColor("#246447" if enabled else "#aeb7b1")
+        fill_color = QColor("#246447" if checked and enabled else "#ffffff")
+        if checked and not enabled:
+            fill_color = QColor("#aeb7b1")
+
+        box = QRectF(indicator).adjusted(1, 1, -1, -1)
+        painter.setPen(QPen(border_color, 1.5))
+        painter.setBrush(fill_color)
+        painter.drawRoundedRect(box, 3, 3)
+
+        if checked:
+            painter.setPen(QPen(QColor("#ffffff"), 2.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+            x, y, width, height = box.x(), box.y(), box.width(), box.height()
+            painter.drawLine(QPointF(x + width * 0.23, y + height * 0.52), QPointF(x + width * 0.43, y + height * 0.72))
+            painter.drawLine(QPointF(x + width * 0.43, y + height * 0.72), QPointF(x + width * 0.78, y + height * 0.30))
+
+
+class OptionsDialog(QDialog):
+    def __init__(self, parent: QWidget | None = None, settings: QSettings | None = None) -> None:
+        super().__init__(parent)
+        self.settings = settings or QSettings()
+        self.setWindowTitle("Options")
+        self.setModal(True)
+        self.setMinimumWidth(520)
+
+        title = QLabel("Options")
+        title.setObjectName("optionsTitle")
+        subtitle = QLabel("Customize how E2DM2 behaves. More options will appear here as they become available.")
+        subtitle.setObjectName("optionsSubtitle")
+        subtitle.setWordWrap(True)
+
+        card = QFrame()
+        card.setObjectName("optionsCard")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(20, 18, 20, 18)
+        card_layout.setSpacing(8)
+
+        section = QLabel("STARTUP")
+        section.setObjectName("optionsSection")
+        option_title = QLabel("Splash screen")
+        option_title.setObjectName("optionTitle")
+        description = QLabel("Show the E2DM2 welcome screen while the application starts.")
+        description.setObjectName("optionDescription")
+        description.setWordWrap(True)
+        self.splash_checkbox = VisibleCheckBox("Show splash screen on startup")
+        self.splash_checkbox.setObjectName("splashScreenOption")
+        self.splash_checkbox.setChecked(splash_screen_enabled(self.settings))
+        self.splash_checkbox.toggled.connect(self._save_splash_preference)
+
+        card_layout.addWidget(section)
+        card_layout.addWidget(option_title)
+        card_layout.addWidget(description)
+        card_layout.addSpacing(4)
+        card_layout.addWidget(self.splash_checkbox)
+
+        hint = QLabel("Changes are saved automatically and take effect the next time you launch E2DM2.")
+        hint.setObjectName("optionsHint")
+        hint.setWordWrap(True)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 22, 24, 20)
+        layout.setSpacing(14)
+        layout.addWidget(title)
+        layout.addWidget(subtitle)
+        layout.addWidget(card)
+        layout.addWidget(hint)
+        layout.addWidget(buttons)
+
+    def _save_splash_preference(self, enabled: bool) -> None:
+        self.settings.setValue(SHOW_SPLASH_SETTING, enabled)
+        self.settings.sync()
+
+
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
@@ -1549,13 +1647,20 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.log_dock)
         self.resizeDocks([self.log_dock], [120], Qt.Orientation.Vertical)
         self.log_dock.hide()
-        self.menuBar().addMenu("View").addAction(self.log_dock.toggleViewAction())
+        view_menu = self.menuBar().addMenu("View")
+        view_menu.addAction(self.log_dock.toggleViewAction())
+        view_menu.addSeparator()
+        self.options_action = view_menu.addAction("Options...")
+        self.options_action.triggered.connect(self.open_options)
         self.home.new_requested.connect(self.new_project)
         self.home.open_requested.connect(self.open_project)
         self.home.recent_requested.connect(lambda path: self.load_project_path(Path(path)))
         self.workspace.home_requested.connect(self.show_home)
         LOGGER.info("E2DM2 main window initialized")
         self.show_home()
+
+    def open_options(self) -> None:
+        OptionsDialog(self).exec()
 
     def show_home(self) -> None:
         self.home.refresh()
@@ -1648,6 +1753,24 @@ QTabWidget::pane { border: 1px solid #c8cec9; background: #fcfcfc; }
 QTabBar::tab { background: #e7ebe7; padding: 8px 16px; }
 QTabBar::tab:selected { background: #fcfcfc; color: #246447; }
 QSplitter::handle { background: #d7dcd8; width: 1px; }
+
+/* Options Dialog */
+QLabel#optionsTitle { color: #18342a; font-size: 19pt; font-weight: 650; }
+QLabel#optionsSubtitle { color: #68716b; font-size: 10pt; }
+QFrame#optionsCard {
+    background: #fcfcfc;
+    border: 1px solid #d3dad4;
+    border-radius: 10px;
+}
+QFrame#optionsCard QLabel, QFrame#optionsCard QCheckBox {
+    background: transparent;
+    border: 0;
+}
+QLabel#optionsSection { color: #246447; font-size: 8.5pt; font-weight: 700; }
+QLabel#optionTitle { color: #18342a; font-size: 12pt; font-weight: 650; }
+QLabel#optionDescription, QLabel#optionsHint { color: #68716b; }
+QCheckBox#splashScreenOption { color: #202521; font-weight: 600; spacing: 9px; padding-top: 5px; }
+QCheckBox#splashScreenOption::indicator { width: 18px; height: 18px; }
 
 /* Produce Tab Card Design */
 QFrame#produceCard {

@@ -7,7 +7,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QMessageBox
 
 from .logging_setup import configure_logging
-from .ui import AppSplashScreen, MainWindow, create_application
+from .ui import AppSplashScreen, MainWindow, create_application, splash_screen_enabled
 
 
 def main() -> int:
@@ -17,20 +17,22 @@ def main() -> int:
         QMessageBox.critical(None, "FFmpeg required", "FFmpeg and FFprobe must be available through PATH.")
         return 1
 
-    splash = AppSplashScreen()
-    splash.show()
-    app.processEvents()
+    if splash_screen_enabled():
+        splash = AppSplashScreen()
+        splash.show()
+        app.processEvents()
+        window = MainWindow()
 
-    window = MainWindow()
+        def start_app() -> None:
+            splash.close()
+            window.show()
 
-    def start_app() -> None:
-        splash.close()
+        QTimer.singleShot(3000, start_app)
+    else:
+        window = MainWindow()
         window.show()
-
-    QTimer.singleShot(3000, start_app)
     return app.exec()
 
 
 if __name__ == "__main__":
     sys.exit(main())
-

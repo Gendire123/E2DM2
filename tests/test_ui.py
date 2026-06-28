@@ -8,14 +8,14 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QAbstractAnimation, QObject, QPoint, Qt, Signal, Slot
+from PySide6.QtCore import QAbstractAnimation, QObject, QPoint, QSettings, Qt, Signal, Slot
 from PySide6.QtWidgets import QMessageBox
 
 from e2dm2.models import ClipSelection, MediaItem, RenderResult, SelectionType, WorkflowMode
 from e2dm2.preview import ClipPreviewDialog, SelectionTimeline, format_timecode, parse_timecode
 from e2dm2.editor import SongEditorDialog
 from e2dm2.entitlements import AlphaEntitlementProvider
-from e2dm2.ui import ClickSeekSlider, HomePage, MainWindow, SongPreviewCell
+from e2dm2.ui import ClickSeekSlider, HomePage, MainWindow, OptionsDialog, SongPreviewCell, splash_screen_enabled
 from e2dm2.project import create_project
 from e2dm2.ui import WorkspacePage
 
@@ -34,11 +34,25 @@ def test_main_window_smoke(qtbot):
     assert not window.home.delete_button.isEnabled()
     assert window.log_dock.windowTitle() == "Backend Log"
     assert not window.log_dock.isVisible()
+    assert window.options_action.text() == "Options..."
     window.center_on_active_screen()
     screen_center = window.screen().availableGeometry().center()
     frame_center = window.frameGeometry().center()
     assert abs(frame_center.x() - screen_center.x()) <= 2
     assert abs(frame_center.y() - screen_center.y()) <= 2
+
+
+def test_options_dialog_persists_splash_screen_preference(qtbot, tmp_path):
+    settings = QSettings(str(tmp_path / "options.ini"), QSettings.Format.IniFormat)
+    dialog = OptionsDialog(settings=settings)
+    qtbot.addWidget(dialog)
+
+    assert dialog.splash_checkbox.isChecked()
+    assert splash_screen_enabled(settings)
+
+    dialog.splash_checkbox.setChecked(False)
+
+    assert not splash_screen_enabled(settings)
 
 
 def test_background_import_worker_is_retained(qtbot, tmp_path):
