@@ -168,6 +168,40 @@ def test_delete_current_song(monkeypatch, tmp_path, qtbot):
     assert not duplicate.manifest_path.exists()
 
 
+def test_song_editor_hides_internal_render_metadata(monkeypatch, qtbot):
+    from PySide6.QtWidgets import QLabel
+    from e2dm2.editor import SongEditorDialog
+
+    monkeypatch.setattr(SongEditorDialog, "load_waveform", lambda *_args: None)
+    dialog = SongEditorDialog(AlphaEntitlementProvider())
+    qtbot.addWidget(dialog)
+
+    labels = {label.text() for label in dialog.tabs.widget(0).findChildren(QLabel)}
+    assert labels.isdisjoint({
+        "BPM",
+        "Montage duration",
+        "Minimum source duration",
+        "Opening fade",
+        "Fade starts",
+        "Fade duration",
+        "Escalation cue",
+        "Hard-cut threshold",
+        "Short-cut threshold",
+        "Short-cut source advance",
+    })
+
+    collected = dialog._collect_song()
+    assert collected.bpm == dialog.current.bpm
+    assert collected.total_duration_seconds == dialog.current.total_duration_seconds
+    assert collected.minimum_source_duration_seconds == dialog.current.minimum_source_duration_seconds
+    assert collected.opening_fade_seconds == dialog.current.opening_fade_seconds
+    assert collected.cuts_end_seconds == dialog.current.cuts_end_seconds
+    assert collected.fade_out_seconds == dialog.current.fade_out_seconds
+    assert collected.escalation_seconds == dialog.current.escalation_seconds
+    assert collected.transitions.hard_cut_threshold_seconds == dialog.current.transitions.hard_cut_threshold_seconds
+    assert collected.source_progression == dialog.current.source_progression
+
+
 def test_rename_song_id(monkeypatch, tmp_path, qtbot):
     from e2dm2.catalog import load_song_catalog, duplicate_song
     from e2dm2.editor import SongEditorDialog
@@ -490,4 +524,3 @@ def test_custom_songs_workflow_and_library_editor(monkeypatch, tmp_path, qtbot):
     assert dialog.song_list.count() == 1
     assert dialog.filtered_songs == [custom_song]
     assert dialog.windowTitle() == "Custom Song Library"
-

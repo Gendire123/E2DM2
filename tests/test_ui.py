@@ -9,15 +9,16 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QAbstractAnimation, QObject, QPoint, QSettings, QSize, Qt, Signal, Slot
-from PySide6.QtWidgets import QMessageBox, QTableWidgetItem
+from PySide6.QtGui import QPalette
+from PySide6.QtWidgets import QLabel, QMessageBox, QTabWidget, QTableWidgetItem, QWidget
 
 from e2dm2.models import ClipSelection, MediaItem, RenderResult, SelectionType, WorkflowMode
 from e2dm2.preview import ClipPreviewDialog, SelectionTimeline, format_timecode, parse_timecode
 from e2dm2.editor import SongEditorDialog
 from e2dm2.entitlements import AlphaEntitlementProvider
-from e2dm2.ui import ClickSeekSlider, HomePage, MainWindow, OptionsDialog, SongPreviewCell, splash_screen_enabled
+from e2dm2.ui import ClickSeekSlider, HomePage, MainWindow, OptionsDialog, STYLESHEET, SongPreviewCell, splash_screen_enabled
 from e2dm2.project import create_project
-from e2dm2.ui import WorkspacePage
+from e2dm2.ui import WorkspacePage, _duration
 
 
 def test_main_window_smoke(qtbot):
@@ -43,6 +44,108 @@ def test_main_window_smoke(qtbot):
     frame_center = window.frameGeometry().center()
     assert abs(frame_center.x() - screen_center.x()) <= 2
     assert abs(frame_center.y() - screen_center.y()) <= 2
+
+
+def test_main_window_can_launch_maximized_on_active_screen(qtbot):
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    window.show_maximized_on_active_screen()
+
+    assert window.isMaximized()
+    assert window._centered_once
+
+
+def test_tab_strip_matches_window_background(qtbot):
+    tabs = QTabWidget()
+    qtbot.addWidget(tabs)
+    tabs.setStyleSheet(STYLESHEET)
+    tabs.addTab(QWidget(), "First")
+    tabs.addTab(QWidget(), "Second")
+    tabs.show()
+
+    background = tabs.tabBar().palette().color(QPalette.ColorRole.Window)
+    assert background.name() == "#f5f7f8"
+
+
+def test_footage_action_controls_have_matching_heights(qtbot):
+    page = WorkspacePage()
+    qtbot.addWidget(page)
+    page.resize(900, 600)
+    page.show()
+
+    expected_height = page.add_files_button.height()
+    assert page.add_folder_button.height() == expected_height
+    assert page.preview_button.height() == expected_height
+    assert page.move_up_button.height() == expected_height
+    assert page.move_down_button.height() == expected_height
+    assert page.remove_button.height() == expected_height
+    assert page.media_total.height() == expected_height
+
+    remove_icon = page.remove_button.icon().pixmap(page.remove_button.iconSize()).toImage()
+    has_red_pixel = any(
+        remove_icon.pixelColor(x, y).alpha() > 0
+        and remove_icon.pixelColor(x, y).red() > remove_icon.pixelColor(x, y).green() * 1.5
+        for x in range(remove_icon.width())
+        for y in range(remove_icon.height())
+    )
+    assert has_red_pixel
+
+
+def test_hero_shows_created_then_selected_soundtrack_target_duration(qtbot, tmp_path):
+    page = WorkspacePage()
+    qtbot.addWidget(page)
+    page.set_project(create_project("Hero Metrics", tmp_path / "projects"))
+    page.resize(900, 600)
+    page.show()
+
+    captions = [
+        label.text()
+        for label in page.findChildren(QLabel)
+        if label.objectName() == "metricCaption"
+    ]
+    assert captions == ["Created", "Target Duration"]
+    hero_icons = [
+        label
+        for label in page.findChildren(QLabel)
+        if label.objectName() == "heroIcon"
+    ]
+    assert len(hero_icons) == 3
+    assert all(label.pixmap() is not None and not label.pixmap().isNull() for label in hero_icons)
+    assert page.findChild(QLabel, "heroSoundtrackCaption") is None
+
+    for label in hero_icons:
+        image = label.pixmap().toImage()
+        colored_pixels = [
+            image.pixelColor(x, y)
+            for x in range(image.width())
+            for y in range(image.height())
+            if image.pixelColor(x, y).alpha() > 0
+        ]
+        assert colored_pixels
+        assert all(color.green() >= color.red() for color in colored_pixels)
+
+    selected_song_id = page.project.settings.song_id
+    selected_song = next(song for song in page.songs if song.song_id == selected_song_id)
+    assert page.metric_target_duration_value.text() == _duration(selected_song.total_duration_seconds)
+
+    page.song_table.selectRow(1)
+    newly_selected_song_id = page.project.settings.song_id
+    newly_selected_song = next(song for song in page.songs if song.song_id == newly_selected_song_id)
+    assert page.metric_target_duration_value.text() == _duration(newly_selected_song.total_duration_seconds)
+
+
+def test_sidebar_uses_full_brand_logo(qtbot):
+    page = WorkspacePage()
+    qtbot.addWidget(page)
+
+    logo = page.sidebar_logo_label.pixmap()
+    assert logo is not None
+    assert not logo.isNull()
+    assert logo.size() == QSize(315, 192)
+    assert page.sidebar_logo_label.size() == logo.deviceIndependentSize().toSize()
+    assert page.findChild(QLabel, "sidebarBrand") is None
+    assert page.findChild(QLabel, "sidebarTagline") is None
 
 
 def test_options_dialog_persists_splash_screen_preference(qtbot, tmp_path):
@@ -223,6 +326,35 @@ def test_full_length_workflow_uses_library_table_and_tracks_selection(qtbot, tmp
     )
     page.full_song_table.selectRow(target_row)
     assert project.settings.full_length_track_id == "drone-music-2"
+    target_song = next(song for song in page.songs if song.song_id == "drone-music-2")
+    assert page.metric_target_duration_value.text() == _duration(target_song.total_duration_seconds)
+
+
+def test_soundtrack_dropdown_popups_use_light_surface(qtbot):
+    page = WorkspacePage()
+    qtbot.addWidget(page)
+    page.resize(900, 600)
+    page.show()
+
+    combos = [
+        page.workflow_combo,
+        page.mood_filter,
+        page.energy_filter,
+        page.full_mood_filter,
+        page.full_energy_filter,
+        page.re_mood_filter,
+        page.re_energy_filter,
+        page.custom_mood_filter,
+        page.custom_energy_filter,
+    ]
+    for combo in combos:
+        combo.showPopup()
+        popup_style = combo.view().window().styleSheet()
+        assert "background-color: #FFFFFF" in popup_style
+        assert "border: 1px solid #DDE5E7" in popup_style
+        content_height = sum(combo.view().sizeHintForRow(row) for row in range(combo.count()))
+        assert combo.view().viewport().height() >= content_height
+        combo.hidePopup()
 
 
 def test_new_project_and_workflow_changes_select_default_songs(qtbot, tmp_path):

@@ -25,12 +25,12 @@ def main() -> int:
 
         def start_app() -> None:
             splash.close()
-            window.show()
+            window.show_maximized_on_active_screen()
 
         QTimer.singleShot(3000, start_app)
     else:
         window = MainWindow()
-        window.show()
+        window.show_maximized_on_active_screen()
     return app.exec()
 
 

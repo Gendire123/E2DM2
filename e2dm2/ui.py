@@ -159,6 +159,38 @@ class ClickSeekSlider(QSlider):
         event.accept()
 
 
+class SoundtrackComboBox(QComboBox):
+    """Combo box whose popup keeps the Soundtrack palette on Windows."""
+
+    _POPUP_STYLE = """
+        background-color: #FFFFFF;
+        border: 1px solid #DDE5E7;
+        padding: 0px;
+        margin: 0px;
+    """
+
+    def showPopup(self) -> None:
+        super().showPopup()
+        view = self.view()
+        popup = view.window()
+        if popup is not self.window():
+            popup.setStyleSheet(self._POPUP_STYLE)
+            if popup.layout() is not None:
+                popup.layout().activate()
+
+            content_height = sum(view.sizeHintForRow(row) for row in range(self.count()))
+            popup_chrome_height = popup.height() - view.viewport().height()
+            target_height = content_height + popup_chrome_height
+            available = popup.screen().availableGeometry()
+            target_height = min(target_height, available.height())
+            if target_height > popup.height():
+                geometry = popup.geometry()
+                geometry.setHeight(target_height)
+                if geometry.bottom() > available.bottom():
+                    geometry.moveBottom(available.bottom())
+                popup.setGeometry(geometry)
+
+
 class SongPreviewCell(QWidget):
     play_requested = Signal()
     seek_requested = Signal(int)
@@ -893,6 +925,7 @@ class WorkspacePage(QWidget):
 
         if icon and not icon.isNull():
             icon_label = QLabel()
+            icon_label.setObjectName("heroIcon")
             icon_label.setPixmap(icon.pixmap(22, 22))
             layout.addWidget(icon_label)
 
@@ -912,22 +945,19 @@ class WorkspacePage(QWidget):
     def _build_sidebar(self) -> QWidget:
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(252)
 
-        logo_label = QLabel()
-        logo_label.setObjectName("sidebarLogo")
-        logo_pix = QPixmap(str(APP_ICON_PATH))
-        if not logo_pix.isNull():
-            logo_label.setPixmap(logo_pix.scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-        logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        brand_label = QLabel("E2DM2")
-        brand_label.setObjectName("sidebarBrand")
-        brand_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        tagline_label = QLabel("Epic Drone. Epic Movies.")
-        tagline_label.setObjectName("sidebarTagline")
-        tagline_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.sidebar_logo_label = QLabel()
+        self.sidebar_logo_label.setObjectName("sidebarLogo")
+        self.sidebar_logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        logo_pix = QPixmap(str(Path(__file__).parent / "assets" / "logo_small.jpg"))
+        if logo_pix.isNull():
+            self.sidebar_logo_label.setText("E2DM2")
+            self.sidebar_logo_label.setFixedSize(252, 154)
+        else:
+            logo_pix.setDevicePixelRatio(self.devicePixelRatioF())
+            self.sidebar_logo_label.setPixmap(logo_pix)
+            self.sidebar_logo_label.setFixedSize(logo_pix.deviceIndependentSize().toSize())
+        sidebar.setFixedWidth(max(252, self.sidebar_logo_label.width()))
 
         self.nav_footage = QPushButton("  Footage")
         self.nav_soundtrack = QPushButton("  Soundtrack")
@@ -956,29 +986,27 @@ class WorkspacePage(QWidget):
         self.back_button.clicked.connect(self.home_requested.emit)
 
         layout = QVBoxLayout(sidebar)
-        layout.setContentsMargins(20, 24, 20, 24)
+        layout.setContentsMargins(0, 24, 0, 24)
         layout.setSpacing(16)
 
-        brand_widget = QWidget()
-        brand_widget.setObjectName("sidebarBrandArea")
-        brand_layout = QVBoxLayout(brand_widget)
-        brand_layout.setContentsMargins(0, 0, 0, 0)
-        brand_layout.setSpacing(6)
-        brand_layout.addWidget(logo_label)
-        brand_layout.addWidget(brand_label)
-        brand_layout.addWidget(tagline_label)
-        layout.addWidget(brand_widget)
+        layout.addWidget(self.sidebar_logo_label, 0, Qt.AlignmentFlag.AlignHCenter)
         
         layout.addSpacing(20)
 
-        layout.addWidget(self.nav_footage)
-        layout.addWidget(self.nav_soundtrack)
-        layout.addWidget(self.nav_produce)
+        controls = QWidget()
+        controls_layout = QVBoxLayout(controls)
+        controls_layout.setContentsMargins(20, 0, 20, 0)
+        controls_layout.setSpacing(16)
 
-        layout.addStretch(1)
+        controls_layout.addWidget(self.nav_footage)
+        controls_layout.addWidget(self.nav_soundtrack)
+        controls_layout.addWidget(self.nav_produce)
 
-        layout.addWidget(settings_button)
-        layout.addWidget(self.back_button)
+        controls_layout.addStretch(1)
+
+        controls_layout.addWidget(settings_button)
+        controls_layout.addWidget(self.back_button)
+        layout.addWidget(controls, 1)
 
         return sidebar
 
@@ -1003,20 +1031,19 @@ class WorkspacePage(QWidget):
         metrics_layout.setSpacing(24)
         metrics_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.metric_duration_value = QLabel("--")
-        self.metric_clips_value = QLabel("--")
-        self.metric_size_value = QLabel("--")
         self.metric_created_value = QLabel("--")
+        self.metric_target_duration_value = QLabel("--")
 
-        metric_duration = self._metric_item(self.metric_duration_value, "Total Duration", self.style().standardIcon(QStyle.StandardPixmap.SP_DialogYesButton))
-        metric_clips = self._metric_item(self.metric_clips_value, "Clips", self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon))
-        metric_size = self._metric_item(self.metric_size_value, "Total Size", self.style().standardIcon(QStyle.StandardPixmap.SP_DriveHDIcon))
-        metric_created = self._metric_item(self.metric_created_value, "Created", self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogListView))
+        icon_root = Path(__file__).parent / "assets" / "icons"
+        metric_created = self._metric_item(
+            self.metric_created_value, "Created", QIcon(str(icon_root / "hero-calendar.svg")),
+        )
+        metric_target_duration = self._metric_item(
+            self.metric_target_duration_value, "Target Duration", QIcon(str(icon_root / "hero-clock.svg")),
+        )
 
-        metrics_layout.addWidget(metric_duration)
-        metrics_layout.addWidget(metric_clips)
-        metrics_layout.addWidget(metric_size)
         metrics_layout.addWidget(metric_created)
+        metrics_layout.addWidget(metric_target_duration)
         metrics_layout.addStretch(1)
 
         left_layout.addLayout(metrics_layout)
@@ -1026,17 +1053,14 @@ class WorkspacePage(QWidget):
         soundtrack_layout.setContentsMargins(0, 0, 0, 0)
 
         music_icon = QLabel()
-        music_icon.setPixmap(QIcon(str(Path(__file__).parent / "assets" / "icons" / "soundtrack.svg")).pixmap(22, 22))
+        music_icon.setObjectName("heroIcon")
+        music_icon.setPixmap(QIcon(str(icon_root / "hero-music.svg")).pixmap(22, 22))
         
         self.hero_soundtrack_title = QLabel("Epic Montage 1 by E2DM2")
         self.hero_soundtrack_title.setObjectName("heroSoundtrackTitle")
         
-        self.hero_soundtrack_caption = QLabel("Soundtrack")
-        self.hero_soundtrack_caption.setObjectName("heroSoundtrackCaption")
-
         soundtrack_layout.addWidget(music_icon)
         soundtrack_layout.addWidget(self.hero_soundtrack_title)
-        soundtrack_layout.addWidget(self.hero_soundtrack_caption)
         soundtrack_layout.addStretch(1)
 
         left_layout.addLayout(soundtrack_layout)
@@ -1168,10 +1192,20 @@ class WorkspacePage(QWidget):
 
         remove = self._tool_button(QStyle.StandardPixmap.SP_TrashIcon, "Remove selected clip", self.remove_selected)
         remove.setObjectName("squareIconButton")
+        remove.setIcon(QIcon(str(Path(__file__).parent / "assets" / "icons" / "remove.svg")))
+        remove.setIconSize(QSize(20, 20))
         self.remove_button = remove
 
         self.media_total = QLabel("No footage imported")
         self.media_total.setObjectName("summaryPill")
+
+        action_height = max(
+            add_files.sizeHint().height(),
+            add_folder.sizeHint().height(),
+            self.preview_button.sizeHint().height(),
+        )
+        for control in (up, down, remove, self.media_total):
+            control.setFixedHeight(action_height)
 
         action_row = QHBoxLayout()
         action_row.setSpacing(10)
@@ -1196,23 +1230,6 @@ class WorkspacePage(QWidget):
         soundtrack_layout.setContentsMargins(0, 0, 0, 0)
         soundtrack_layout.setSpacing(16)
 
-        self.selected_music_card = QFrame()
-        self.selected_music_card.setObjectName("selectedMusicCard")
-        apply_card_shadow(self.selected_music_card)
-        card_layout = QHBoxLayout(self.selected_music_card)
-        card_layout.setContentsMargins(16, 12, 16, 12)
-        card_layout.setSpacing(8)
-        
-        info_label = QLabel("Selected soundtrack:")
-        info_label.setStyleSheet("font-weight: bold; color: #18342a; font-size: 10.5pt;")
-        self.selected_music_title_label = QLabel("No music selected")
-        self.selected_music_title_label.setStyleSheet("font-weight: 600; color: #246447; font-size: 10.5pt;")
-        
-        card_layout.addWidget(info_label)
-        card_layout.addWidget(self.selected_music_title_label, 1)
-
-        soundtrack_layout.addWidget(self.selected_music_card)
-
         workflow_card = QFrame()
         workflow_card.setObjectName("mainCard")
         apply_card_shadow(workflow_card)
@@ -1223,7 +1240,7 @@ class WorkspacePage(QWidget):
         workflow_label = QLabel("Workflow")
         workflow_label.setStyleSheet("font-weight: bold; color: #18342a;")
         
-        self.workflow_combo = QComboBox()
+        self.workflow_combo = SoundtrackComboBox()
         self.workflow_combo.addItem("Epic Montage", WorkflowMode.EPIC_MONTAGE)
         self.workflow_combo.addItem("Full-length Video", WorkflowMode.FULL_LENGTH)
         self.workflow_combo.addItem("Real Estate Showcase", WorkflowMode.REAL_ESTATE)
@@ -1387,8 +1404,8 @@ class WorkspacePage(QWidget):
         self.song_search = QLineEdit()
         self.song_search.setPlaceholderText("Search songs, artists, or moods")
         self.song_search.textChanged.connect(self.apply_song_filters)
-        self.mood_filter = QComboBox()
-        self.energy_filter = QComboBox()
+        self.mood_filter = SoundtrackComboBox()
+        self.energy_filter = SoundtrackComboBox()
         self.mood_filter.currentIndexChanged.connect(self.apply_song_filters)
         self.energy_filter.addItems(["All energies", "Low", "Medium", "High"])
         self.energy_filter.currentIndexChanged.connect(self.apply_song_filters)
@@ -1420,8 +1437,8 @@ class WorkspacePage(QWidget):
         self.full_song_search = QLineEdit()
         self.full_song_search.setPlaceholderText("Search songs, artists, or moods")
         self.full_song_search.textChanged.connect(self.apply_song_filters)
-        self.full_mood_filter = QComboBox()
-        self.full_energy_filter = QComboBox()
+        self.full_mood_filter = SoundtrackComboBox()
+        self.full_energy_filter = SoundtrackComboBox()
         self.full_mood_filter.currentIndexChanged.connect(self.apply_song_filters)
         self.full_energy_filter.addItems(["All energies", "Low", "Medium", "High"])
         self.full_energy_filter.currentIndexChanged.connect(self.apply_song_filters)
@@ -1453,8 +1470,8 @@ class WorkspacePage(QWidget):
         self.re_song_search = QLineEdit()
         self.re_song_search.setPlaceholderText("Search songs, artists, or moods")
         self.re_song_search.textChanged.connect(self.apply_song_filters)
-        self.re_mood_filter = QComboBox()
-        self.re_energy_filter = QComboBox()
+        self.re_mood_filter = SoundtrackComboBox()
+        self.re_energy_filter = SoundtrackComboBox()
         self.re_mood_filter.currentIndexChanged.connect(self.apply_song_filters)
         self.re_energy_filter.addItems(["All energies", "Low", "Medium", "High"])
         self.re_energy_filter.currentIndexChanged.connect(self.apply_song_filters)
@@ -1486,8 +1503,8 @@ class WorkspacePage(QWidget):
         self.custom_song_search = QLineEdit()
         self.custom_song_search.setPlaceholderText("Search songs, artists, or moods")
         self.custom_song_search.textChanged.connect(self.apply_song_filters)
-        self.custom_mood_filter = QComboBox()
-        self.custom_energy_filter = QComboBox()
+        self.custom_mood_filter = SoundtrackComboBox()
+        self.custom_energy_filter = SoundtrackComboBox()
         self.custom_mood_filter.currentIndexChanged.connect(self.apply_song_filters)
         self.custom_energy_filter.addItems(["All energies", "Low", "Medium", "High"])
         self.custom_energy_filter.currentIndexChanged.connect(self.apply_song_filters)
@@ -1527,7 +1544,6 @@ class WorkspacePage(QWidget):
         total_size = sum(item.size_bytes for item in media)
         
         duration_text = _duration(total_duration)
-        clips_text = str(len(media))
         size_text = f"{total_size / 1024 ** 3:.2f} GB"
         
         self.project_footage_label.setText(
@@ -1558,9 +1574,14 @@ class WorkspacePage(QWidget):
         song_id = None
         if workflow == WorkflowMode.FULL_LENGTH:
             song_id = self.project.settings.full_length_track_id
+        elif workflow == WorkflowMode.CUSTOM:
+            row = self.custom_song_table.currentRow()
+            item = self.custom_song_table.item(row, 0) if row >= 0 else None
+            song_id = item.data(Qt.ItemDataRole.UserRole) if item else None
         else:
             song_id = self.project.settings.song_id
 
+        target_duration_seconds = None
         if not song_id:
             music_str = "No soundtrack selected"
         else:
@@ -1571,11 +1592,13 @@ class WorkspacePage(QWidget):
             if song:
                 song_title = song.title
                 song_artist = song.artist
+                target_duration_seconds = song.total_duration_seconds
             elif workflow == WorkflowMode.FULL_LENGTH:
                 for track in FULL_LENGTH_TRACKS:
                     if track.track_id == song_id:
                         song_title = track.title
                         song_artist = "E2DM2"
+                        target_duration_seconds = track.duration_seconds
                         break
             
             if song_title:
@@ -1585,50 +1608,12 @@ class WorkspacePage(QWidget):
                 music_str = f"Unknown Soundtrack ({song_id})"
         self.project_music_label.setText(f"Soundtrack: {music_str}")
         
-        # Update metrics and hero soundtrack title
-        self.metric_duration_value.setText(duration_text)
-        self.metric_clips_value.setText(clips_text)
-        self.metric_size_value.setText(size_text)
+        # Update hero details
         self.metric_created_value.setText(created_str)
+        self.metric_target_duration_value.setText(
+            _duration(target_duration_seconds) if target_duration_seconds is not None else "Unavailable"
+        )
         self.hero_soundtrack_title.setText(music_str)
-
-    def _update_selected_music_card(self) -> None:
-        if not self.project:
-            self.selected_music_title_label.setText("No project loaded")
-            return
-        
-        workflow = self.workflow_combo.currentData()
-        song_id = None
-        if workflow == WorkflowMode.FULL_LENGTH:
-            song_id = self.project.settings.full_length_track_id
-        else:
-            song_id = self.project.settings.song_id
-
-        if not song_id:
-            self.selected_music_title_label.setText("No music selected")
-            return
-
-        song = next((s for s in self.songs if s.song_id == song_id), None)
-        if song:
-            song_title = song.title
-            song_artist = song.artist
-            is_builtin = song.readonly
-        elif workflow == WorkflowMode.FULL_LENGTH:
-            for track in FULL_LENGTH_TRACKS:
-                if track.track_id == song_id:
-                    song_title = track.title
-                    song_artist = "Built-in Library"
-                    is_builtin = True
-                    break
-
-        if song_title:
-            artist_info = f" - by {song_artist}" if song_artist else ""
-            type_info = " [Built-in]" if is_builtin else " [Custom]"
-            self.selected_music_title_label.setText(f"{song_title}{artist_info}{type_info}")
-        else:
-            self.selected_music_title_label.setText(f"Unknown Song ({song_id})")
-        
-        self._update_header_details()
 
     def set_project(self, project: Project) -> None:
         self.project = project
@@ -1643,7 +1628,7 @@ class WorkspacePage(QWidget):
         self.refresh_media()
         self.refresh_catalog(project.settings.song_id)
         self.workflow_changed()
-        self._update_selected_music_card()
+        self._update_header_details()
         self.results_list.clear()
         self.results_list.setVisible(False)
         self.status_label.setText("Ready")
@@ -2073,7 +2058,7 @@ class WorkspacePage(QWidget):
                     else:
                         self.project.settings.song_id = selected_id
                     self.project.settings.workflow = song.workflow
-        self._update_selected_music_card()
+        self._update_header_details()
 
     def workflow_changed(self) -> None:
         self.stop_song_preview()
@@ -2117,7 +2102,7 @@ class WorkspacePage(QWidget):
             self.project.settings.full_length_track_id = selected_id
         else:
             self.project.settings.song_id = selected_id
-        self._update_selected_music_card()
+        self._update_header_details()
 
     def add_files(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(self, "Import drone footage", "", "Video (*.mp4 *.mov *.m4v)")
@@ -2698,6 +2683,11 @@ class MainWindow(QMainWindow):
         frame.moveCenter(screen.availableGeometry().center())
         self.move(frame.topLeft())
 
+    def show_maximized_on_active_screen(self) -> None:
+        self.center_on_active_screen()
+        self._centered_once = True
+        self.showMaximized()
+
 
 STYLESHEET = """
 QWidget {
@@ -2717,19 +2707,6 @@ QFrame#sidebar {
 
 QLabel#sidebarLogo {
     background: transparent;
-}
-
-QLabel#sidebarBrand {
-    background: transparent;
-    color: #142033;
-    font-size: 22pt;
-    font-weight: 800;
-}
-
-QLabel#sidebarTagline {
-    background: transparent;
-    color: #66758A;
-    font-size: 9.5pt;
 }
 
 QPushButton#navButton {
@@ -2825,12 +2802,6 @@ QLabel#heroSoundtrackTitle {
     color: #087D80;
     font-size: 12pt;
     font-weight: 700;
-}
-
-QLabel#heroSoundtrackCaption {
-    background: transparent;
-    color: #66758A;
-    font-size: 9pt;
 }
 
 QFrame#mainCard {
@@ -2976,6 +2947,10 @@ QTabWidget > QWidget, QTabWidget > QStackedWidget > QWidget {
     background: #FFFFFF;
 }
 
+QTabWidget > QTabBar {
+    background: #F5F7F8;
+}
+
 QTabBar::tab {
     background: #E6ECEE;
     color: #526173;
@@ -3071,7 +3046,6 @@ QToolButton#squareIconButton {
     border-radius: 10px;
     padding: 10px;
     min-width: 42px;
-    min-height: 42px;
 }
 
 QToolButton#squareIconButton:hover {
@@ -3192,16 +3166,6 @@ QLabel#splashStatus {
 QLabel#splashCopyright {
     font-size: 8pt;
     color: #8A98A8;
-}
-
-/* Selected Music Card Design */
-QFrame#selectedMusicCard {
-    background-color: #E7F6F5;
-    border: 1px solid #087D80;
-    border-radius: 12px;
-}
-QFrame#selectedMusicCard QLabel {
-    background: transparent;
 }
 
 /* Home Screen Specifics */

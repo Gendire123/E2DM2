@@ -632,15 +632,26 @@ class SongEditorDialog(QDialog):
         self.hard_cut_spin = _spin(30)
         self.short_threshold_spin = _spin(60)
         self.short_advance_spin = _spin(60)
+        # Retain these controls as internal value holders for manifest
+        # compatibility, but do not expose rendering metadata to users.
+        for control in (
+            self.bpm_spin,
+            self.total_spin,
+            self.minimum_source_spin,
+            self.opening_spin,
+            self.cuts_end_spin,
+            self.fade_out_spin,
+            self.escalation_spin,
+            self.hard_cut_spin,
+            self.short_threshold_spin,
+            self.short_advance_spin,
+        ):
+            control.setParent(content)
+            control.hide()
         for label, control in [
             ("Title", self.title_edit), ("Artist", self.artist_edit), ("Song ID", self.id_edit),
-            ("Moods (comma separated)", self.moods_edit), ("Energy", self.energy_combo), ("BPM", self.bpm_spin),
-            ("Audio", audio_row), ("Montage duration", self.total_spin),
-            ("Minimum source duration", self.minimum_source_spin), ("Opening fade", self.opening_spin),
-            ("Fade starts", self.cuts_end_spin), ("Fade duration", self.fade_out_spin),
-            ("Escalation cue", self.escalation_spin), ("Transition duration", self.transition_spin),
-            ("Hard-cut threshold", self.hard_cut_spin), ("Short-cut threshold", self.short_threshold_spin),
-            ("Short-cut source advance", self.short_advance_spin),
+            ("Moods (comma separated)", self.moods_edit), ("Energy", self.energy_combo),
+            ("Audio", audio_row), ("Transition duration", self.transition_spin),
         ]:
             form.addRow(label, control)
         scroll = QScrollArea()
