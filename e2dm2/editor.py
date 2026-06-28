@@ -444,15 +444,14 @@ class WorkflowSelectionDialog(QDialog):
     def set_audio_path(self, path: Path) -> None:
         self.audio_edit.setText(str(path))
         self.audio_edit.setToolTip(str(path))
-        full_length_key = WorkflowMode.FULL_LENGTH.value
-        full_length_title = path.stem
-        full_length_id = "-".join(
-            part for part in re.split(r"[^a-z0-9]+", full_length_title.lower()) if part
+        title = path.stem
+        song_id = "-".join(
+            part for part in re.split(r"[^a-z0-9]+", title.lower()) if part
         ) or "custom-song"
-        self.suggestions[full_length_key] = (full_length_title, full_length_id)
-        if self.selected_workflow() == full_length_key:
-            self.title_edit.setText(full_length_title)
-            self.id_edit.setText(full_length_id)
+        for key in ["epic_montage", "full_length", "real_estate"]:
+            self.suggestions[key] = (title, song_id)
+        self.title_edit.setText(title)
+        self.id_edit.setText(song_id)
 
     def selected_audio_path(self) -> Path | None:
         value = self.audio_edit.text().strip()
@@ -913,7 +912,7 @@ class SongEditorDialog(QDialog):
                 audio_file_name = path.name
 
             self.current = SongManifest(
-                schema_version=1, song_id=song_id, title=title, artist="E2DM2 Library", audio_file=audio_file_name,
+                schema_version=1, song_id=song_id, title=title, artist="User", audio_file=audio_file_name,
                 moods=["epic"], bpm=None, energy=EnergyLevel.HIGH, total_duration_seconds=1,
                 minimum_source_duration_seconds=1, opening_fade_seconds=0, cuts_end_seconds=1,
                 fade_out_seconds=0, escalation_seconds=0, cut_timestamps=[0], readonly=is_builtin,

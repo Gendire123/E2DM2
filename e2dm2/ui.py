@@ -783,10 +783,25 @@ class WorkspacePage(QWidget):
         self.mode_stack.addWidget(self.real_estate_panel)
         self.mode_stack.addWidget(self.custom_panel)
 
+        self.selected_music_card = QFrame()
+        self.selected_music_card.setObjectName("selectedMusicCard")
+        card_layout = QHBoxLayout(self.selected_music_card)
+        card_layout.setContentsMargins(16, 12, 16, 12)
+        card_layout.setSpacing(8)
+        
+        info_label = QLabel("Active Production Soundtrack:")
+        info_label.setStyleSheet("font-weight: bold; color: #18342a; font-size: 10.5pt;")
+        self.selected_music_title_label = QLabel("No music selected")
+        self.selected_music_title_label.setStyleSheet("font-weight: 600; color: #246447; font-size: 10.5pt;")
+        
+        card_layout.addWidget(info_label)
+        card_layout.addWidget(self.selected_music_title_label, 1)
+
         music_panel = QWidget()
         music_layout = QVBoxLayout(music_panel)
         music_layout.setContentsMargins(16, 16, 16, 16)
         music_layout.setSpacing(12)
+        music_layout.addWidget(self.selected_music_card)
         music_layout.addLayout(workflow_row)
         music_layout.addWidget(self.mode_stack, 1)
 
@@ -1017,6 +1032,42 @@ class WorkspacePage(QWidget):
         layout.addWidget(self.custom_song_table)
         return panel
 
+    def _update_selected_music_card(self) -> None:
+        if not self.project:
+            self.selected_music_title_label.setText("No project loaded")
+            return
+        
+        workflow = self.workflow_combo.currentData()
+        song_id = None
+        if workflow == WorkflowMode.FULL_LENGTH:
+            song_id = self.project.settings.full_length_track_id
+        else:
+            song_id = self.project.settings.song_id
+
+        if not song_id:
+            self.selected_music_title_label.setText("No music selected")
+            return
+
+        song = next((s for s in self.songs if s.song_id == song_id), None)
+        if song:
+            song_title = song.title
+            song_artist = song.artist
+            is_builtin = song.readonly
+        elif workflow == WorkflowMode.FULL_LENGTH:
+            for track in FULL_LENGTH_TRACKS:
+                if track.track_id == song_id:
+                    song_title = track.title
+                    song_artist = "Built-in Library"
+                    is_builtin = True
+                    break
+
+        if song_title:
+            artist_info = f" - by {song_artist}" if song_artist else ""
+            type_info = " [Built-in]" if is_builtin else " [Custom]"
+            self.selected_music_title_label.setText(f"{song_title}{artist_info}{type_info}")
+        else:
+            self.selected_music_title_label.setText(f"Unknown Song ({song_id})")
+
     def set_project(self, project: Project) -> None:
         self.project = project
         self.project_title.setText(project.settings.name)
@@ -1030,6 +1081,7 @@ class WorkspacePage(QWidget):
         self.refresh_media()
         self.refresh_catalog(project.settings.song_id)
         self.workflow_changed()
+        self._update_selected_music_card()
         self.results_list.clear()
         self.results_list.setVisible(False)
         self.status_label.setText("Ready")
@@ -1401,6 +1453,7 @@ class WorkspacePage(QWidget):
                     else:
                         self.project.settings.song_id = selected_id
                     self.project.settings.workflow = song.workflow
+        self._update_selected_music_card()
 
     def workflow_changed(self) -> None:
         self.stop_song_preview()
@@ -1444,6 +1497,7 @@ class WorkspacePage(QWidget):
             self.project.settings.full_length_track_id = selected_id
         else:
             self.project.settings.song_id = selected_id
+        self._update_selected_music_card()
 
     def add_files(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(self, "Import drone footage", "", "Video (*.mp4 *.mov *.m4v)")
@@ -2024,6 +2078,16 @@ QLabel#splashStatus {
 QLabel#splashCopyright {
     font-size: 8pt;
     color: #99a19b;
+}
+
+/* Selected Music Card Design */
+QFrame#selectedMusicCard {
+    background-color: #f0f7f4;
+    border: 1px solid #b2d4c5;
+    border-radius: 8px;
+}
+QFrame#selectedMusicCard QLabel {
+    background: transparent;
 }
 """
 

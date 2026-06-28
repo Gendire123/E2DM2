@@ -236,17 +236,17 @@ def test_new_song_workflow_dialog(monkeypatch, tmp_path, qtbot):
     next_idx = max(existing_indices, default=0) + 1
 
     dialog.new_song()
-    qtbot.waitUntil(lambda: dialog.current is not None and dialog.current.song_id == f"epic-montage-{next_idx}")
+    qtbot.waitUntil(lambda: dialog.current is not None and dialog.current.song_id == "test-track")
 
     assert dialog.current is not None
     assert dialog.current.workflow.value == "epic_montage"
     assert dialog.current.readonly is True
-    assert dialog.current.title == f"Epic Montage {next_idx}"
-    assert dialog.current.song_id == f"epic-montage-{next_idx}"
+    assert dialog.current.title == "test_track"
+    assert dialog.current.song_id == "test-track"
     assert dialog.current.audio_file == f"EpicMusic{next_idx}.m4a"
-    assert dialog.current.artist == "E2DM2 Library"
+    assert dialog.current.artist == "User"
     from e2dm2.catalog import BUILTIN_SONG_ROOT
-    expected_path = BUILTIN_SONG_ROOT / f"epic-montage-{next_idx}" / f"EpicMusic{next_idx}.m4a"
+    expected_path = BUILTIN_SONG_ROOT / "test-track" / f"EpicMusic{next_idx}.m4a"
     assert dialog.audio_edit.text() == str(expected_path)
 
 
@@ -282,15 +282,15 @@ def test_real_estate_song_dialog_workflow(monkeypatch, tmp_path, qtbot):
     next_idx = max(existing_indices, default=0) + 1
 
     dialog.new_song()
-    qtbot.waitUntil(lambda: dialog.current is not None and dialog.current.song_id == f"real-estate-{next_idx}")
+    qtbot.waitUntil(lambda: dialog.current is not None and dialog.current.song_id == "real-estate-music")
 
     assert dialog.current is not None
     assert dialog.current.workflow == WorkflowMode.REAL_ESTATE
     assert dialog.current.readonly is False
-    assert dialog.current.title == f"Real Estate {next_idx}"
-    assert dialog.current.song_id == f"real-estate-{next_idx}"
+    assert dialog.current.title == "real_estate_music"
+    assert dialog.current.song_id == "real-estate-music"
     assert dialog.current.audio_file == f"RealEstate{next_idx}.mp3"
-    assert dialog.current.artist == "E2DM2 Library"
+    assert dialog.current.artist == "User"
 
 
 def test_filtered_library_locks_new_song_to_full_length(monkeypatch, tmp_path, qtbot):

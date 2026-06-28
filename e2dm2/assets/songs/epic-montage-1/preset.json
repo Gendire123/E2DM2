@@ -2,7 +2,7 @@
   "schema_version": 1,
   "song_id": "epic-montage-1",
   "title": "Epic Montage 1",
-  "artist": "E2DM2 Library",
+  "artist": "E2DM2",
   "audio_file": "EpicMusic.m4a",
   "moods": ["epic", "cinematic", "dramatic"],
   "bpm": null,
