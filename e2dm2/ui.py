@@ -38,6 +38,7 @@ from PySide6.QtGui import (
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
     QApplication,
+    QGraphicsOpacityEffect,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -894,11 +895,32 @@ class WorkspacePage(QWidget):
         self.workspace_tabs.addTab(media_panel, "Footage")
         self.workspace_tabs.addTab(music_scroll, "Music")
         self.workspace_tabs.addTab(produce_scroll, "Produce")
+        self.workspace_tabs.currentChanged.connect(self._on_tab_changed)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 18, 24, 24)
         layout.addLayout(header)
         layout.addWidget(self.workspace_tabs, 1)
+
+    def _on_tab_changed(self, index: int) -> None:
+        widget = self.workspace_tabs.widget(index)
+        if not widget:
+            return
+
+        effect = widget.graphicsEffect()
+        if not isinstance(effect, QGraphicsOpacityEffect):
+            effect = QGraphicsOpacityEffect(widget)
+            widget.setGraphicsEffect(effect)
+
+        effect.setOpacity(0.0)
+
+        anim = QPropertyAnimation(effect, b"opacity")
+        anim.setDuration(200)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        anim.start(QPropertyAnimation.DeletionPolicy.KeepWhenStopped)
+        widget._fade_anim = anim
 
     def _epic_panel(self) -> QWidget:
         panel = QWidget()
@@ -2021,8 +2043,15 @@ QProgressBar { background: #e0e4e0; border: 0; border-radius: 4px; height: 16px;
 QProgressBar::chunk { background: #d08a2f; border-radius: 4px; }
 QPlainTextEdit#backendLog { background: #171b18; color: #dce6df; border: 1px solid #39433c; font-family: Consolas; font-size: 9pt; }
 QTabWidget::pane { border: 1px solid #c8cec9; background: #fcfcfc; }
-QTabBar::tab { background: #e7ebe7; padding: 8px 16px; }
-QTabBar::tab:selected { background: #fcfcfc; color: #246447; }
+QTabBar::tab { background: #e7ebe7; padding: 8px 16px; border: 1px solid transparent; border-bottom: none; }
+QTabBar::tab:selected {
+    background: #fcfcfc;
+    color: #246447;
+    border-left: 1px solid #354039;
+    border-right: 1px solid #354039;
+    border-top: 1px solid #354039;
+    border-bottom: none;
+}
 QSplitter::handle { background: #d7dcd8; width: 1px; }
 
 /* Options Dialog */
