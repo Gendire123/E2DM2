@@ -27,6 +27,7 @@ def test_main_window_smoke(qtbot):
     assert window.size().height() == 660
     window.show()
     assert window.windowTitle().startswith("Easy Epic Drone Movie Maker")
+    assert not window.windowIcon().isNull()
     assert window.workspace.song_table.rowCount() >= 2
     assert window.home.recent_list is not None
     assert window.home.logo_label.pixmap() is not None

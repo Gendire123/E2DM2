@@ -93,6 +93,7 @@ from .logging_setup import log_file_path
 
 LOGGER = logging.getLogger(__name__)
 SHOW_SPLASH_SETTING = "startup/show_splash_screen"
+APP_ICON_PATH = Path(__file__).parent / "assets" / "icons" / "app-icon.ico"
 
 
 def splash_screen_enabled(settings: QSettings | None = None) -> bool:
@@ -1724,6 +1725,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Easy Epic Drone Movie Maker - E2DM2")
+        self.setWindowIcon(QIcon(str(APP_ICON_PATH)))
         self.resize(820, 660)
         self._centered_once = False
         self.stack = CompactPageStack()
@@ -1906,6 +1908,7 @@ def create_application() -> QApplication:
     application = QApplication.instance() or QApplication([])
     application.setApplicationName("E2DM2")
     application.setOrganizationName("E2DM2")
+    application.setWindowIcon(QIcon(str(APP_ICON_PATH)))
     application.setStyle("Fusion")
     application.setStyleSheet(STYLESHEET)
     return application
