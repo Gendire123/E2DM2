@@ -8,8 +8,8 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QAbstractAnimation, QObject, QPoint, QSettings, Qt, Signal, Slot
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtCore import QAbstractAnimation, QObject, QPoint, QSettings, QSize, Qt, Signal, Slot
+from PySide6.QtWidgets import QMessageBox, QTableWidgetItem
 
 from e2dm2.models import ClipSelection, MediaItem, RenderResult, SelectionType, WorkflowMode
 from e2dm2.preview import ClipPreviewDialog, SelectionTimeline, format_timecode, parse_timecode
@@ -24,13 +24,15 @@ def test_main_window_smoke(qtbot):
     window = MainWindow()
     qtbot.addWidget(window)
     assert window.size().width() == 820
-    assert window.size().height() == 540
+    assert window.size().height() == 660
     window.show()
     assert window.windowTitle().startswith("Easy Epic Drone Movie Maker")
     assert window.workspace.song_table.rowCount() >= 2
     assert window.home.recent_list is not None
     assert window.home.logo_label.pixmap() is not None
     assert not window.home.logo_label.pixmap().isNull()
+    assert window.home.logo_label.size() == QSize(300, 200)
+    assert window.home.title_label.wordWrap()
     assert not window.home.delete_button.isEnabled()
     assert window.log_dock.windowTitle() == "Backend Log"
     assert not window.log_dock.isVisible()
@@ -76,10 +78,11 @@ def test_home_page_deletes_selected_project_after_confirmation(qtbot, tmp_path, 
     project_path = tmp_path / "project"
     project_path.mkdir()
     (project_path / "project.json").write_text("{}", encoding="utf-8")
-    page.recent_list.addItem(project_path.name)
-    item = page.recent_list.item(0)
+    page.recent_list.setRowCount(1)
+    item = QTableWidgetItem(project_path.name)
+    page.recent_list.setItem(0, 0, item)
     item.setData(Qt.ItemDataRole.UserRole, str(project_path))
-    page.recent_list.setCurrentItem(item)
+    page.recent_list.setCurrentCell(0, 0)
     assert page.delete_button.isEnabled()
 
     deleted = []
@@ -87,6 +90,84 @@ def test_home_page_deletes_selected_project_after_confirmation(qtbot, tmp_path, 
     monkeypatch.setattr("e2dm2.ui.delete_project", lambda path: deleted.append(path))
     page.delete_selected_project()
     assert deleted == [project_path]
+
+
+def test_home_page_shows_recent_project_metadata(qtbot, tmp_path, monkeypatch):
+    project = create_project("Coastal Showcase", tmp_path / "projects")
+    data = json.loads((project.path / "project.json").read_text(encoding="utf-8"))
+    data["created_at"] = "2026-06-20T14:30:00"
+    data["updated_at"] = "2026-06-28T09:45:00"
+    (project.path / "project.json").write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setattr("e2dm2.ui.recent_projects", lambda: [project.path])
+
+    page = HomePage()
+    qtbot.addWidget(page)
+    page.refresh()
+
+    assert page.recent_list.horizontalHeaderItem(0).text() == "Project title"
+    assert page.recent_list.horizontalHeaderItem(1).text() == "Created"
+    assert page.recent_list.horizontalHeaderItem(2).text() == "Last modified"
+    assert page.recent_list.item(0, 0).text() == "Coastal Showcase"
+    assert page.recent_list.item(0, 1).text() == "2026-06-20  14:30"
+    assert page.recent_list.item(0, 2).text() == "2026-06-28  09:45"
+    assert page.recent_list.item(0, 2).data(Qt.ItemDataRole.UserRole) == str(project.path)
+
+
+def test_open_project_uses_latest_modified_or_selected_project(qtbot, tmp_path, monkeypatch):
+    older = create_project("Older", tmp_path / "projects")
+    newer = create_project("Newer", tmp_path / "projects")
+    for project, updated_at in ((older, "2026-06-27T10:00:00"), (newer, "2026-06-28T10:00:00")):
+        project_file = project.path / "project.json"
+        data = json.loads(project_file.read_text(encoding="utf-8"))
+        data["updated_at"] = updated_at
+        project_file.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setattr("e2dm2.ui.recent_projects", lambda: [older.path, newer.path])
+
+    page = HomePage()
+    qtbot.addWidget(page)
+    page.refresh()
+    opened = []
+    page.recent_requested.connect(opened.append)
+
+    page.open_button.click()
+    assert opened == [str(newer.path)]
+
+    older_row = next(
+        row for row in range(page.recent_list.rowCount())
+        if page.recent_list.item(row, 0).data(Qt.ItemDataRole.UserRole) == str(older.path)
+    )
+    page.recent_list.selectRow(older_row)
+    page.open_button.click()
+    assert opened == [str(newer.path), str(older.path)]
+
+
+def test_recent_projects_default_to_latest_and_support_column_sorting(qtbot, tmp_path, monkeypatch):
+    projects = [
+        create_project("zebra", tmp_path / "projects"),
+        create_project("Alpha", tmp_path / "projects"),
+        create_project("middle", tmp_path / "projects"),
+    ]
+    timestamps = ["2026-06-29T10:00:00", "2026-06-27T10:00:00", "2026-06-28T10:00:00"]
+    for project, updated_at in zip(projects, timestamps):
+        project_file = project.path / "project.json"
+        data = json.loads(project_file.read_text(encoding="utf-8"))
+        data["updated_at"] = updated_at
+        project_file.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setattr("e2dm2.ui.recent_projects", lambda: [projects[0].path, projects[1].path, projects[2].path])
+
+    page = HomePage()
+    qtbot.addWidget(page)
+    page.refresh()
+
+    assert page.recent_list.isSortingEnabled()
+    assert page.recent_list.horizontalHeader().sortIndicatorSection() == 2
+    assert page.recent_list.horizontalHeader().sortIndicatorOrder() == Qt.SortOrder.DescendingOrder
+    assert [page.recent_list.item(row, 0).text() for row in range(3)] == ["zebra", "middle", "Alpha"]
+
+    page.recent_list.sortItems(0, Qt.SortOrder.AscendingOrder)
+    assert [page.recent_list.item(row, 0).text() for row in range(3)] == ["Alpha", "middle", "zebra"]
+    page.recent_list.sortItems(0, Qt.SortOrder.DescendingOrder)
+    assert [page.recent_list.item(row, 0).text() for row in range(3)] == ["zebra", "middle", "Alpha"]
 
 
 def test_produce_coerces_qt_combo_data_to_workflow_enum(qtbot, tmp_path, monkeypatch):

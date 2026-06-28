@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
+import json
 import shutil
+from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import (
@@ -260,6 +262,8 @@ class SongPreviewCell(QWidget):
             self.progress_slider.setVisible(False)
             self.progress_slider.setMaximumWidth(16777215)
             self._transport_visible = False
+            if self.layout() is not None:
+                self.layout().activate()
             self.update()
 
     def set_position(self, position: int) -> None:
@@ -452,6 +456,19 @@ class BackendLogWidget(QWidget):
         self.offset = self.path.stat().st_size if self.path.exists() else 0
 
 
+PROJECT_MODIFIED_ROLE = int(Qt.ItemDataRole.UserRole) + 1
+PROJECT_SORT_ROLE = int(Qt.ItemDataRole.UserRole) + 2
+
+
+class ProjectTableItem(QTableWidgetItem):
+    def __lt__(self, other: QTableWidgetItem) -> bool:
+        left = self.data(PROJECT_SORT_ROLE)
+        right = other.data(PROJECT_SORT_ROLE)
+        if left is not None and right is not None:
+            return left < right
+        return super().__lt__(other)
+
+
 class HomePage(QWidget):
     new_requested = Signal()
     open_requested = Signal()
@@ -463,7 +480,7 @@ class HomePage(QWidget):
         brand_card.setObjectName("brandCard")
         self.logo_label = QLabel()
         self.logo_label.setObjectName("brandLogo")
-        self.logo_label.setFixedSize(250, 165)
+        self.logo_label.setFixedSize(300, 200)
         self.logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         logo = QPixmap(str(Path(__file__).parent / "assets" / "logo.jpg"))
         if logo.isNull():
@@ -473,8 +490,9 @@ class HomePage(QWidget):
                 self.logo_label.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation,
             ))
 
-        title = QLabel("Create cinematic drone films")
-        title.setObjectName("appTitle")
+        self.title_label = QLabel("Create cinematic drone films")
+        self.title_label.setObjectName("appTitle")
+        self.title_label.setWordWrap(True)
         subtitle = QLabel(
             "Import your footage, guide the edit, and produce a polished music-driven movie, all in one project."
         )
@@ -482,18 +500,18 @@ class HomePage(QWidget):
         subtitle.setWordWrap(True)
         new_button = QPushButton("New Project")
         new_button.setObjectName("primaryButton")
-        open_button = QPushButton("Open Project")
+        self.open_button = QPushButton("Open Project")
         new_button.clicked.connect(self.new_requested)
-        open_button.clicked.connect(self.open_requested)
+        self.open_button.clicked.connect(self.open_preferred_project)
         actions = QHBoxLayout()
         actions.addWidget(new_button)
-        actions.addWidget(open_button)
+        actions.addWidget(self.open_button)
         actions.addStretch()
 
         brand_copy = QVBoxLayout()
         brand_copy.setSpacing(10)
         brand_copy.addStretch()
-        brand_copy.addWidget(title)
+        brand_copy.addWidget(self.title_label)
         brand_copy.addWidget(subtitle)
         brand_copy.addSpacing(8)
         brand_copy.addLayout(actions)
@@ -504,8 +522,23 @@ class HomePage(QWidget):
         brand_layout.addWidget(self.logo_label)
         brand_layout.addLayout(brand_copy, 1)
 
-        self.recent_list = QListWidget()
-        self.recent_list.itemDoubleClicked.connect(lambda item: self.recent_requested.emit(item.data(Qt.ItemDataRole.UserRole)))
+        self.recent_list = QTableWidget(0, 3)
+        self.recent_list.setObjectName("recentProjectsTable")
+        self.recent_list.setHorizontalHeaderLabels(["Project title", "Created", "Last modified"])
+        self.recent_list.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.recent_list.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.recent_list.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.recent_list.setAlternatingRowColors(True)
+        self.recent_list.verticalHeader().setVisible(False)
+        self.recent_list.verticalHeader().setDefaultSectionSize(38)
+        self.recent_list.setMinimumHeight(self.recent_list.horizontalHeader().sizeHint().height() + 5 * 38 + 4)
+        self.recent_list.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.recent_list.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.recent_list.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.recent_list.setSortingEnabled(True)
+        self.recent_list.itemDoubleClicked.connect(
+            lambda item: self.recent_requested.emit(item.data(Qt.ItemDataRole.UserRole))
+        )
         self.recent_list.itemSelectionChanged.connect(self.update_delete_button)
         recent_title = QLabel("Recent projects")
         recent_title.setObjectName("sectionTitle")
@@ -527,13 +560,71 @@ class HomePage(QWidget):
         layout.addWidget(self.recent_list, 1)
 
     def refresh(self) -> None:
-        self.recent_list.clear()
-        for path in recent_projects():
-            self.recent_list.addItem(path.name)
-            list_item = self.recent_list.item(self.recent_list.count() - 1)
-            list_item.setToolTip(str(path))
-            list_item.setData(Qt.ItemDataRole.UserRole, str(path))
+        paths = recent_projects()
+        self.recent_list.setSortingEnabled(False)
+        self.recent_list.setRowCount(len(paths))
+        for row, path in enumerate(paths):
+            project_file = path / "project.json"
+            try:
+                data = json.loads(project_file.read_text(encoding="utf-8"))
+            except (OSError, ValueError, TypeError):
+                data = {}
+            title = str(data.get("name") or path.name)
+            created_at = self._project_datetime(data.get("created_at"), project_file, created=True)
+            modified_at = self._project_datetime(data.get("updated_at"), project_file, created=False)
+            created = self._format_project_timestamp(created_at)
+            modified = self._format_project_timestamp(modified_at)
+            for column, value in enumerate((title, created, modified)):
+                item = ProjectTableItem(value)
+                item.setToolTip(str(path))
+                item.setData(Qt.ItemDataRole.UserRole, str(path))
+                item.setData(PROJECT_MODIFIED_ROLE, modified_at.timestamp() if modified_at else float("-inf"))
+                sort_value = (
+                    title.casefold() if column == 0 else
+                    created_at.timestamp() if column == 1 and created_at else
+                    modified_at.timestamp() if modified_at else float("-inf")
+                )
+                item.setData(PROJECT_SORT_ROLE, sort_value)
+                if column > 0:
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.recent_list.setItem(row, column, item)
+        self.recent_list.setSortingEnabled(True)
+        self.recent_list.sortItems(2, Qt.SortOrder.DescendingOrder)
         self.update_delete_button()
+
+    @staticmethod
+    def _project_datetime(value, project_file: Path, *, created: bool) -> datetime | None:
+        try:
+            timestamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            if timestamp.tzinfo is not None:
+                timestamp = timestamp.astimezone()
+        except (TypeError, ValueError):
+            try:
+                file_timestamp = project_file.stat().st_ctime if created else project_file.stat().st_mtime
+                timestamp = datetime.fromtimestamp(file_timestamp).astimezone()
+            except OSError:
+                return None
+        return timestamp
+
+    @staticmethod
+    def _format_project_timestamp(timestamp: datetime | None) -> str:
+        if timestamp is None:
+            return "Unavailable"
+        return timestamp.strftime("%Y-%m-%d  %H:%M")
+
+    def open_preferred_project(self) -> None:
+        selected_items = self.recent_list.selectedItems()
+        if selected_items:
+            self.recent_requested.emit(selected_items[0].data(Qt.ItemDataRole.UserRole))
+            return
+        if self.recent_list.rowCount() == 0:
+            self.open_requested.emit()
+            return
+        latest_item = max(
+            (self.recent_list.item(row, 0) for row in range(self.recent_list.rowCount())),
+            key=lambda item: item.data(PROJECT_MODIFIED_ROLE),
+        )
+        self.recent_requested.emit(latest_item.data(Qt.ItemDataRole.UserRole))
 
     def update_delete_button(self) -> None:
         self.delete_button.setEnabled(self.recent_list.currentItem() is not None)
@@ -1633,7 +1724,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Easy Epic Drone Movie Maker - E2DM2")
-        self.resize(820, 540)
+        self.resize(820, 660)
         self._centered_once = False
         self.stack = CompactPageStack()
         self.home = HomePage()
@@ -1721,7 +1812,7 @@ class MainWindow(QMainWindow):
 STYLESHEET = """
 QWidget { background: #f4f5f2; color: #202521; font-size: 10pt; }
 QMainWindow, QDialog { background: #f4f5f2; }
-QLabel#appTitle { font-size: 25pt; font-weight: 650; color: #18342a; }
+QLabel#appTitle { font-size: 23pt; font-weight: 650; color: #18342a; }
 QLabel#shortName { font-size: 13pt; color: #9a5b16; }
 QFrame#brandCard { background: #fcfcfc; border: 1px solid #d8ded9; border-radius: 10px; }
 QFrame#brandCard QLabel { background: transparent; border: 0; }
