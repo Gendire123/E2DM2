@@ -628,14 +628,19 @@ def test_song_editor_space_shortcut_is_limited_to_cuts_tab(qtbot):
     qtbot.keyClick(dialog.title_edit, Qt.Key.Key_Space)
     assert toggles == []
     assert dialog.title_edit.text() == "Epic "
-    dialog.tabs.setCurrentIndex(1)
+
+    cuts_tab_position = dialog.tabs.tabBar().tabRect(1).center()
+    qtbot.mouseClick(dialog.tabs.tabBar(), Qt.MouseButton.LeftButton, pos=cuts_tab_position)
+    qtbot.keyClick(dialog.tabs.tabBar(), Qt.Key.Key_Space)
+    assert toggles == [True]
+
     dialog.cut_markers.table.setFocus()
     qtbot.keyClick(dialog.cut_markers.table, Qt.Key.Key_Space)
-    assert toggles == [True]
+    assert toggles == [True, True]
 
     dialog.play_button.setFocus()
     qtbot.keyClick(dialog.play_button, Qt.Key.Key_Space)
-    assert toggles == [True, True]
+    assert toggles == [True, True, True]
 
 
 def test_song_editor_uses_compact_ten_row_cut_table(qtbot):

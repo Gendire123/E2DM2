@@ -17,7 +17,19 @@
   "escalation_seconds": 0.0,
   "cut_timestamps": [
     0.0,
-    12.061374
+    12.061374,
+    24.043498,
+    32.634896,
+    35.155232,
+    36.140782,
+    42.096512,
+    48.083839,
+    51.059919,
+    51.560474,
+    52.181801,
+    54.125175,
+    56.722555,
+    60.120995
   ],
   "transitions": {
     "duration_seconds": 0.25,
@@ -32,10 +44,27 @@
     "opacity": 0.3,
     "fade_seconds": 0.5
   },
-  "dark_cue": null,
+  "dark_cue": {
+    "start_seconds": 56.722555,
+    "end_seconds": 58.222555,
+    "fade_out_seconds": 1.0,
+    "opacity": 0.9
+  },
   "flash_cue": null,
   "effects": [
     "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "slow_fade_out",
     "none"
   ],
   "workflow": "epic_montage",

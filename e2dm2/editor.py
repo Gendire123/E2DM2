@@ -943,14 +943,14 @@ class SongEditorDialog(QWidget):
 
     def eventFilter(self, watched, event) -> bool:
         if event.type() == QEvent.Type.KeyPress:
-            watched_is_in_cuts = (
-                watched is self.cuts_tab
-                or isinstance(watched, QWidget) and self.cuts_tab.isAncestorOf(watched)
+            watched_is_in_editor = (
+                watched is self
+                or isinstance(watched, QWidget) and self.isAncestorOf(watched)
             )
             if (
                 self.isVisible()
                 and self.tabs.currentWidget() is self.cuts_tab
-                and watched_is_in_cuts
+                and watched_is_in_editor
                 and event.key() == Qt.Key.Key_Space
                 and event.modifiers() == Qt.KeyboardModifier.NoModifier
             ):
