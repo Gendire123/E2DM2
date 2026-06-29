@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QPointF, QRectF, QRunnable, Qt, Signal, Slot
-from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen, QPolygonF
+from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen, QPolygonF, QWheelEvent
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from .catalog import default_project_root
@@ -129,6 +129,7 @@ class WaveformWidget(QWidget):
     marker_selected = Signal(int)
     marker_moved = Signal(int, float)
     marker_remove_requested = Signal(int)
+    position_requested = Signal(float)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -312,6 +313,27 @@ class WaveformWidget(QWidget):
         self.hover_x = None
         self.update()
         super().leaveEvent(event)
+
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        if not self.data:
+            super().wheelEvent(event)
+            return
+
+        ticks = event.angleDelta().y() / 120.0
+        
+        modifiers = event.modifiers()
+        if modifiers & Qt.KeyboardModifier.ControlModifier:
+            step = 0.01
+        elif modifiers & Qt.KeyboardModifier.ShiftModifier:
+            step = 1.0
+        else:
+            step = 0.1
+
+        new_position = self.position_seconds + ticks * step
+        new_position = max(0.0, min(new_position, self.duration_seconds))
+        
+        self.position_requested.emit(new_position)
+        event.accept()
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)

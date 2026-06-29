@@ -692,6 +692,9 @@ class SongEditorDialog(QDialog):
         self.waveform.marker_selected.connect(self.select_cut_from_waveform)
         self.waveform.marker_moved.connect(self.move_cut_timestamp)
         self.waveform.marker_remove_requested.connect(self.remove_cut_timestamp)
+        self.waveform.position_requested.connect(
+            lambda secs: self.player.setPosition(round(secs * 1000))
+        )
         self.waveform_zoom.currentIndexChanged.connect(
             lambda: self.waveform.set_window_seconds(self.waveform_zoom.currentData())
         )

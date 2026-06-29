@@ -1137,6 +1137,80 @@ def test_smooth_table_widget_clicked_empty(qtbot):
     assert clicked_called == 1
 
 
+def test_waveform_widget_wheel_event(qtbot):
+    from e2dm2.waveform import WaveformWidget, WaveformData
+    from PySide6.QtCore import Qt, QPoint
+    
+    widget = WaveformWidget()
+    qtbot.addWidget(widget)
+    
+    # Setup data
+    widget.data = WaveformData(peaks=[0.0]*100, peaks_per_second=10.0, duration_seconds=10.0)
+    widget.duration_seconds = 10.0
+    widget.position_seconds = 5.0
+    
+    positions = []
+    widget.position_requested.connect(positions.append)
+    
+    # Mock event class for wheel event
+    class MockWheelEvent:
+        def __init__(self, angle_delta_y, modifiers=Qt.KeyboardModifier.NoModifier):
+            self._angle_delta = QPoint(0, angle_delta_y)
+            self._modifiers = modifiers
+            self._accepted = False
+            
+        def angleDelta(self):
+            return self._angle_delta
+            
+        def modifiers(self):
+            return self._modifiers
+            
+        def accept(self):
+            self._accepted = True
+            
+    # 1. Test normal scroll up (forward)
+    event1 = MockWheelEvent(120, Qt.KeyboardModifier.NoModifier)
+    widget.wheelEvent(event1)
+    assert event1._accepted
+    assert len(positions) == 1
+    assert pytest.approx(positions[-1]) == 5.1
+    
+    # 2. Test normal scroll down (backward)
+    event2 = MockWheelEvent(-120, Qt.KeyboardModifier.NoModifier)
+    widget.wheelEvent(event2)
+    assert len(positions) == 2
+    assert pytest.approx(positions[-1]) == 4.9
+    
+    # 3. Test precise scroll with Ctrl (ControlModifier)
+    widget.position_seconds = 5.0
+    event3 = MockWheelEvent(120, Qt.KeyboardModifier.ControlModifier)
+    widget.wheelEvent(event3)
+    assert len(positions) == 3
+    assert pytest.approx(positions[-1]) == 5.01
+    
+    # 4. Test fast scroll with Shift (ShiftModifier)
+    widget.position_seconds = 5.0
+    event4 = MockWheelEvent(120, Qt.KeyboardModifier.ShiftModifier)
+    widget.wheelEvent(event4)
+    assert len(positions) == 4
+    assert pytest.approx(positions[-1]) == 6.0
+    
+    # 5. Test boundary clamping (high boundary)
+    widget.position_seconds = 9.95
+    event5 = MockWheelEvent(120, Qt.KeyboardModifier.NoModifier) # moves by +0.1 -> 10.05 -> clamped to 10.0
+    widget.wheelEvent(event5)
+    assert len(positions) == 5
+    assert pytest.approx(positions[-1]) == 10.0
+    
+    # 6. Test boundary clamping (low boundary)
+    widget.position_seconds = 0.05
+    event6 = MockWheelEvent(-120, Qt.KeyboardModifier.NoModifier) # moves by -0.1 -> -0.05 -> clamped to 0.0
+    widget.wheelEvent(event6)
+    assert len(positions) == 6
+    assert pytest.approx(positions[-1]) == 0.0
+
+
+
 
 
 
