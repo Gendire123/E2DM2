@@ -3938,6 +3938,9 @@ class MainWindow(QMainWindow):
         if isinstance(current, ClipPreviewDialog):
             selection_tour_action = self.help_menu.addAction("Show Selection Tour")
             selection_tour_action.triggered.connect(current.show_onboarding)
+        elif isinstance(current, SongEditorDialog):
+            library_tour_action = self.help_menu.addAction("Show Library Tour")
+            library_tour_action.triggered.connect(current.show_onboarding)
         else:
             home_tour_action = self.help_menu.addAction("Show Welcome Screen Tour")
             home_tour_action.triggered.connect(self.start_onboarding_tour)

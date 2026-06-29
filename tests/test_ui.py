@@ -1995,6 +1995,42 @@ def test_mainwindow_open_close_options(qtbot):
     window.close()
 
 
+def test_help_menu_updates(qtbot):
+    from e2dm2.ui import MainWindow
+    from e2dm2.editor import SongEditorDialog
+    from e2dm2.entitlements import AlphaEntitlementProvider
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    QApplication.processEvents()
+
+    # Initial state (Home Page active)
+    actions = window.help_menu.actions()
+    assert len(actions) == 4
+    assert actions[0].text() == "Show Welcome Screen Tour"
+    assert actions[1].text() == "Show Workspace Tour"
+    assert actions[2].text() == "Show Soundtrack Tour"
+    assert actions[3].text() == "Show Produce Tour"
+
+    # Push a SongEditorDialog to the stack
+    library_page = SongEditorDialog(AlphaEntitlementProvider(), window)
+    window.stack.addWidget(library_page)
+    window.stack.setCurrentWidget(library_page)
+    QApplication.processEvents()
+
+    actions = window.help_menu.actions()
+    assert len(actions) == 1
+    assert actions[0].text() == "Show Library Tour"
+
+    # Cleanup
+    window.stack.removeWidget(library_page)
+    library_page.deleteLater()
+    window.close()
+
+
 
 
 
