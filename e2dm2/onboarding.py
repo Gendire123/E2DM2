@@ -292,7 +292,7 @@ class WelcomeDialog(QDialog):
 
     def reject(self) -> None:
         settings = QSettings()
-        settings.setValue("startup/show_welcome_modal", False)
+        settings.setValue("startup/show_welcome_modal", not self.opt_out_cb.isChecked())
         settings.setValue("startup/show_onboarding", False)
         settings.setValue("startup/show_workspace_onboarding", False)
         settings.setValue("startup/show_preview_onboarding", False)
@@ -335,6 +335,7 @@ class OnboardingPopup(QFrame):
         self.settings_key = settings_key
         self.setObjectName("onboardingPopup")
         self.setFixedWidth(320)
+        self.setMinimumHeight(250)
         
         # Shadow effect
         shadow = QGraphicsDropShadowEffect(self)
@@ -614,7 +615,14 @@ class OnboardingOverlay(QWidget):
                 target_obj.height() + 2 * SPOTLIGHT_PADDING
             )
         
-        self.popup.set_step(index + 1, len(self.steps), step_data["title"], step_data["description"])
+        disable_next = step_data.get("disable_next", False)
+        self.popup.set_step(
+            index + 1,
+            len(self.steps),
+            step_data["title"],
+            step_data["description"],
+            disable_next=disable_next,
+        )
         
         import sys
         is_testing = "pytest" in sys.modules or "unittest" in sys.modules
@@ -631,11 +639,10 @@ class OnboardingOverlay(QWidget):
         self.anim_group.addAnimation(self.spotlight_anim)
         
         # Card position transition
-        popup_size = self.popup.sizeHint()
+        self.popup.layout().activate()
+        popup_size = self.popup.sizeHint().expandedTo(self.popup.minimumSize())
         self.popup.resize(popup_size)
-        
-        disable_next = step_data.get("disable_next", False)
-        self.popup.set_step(index + 1, len(self.steps), step_data["title"], step_data["description"], disable_next=disable_next)
+        popup_size = self.popup.size()
         
         position = step_data.get("position", "bottom")
         target_popup_pos = self.calculate_popup_position(target_rect, popup_size, position)
@@ -696,8 +703,10 @@ class OnboardingOverlay(QWidget):
             self.anim_group.stop()
             
         self.set_spotlight_rect(target_rect)
-        popup_size = self.popup.sizeHint()
+        self.popup.layout().activate()
+        popup_size = self.popup.sizeHint().expandedTo(self.popup.minimumSize())
         self.popup.resize(popup_size)
+        popup_size = self.popup.size()
         
         position = step_data.get("position", "bottom")
         self.popup.move(self.calculate_popup_position(target_rect, popup_size, position))

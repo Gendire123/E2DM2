@@ -203,30 +203,31 @@ class SmoothTableWidget(QTableWidget):
     deleteRequested = Signal()
     clickedEmpty = Signal()
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, file_drop_enabled: bool = False, **kwargs):
         super().__init__(*args, **kwargs)
+        self._file_drop_enabled = file_drop_enabled
         self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
-        self.setAcceptDrops(True)
-        
-        # Load footage icon for drag & drop placeholder
-        icon_path = Path(__file__).parent / "assets" / "icons" / "footage.svg"
-        self._placeholder_icon = QIcon(str(icon_path))
+        self.setAcceptDrops(file_drop_enabled)
+
+        if file_drop_enabled:
+            icon_path = Path(__file__).parent / "assets" / "icons" / "footage.svg"
+            self._placeholder_icon = QIcon(str(icon_path))
 
     def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
+        if self._file_drop_enabled and event.mimeData().hasUrls():
             event.acceptProposedAction()
         else:
             super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event):
-        if event.mimeData().hasUrls():
+        if self._file_drop_enabled and event.mimeData().hasUrls():
             event.acceptProposedAction()
         else:
             super().dragMoveEvent(event)
 
     def dropEvent(self, event):
-        if event.mimeData().hasUrls():
+        if self._file_drop_enabled and event.mimeData().hasUrls():
             paths = []
             for url in event.mimeData().urls():
                 local_path = url.toLocalFile()
@@ -246,7 +247,7 @@ class SmoothTableWidget(QTableWidget):
 
     def paintEvent(self, event):
         super().paintEvent(event)
-        if self.rowCount() == 0:
+        if self._file_drop_enabled and self.rowCount() == 0:
             from PySide6.QtGui import QFont, QFontMetrics
             from PySide6.QtCore import QRect
             
@@ -305,7 +306,7 @@ class SmoothTableWidget(QTableWidget):
             super().keyPressEvent(event)
 
     def mousePressEvent(self, event) -> None:
-        if self.rowCount() == 0 and event.button() == Qt.MouseButton.LeftButton:
+        if self._file_drop_enabled and self.rowCount() == 0 and event.button() == Qt.MouseButton.LeftButton:
             self.clickedEmpty.emit()
             event.accept()
         else:
@@ -1332,7 +1333,10 @@ class WorkspacePage(QWidget):
     def _build_footage_page(self) -> QWidget:
         footage_panel = QWidget()
         footage_layout = QVBoxLayout(footage_panel)
-        footage_layout.setContentsMargins(0, 0, 0, 0)
+        # Leave room inside the page for the card's drop shadow. Without this
+        # gutter, the card fills the panel and Qt clips the shadow at the
+        # panel's lower boundary.
+        footage_layout.setContentsMargins(0, 0, 0, 24)
         footage_layout.setSpacing(16)
 
         card = QFrame()
@@ -1374,7 +1378,7 @@ class WorkspacePage(QWidget):
 
         card_layout.addLayout(card_header)
 
-        self.media_table = SmoothTableWidget(0, 9)
+        self.media_table = SmoothTableWidget(0, 9, file_drop_enabled=True)
         self.media_table.setHorizontalHeaderLabels([
             "#",
             "Clip",
@@ -1473,7 +1477,9 @@ class WorkspacePage(QWidget):
     def _build_soundtrack_page(self) -> QWidget:
         soundtrack_panel = QWidget()
         soundtrack_layout = QVBoxLayout(soundtrack_panel)
-        soundtrack_layout.setContentsMargins(0, 0, 0, 0)
+        # Keep the library card's drop shadow inside the scrollable widget so
+        # it is not clipped at the bottom of the viewport.
+        soundtrack_layout.setContentsMargins(0, 0, 0, 24)
         soundtrack_layout.setSpacing(16)
 
         workflow_card = QFrame()
@@ -3129,15 +3135,18 @@ class OptionsDialog(QWidget):
         self.output_edit = QLineEdit()
         self.output_edit.setReadOnly(True)
         self.output_edit.setPlaceholderText("Using default output directory")
+        self.output_edit.setMinimumHeight(44)
         
         custom_folder = self.settings.value("custom_output_folder", "")
         if custom_folder:
             self.output_edit.setText(custom_folder)
             
         self.browse_button = QPushButton("Browse...")
+        self.browse_button.setMinimumHeight(44)
         self.browse_button.clicked.connect(self._browse_output_folder)
         
         self.clear_button = QPushButton("Reset to Default")
+        self.clear_button.setMinimumHeight(44)
         self.clear_button.clicked.connect(self._clear_output_folder)
         
         output_row = QHBoxLayout()

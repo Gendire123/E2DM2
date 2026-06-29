@@ -31,6 +31,7 @@ def test_main_window_smoke(qtbot):
     assert not window.windowIcon().isNull()
     assert window.workspace.song_table.rowCount() >= 2
     assert window.home.recent_list is not None
+    assert not window.home.recent_list.acceptDrops()
     assert window.home.logo_label.pixmap() is not None
     assert not window.home.logo_label.pixmap().isNull()
     assert window.home.logo_label.size() == QSize(300, 200)
@@ -96,6 +97,9 @@ def test_footage_action_controls_have_matching_heights(qtbot):
     page.resize(900, 600)
     page.show()
 
+    assert page.workspace_tabs.widget(0).layout().contentsMargins().bottom() == 24
+    soundtrack_scroll = page.workspace_tabs.widget(1)
+    assert soundtrack_scroll.widget().layout().contentsMargins().bottom() == 24
     expected_height = page.add_files_button.height()
     assert page.add_folder_button.height() == expected_height
     assert page.preview_button.height() == expected_height
@@ -237,6 +241,7 @@ def test_options_dialog_persists_splash_screen_preference(qtbot, tmp_path):
     qtbot.addWidget(dialog)
 
     assert dialog.splash_checkbox.isChecked()
+    assert dialog.welcome_checkbox.isChecked()
     assert splash_screen_enabled(settings)
 
     dialog.splash_checkbox.setChecked(False)
@@ -246,6 +251,9 @@ def test_options_dialog_persists_splash_screen_preference(qtbot, tmp_path):
     # Test output directory settings loading/saving
     assert dialog.output_edit.text() == ""
     assert settings.value("custom_output_folder", "") == ""
+    assert dialog.output_edit.minimumHeight() == 44
+    assert dialog.browse_button.minimumHeight() == 44
+    assert dialog.clear_button.minimumHeight() == 44
 
     # Clear/reset
     dialog._clear_output_folder()
@@ -1060,7 +1068,7 @@ def test_smooth_table_widget_drag_drop(qtbot):
     from e2dm2.ui import SmoothTableWidget
     import tempfile
     
-    table = SmoothTableWidget(0, 9)
+    table = SmoothTableWidget(0, 9, file_drop_enabled=True)
     qtbot.addWidget(table)
     
     assert table.acceptDrops()
@@ -1121,7 +1129,7 @@ def test_smooth_table_widget_clicked_empty(qtbot):
     from PySide6.QtGui import QMouseEvent
     from e2dm2.ui import SmoothTableWidget
     
-    table = SmoothTableWidget(0, 9)
+    table = SmoothTableWidget(0, 9, file_drop_enabled=True)
     qtbot.addWidget(table)
     
     clicked_called = 0
@@ -1369,18 +1377,29 @@ def test_welcome_dialog(qtbot):
     assert settings.value("startup/show_library_onboarding", True, type=bool) is True
     assert settings.value("startup/show_produce_onboarding", True, type=bool) is True
 
-    # 2. Test Reject (Explore on My Own) - Disables all onboarding
+    # 2. Test Reject (Explore on My Own) - Keeps the welcome screen enabled by
+    # default while disabling the optional tours.
+    settings.setValue("startup/show_welcome_modal", True)
+    settings.sync()
     dialog2 = WelcomeDialog()
     qtbot.addWidget(dialog2)
     dialog2.reject()
 
-    assert settings.value("startup/show_welcome_modal", True, type=bool) is False
+    assert settings.value("startup/show_welcome_modal", False, type=bool) is True
     assert settings.value("startup/show_onboarding", True, type=bool) is False
     assert settings.value("startup/show_workspace_onboarding", True, type=bool) is False
     assert settings.value("startup/show_preview_onboarding", True, type=bool) is False
     assert settings.value("startup/show_soundtrack_onboarding", True, type=bool) is False
     assert settings.value("startup/show_library_onboarding", True, type=bool) is False
     assert settings.value("startup/show_produce_onboarding", True, type=bool) is False
+
+    # Explicitly opting out still disables the welcome screen.
+    dialog3 = WelcomeDialog()
+    qtbot.addWidget(dialog3)
+    dialog3.opt_out_cb.setChecked(True)
+    dialog3.reject()
+
+    assert settings.value("startup/show_welcome_modal", True, type=bool) is False
 
     # Restore settings
     settings.setValue("startup/show_welcome_modal", True)
@@ -1440,6 +1459,15 @@ def test_workspace_onboarding_overlay(qtbot):
     overlay.next_step()
     assert overlay.current_step == 3
     assert overlay.popup.title_label.text() == "Preview and Edit Clips"
+
+    overlay.next_step()
+    QApplication.processEvents()
+    assert overlay.current_step == 4
+    assert overlay.popup.title_label.text() == "Change Clip Order"
+    assert overlay.popup.height() >= 250
+    assert overlay.popup.desc_label.height() >= overlay.popup.desc_label.sizeHint().height()
+    highlighted_buttons = overlay.spotlightRect
+    assert overlay.popup.geometry().bottom() + 12 <= highlighted_buttons.top()
 
     # Verify opt-out updates settings
     assert not overlay.popup.opt_out_cb.isChecked()
@@ -1705,13 +1733,13 @@ def test_preview_onboarding_overlay_cached(qtbot, tmp_path):
     dialog.close()
 
 
-def test_options_onboarding_reset(qtbot):
+def test_options_onboarding_reset(qtbot, tmp_path):
     from e2dm2.ui import OptionsDialog
     from PySide6.QtCore import QSettings
     from PySide6.QtWidgets import QApplication
 
     app = QApplication.instance() or QApplication([])
-    settings = QSettings()
+    settings = QSettings(str(tmp_path / "onboarding-options.ini"), QSettings.Format.IniFormat)
     
     # Disable onboarding features
     settings.setValue("startup/show_welcome_modal", False)
