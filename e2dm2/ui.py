@@ -3319,6 +3319,11 @@ class WorkspacePage(QWidget):
                 "description": "Choose your final video resolution. By default, standard 1080p is selected. Pro users can export at Source resolution to output stunning high-definition 4K footage."
             },
             {
+                "target": lambda ws: ws.add_to_queue_button,
+                "title": "Add to Queue",
+                "description": "Queue your current project settings to render later. This captures all current configurations, including footage segments (along with excluded parts and required segment timing) and soundtrack selection. Queued jobs are saved in the list below until produced, allowing you to easily build up your queue list."
+            },
+            {
                 "target": lambda ws: ws.render_button,
                 "title": "Produce Video",
                 "description": "Once you are satisfied with your selected clips, edits, and soundtrack selection, click this button to start rendering your final movie masterpiece."

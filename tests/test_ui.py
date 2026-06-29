@@ -1717,6 +1717,8 @@ def test_soundtrack_onboarding_overlay(qtbot):
     from PySide6.QtWidgets import QApplication
 
     app = QApplication.instance() or QApplication([])
+    app.setApplicationName("E2DM2")
+    app.setOrganizationName("E2DM2")
     settings = QSettings()
     settings.setValue("startup/show_soundtrack_onboarding", True)
     settings.sync()
@@ -1765,6 +1767,8 @@ def test_library_onboarding_overlay(qtbot):
     from PySide6.QtWidgets import QApplication
 
     app = QApplication.instance() or QApplication([])
+    app.setApplicationName("E2DM2")
+    app.setOrganizationName("E2DM2")
     settings = QSettings()
     settings.setValue("startup/show_library_onboarding", True)
     settings.sync()
@@ -1831,6 +1835,8 @@ def test_produce_onboarding_overlay(qtbot):
     from PySide6.QtWidgets import QApplication
 
     app = QApplication.instance() or QApplication([])
+    app.setApplicationName("E2DM2")
+    app.setOrganizationName("E2DM2")
     settings = QSettings()
     settings.setValue("startup/show_produce_onboarding", True)
     settings.sync()
@@ -1842,11 +1848,12 @@ def test_produce_onboarding_overlay(qtbot):
 
     # Get onboarding steps
     steps = workspace.get_produce_onboarding_steps()
-    assert len(steps) == 3
+    assert len(steps) == 4
 
     assert steps[0]["title"] == "Export Resolution"
-    assert steps[1]["title"] == "Produce Video"
-    assert steps[2]["title"] == "Access Renders"
+    assert steps[1]["title"] == "Add to Queue"
+    assert steps[2]["title"] == "Produce Video"
+    assert steps[3]["title"] == "Access Renders"
 
     overlay = OnboardingOverlay(workspace, steps, "startup/show_produce_onboarding")
     qtbot.addWidget(overlay)
@@ -1858,11 +1865,13 @@ def test_produce_onboarding_overlay(qtbot):
     # Next step
     overlay.next_step()
     assert overlay.current_step == 1
-    assert overlay.popup.title_label.text() == "Produce Video"
+    assert overlay.popup.title_label.text() == "Add to Queue"
 
     # Verify opt-out checkbox behavior
     assert not overlay.popup.opt_out_cb.isChecked()
     overlay.popup.opt_out_cb.setChecked(True)
+    # Process events to ensure signal handlers finish executing
+    QApplication.processEvents()
     assert settings.value("startup/show_produce_onboarding", True, type=bool) is False
 
     # Reset settings
@@ -1880,6 +1889,8 @@ def test_preview_onboarding_overlay_cached(qtbot, tmp_path):
     from PySide6.QtWidgets import QApplication
 
     app = QApplication.instance() or QApplication([])
+    app.setApplicationName("E2DM2")
+    app.setOrganizationName("E2DM2")
     settings = QSettings()
     settings.setValue("startup/show_preview_onboarding", True)
     settings.sync()
