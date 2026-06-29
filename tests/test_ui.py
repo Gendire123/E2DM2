@@ -633,6 +633,10 @@ def test_song_editor_space_shortcut_is_limited_to_cuts_tab(qtbot):
     qtbot.keyClick(dialog.cut_markers.table, Qt.Key.Key_Space)
     assert toggles == [True]
 
+    dialog.play_button.setFocus()
+    qtbot.keyClick(dialog.play_button, Qt.Key.Key_Space)
+    assert toggles == [True, True]
+
 
 def test_song_editor_uses_compact_ten_row_cut_table(qtbot):
     dialog = SongEditorDialog(AlphaEntitlementProvider())

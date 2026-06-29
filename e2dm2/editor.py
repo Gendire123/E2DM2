@@ -11,6 +11,7 @@ LOGGER = logging.getLogger(__name__)
 from PySide6.QtCore import QEvent, QSignalBlocker, QThreadPool, QTimer, Qt, QUrl, Signal
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -542,9 +543,7 @@ class SongEditorDialog(QWidget):
         self.audio_output.setVolume(0.7)
         self._build_ui()
         self._connect_player()
-        self.cuts_tab.installEventFilter(self)
-        for child in self.cuts_tab.findChildren(QWidget):
-            child.installEventFilter(self)
+        QApplication.instance().installEventFilter(self)
         self.reload_catalog()
         allowed = self.entitlement.has_feature(PRESET_EDITOR_FEATURE)
         self.new_button.setEnabled(allowed)
@@ -943,15 +942,21 @@ class SongEditorDialog(QWidget):
             self.player.play()
 
     def eventFilter(self, watched, event) -> bool:
-        if (
-            self.tabs.currentWidget() is self.cuts_tab
-            and event.type() == QEvent.Type.KeyPress
-            and event.key() == Qt.Key.Key_Space
-            and event.modifiers() == Qt.KeyboardModifier.NoModifier
-        ):
-            self.toggle_playback()
-            event.accept()
-            return True
+        if event.type() == QEvent.Type.KeyPress:
+            watched_is_in_cuts = (
+                watched is self.cuts_tab
+                or isinstance(watched, QWidget) and self.cuts_tab.isAncestorOf(watched)
+            )
+            if (
+                self.isVisible()
+                and self.tabs.currentWidget() is self.cuts_tab
+                and watched_is_in_cuts
+                and event.key() == Qt.Key.Key_Space
+                and event.modifiers() == Qt.KeyboardModifier.NoModifier
+            ):
+                self.toggle_playback()
+                event.accept()
+                return True
         return super().eventFilter(watched, event)
 
     def new_song(self) -> None:
