@@ -12,12 +12,23 @@ from PySide6.QtCore import QAbstractAnimation, QObject, QPoint, QSettings, QSize
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QLabel, QMessageBox, QProgressBar, QProgressDialog, QTabWidget, QTableWidget, QTableWidgetItem, QWidget, QDialogButtonBox
 
-from e2dm2.models import ClipSelection, MediaItem, RenderResult, SelectionType, WorkflowMode
+from e2dm2.models import (
+    ClipSelection,
+    ExportSize,
+    MediaItem,
+    OutputResult,
+    ProgressEvent,
+    RenderOutputPlan,
+    RenderPlan,
+    RenderResult,
+    SelectionType,
+    WorkflowMode,
+)
 from e2dm2.preview import ClipPreviewDialog, SelectionTimeline, format_timecode, parse_timecode
 from e2dm2.editor import SongEditorDialog
 from e2dm2.entitlements import AlphaEntitlementProvider
 from e2dm2.ui import ClickSeekSlider, FullRowSelectionDelegate, HomePage, MainWindow, OptionsDialog, STYLESHEET, SongPreviewCell, splash_screen_enabled
-from e2dm2.project import create_project, load_project
+from e2dm2.project import create_project, load_project, save_project
 from e2dm2.ui import WorkspacePage, _duration
 
 
@@ -235,6 +246,50 @@ def test_project_title_can_be_edited_inline_and_persisted(qtbot, tmp_path):
     assert project.settings.name == "New Project Title"
 
 
+def test_soundtrack_selection_is_saved_to_project_immediately(qtbot, tmp_path):
+    page = WorkspacePage()
+    qtbot.addWidget(page)
+    project = create_project("Saved Soundtrack", tmp_path / "projects")
+    page.set_project(project)
+
+    current_id = project.settings.song_id
+    target_row = next(
+        row
+        for row in range(page.song_table.rowCount())
+        if page.song_table.item(row, 0).data(Qt.ItemDataRole.UserRole) != current_id
+    )
+    expected_id = page.song_table.item(target_row, 0).data(Qt.ItemDataRole.UserRole)
+    page.song_table.selectRow(target_row)
+
+    assert project.settings.song_id == expected_id
+    assert load_project(project.path).settings.song_id == expected_id
+
+
+def test_real_estate_soundtrack_selection_survives_project_reopen(qtbot, tmp_path):
+    page = WorkspacePage()
+    qtbot.addWidget(page)
+    project = create_project("Reopened Soundtrack", tmp_path / "projects")
+    project.settings.workflow = WorkflowMode.REAL_ESTATE
+    save_project(project.path, project.settings)
+    page.set_project(load_project(project.path))
+
+    expected_id = "real-estate-3"
+    target_row = next(
+        row
+        for row in range(page.re_song_table.rowCount())
+        if page.re_song_table.item(row, 0).data(Qt.ItemDataRole.UserRole) == expected_id
+    )
+    page.re_song_table.selectRow(target_row)
+    assert load_project(project.path).settings.song_id == expected_id
+
+    page.set_project(load_project(project.path))
+
+    assert WorkflowMode(page.workflow_combo.currentData()) is WorkflowMode.REAL_ESTATE
+    selected_item = page.re_song_table.item(page.re_song_table.currentRow(), 0)
+    assert selected_item.data(Qt.ItemDataRole.UserRole) == expected_id
+    assert page.project.settings.song_id == expected_id
+
+
 def test_options_dialog_persists_splash_screen_preference(qtbot, tmp_path):
     settings = QSettings(str(tmp_path / "options.ini"), QSettings.Format.IniFormat)
     dialog = OptionsDialog(settings=settings)
@@ -423,6 +478,81 @@ def test_produce_coerces_qt_combo_data_to_workflow_enum(qtbot, tmp_path, monkeyp
     qtbot.waitUntil(lambda: page.thread is None, timeout=5000)
 
     assert page.project.settings.workflow is WorkflowMode.EPIC_MONTAGE
+
+
+def test_render_queue_freezes_each_configuration_and_produces_every_job(qtbot, tmp_path, monkeypatch):
+    rendered_soundtracks = []
+
+    def fake_create_render_plan(project, request):
+        soundtrack = request.song_id or request.full_length_track_id
+        output = RenderOutputPlan(
+            soundtrack,
+            "1920x1080_30fps",
+            [],
+            1920,
+            1080,
+            30,
+            10,
+            ExportSize.SOURCE,
+            str(project.path / "renders" / f"{soundtrack}.mp4"),
+            8000,
+        )
+        return RenderPlan(
+            1,
+            str(project.path),
+            project.settings.name,
+            request.workflow,
+            str(project.path / "music" / f"{soundtrack}.m4a"),
+            {"title": soundtrack, "artist": "Queue Test"},
+            "libx264",
+            [output],
+        )
+
+    def fake_render(plan, progress_callback, cancellation):
+        output = plan.outputs[0]
+        progress_callback(ProgressEvent("complete", f"Created {Path(output.output_path).name}", output.output_id, 100))
+        rendered_soundtracks.append(plan.song_manifest["title"])
+        return RenderResult([OutputResult(output.output_id, output.output_path, True)])
+
+    monkeypatch.setattr("e2dm2.ui.create_render_plan", fake_create_render_plan)
+    monkeypatch.setattr("e2dm2.ui.render", fake_render)
+
+    page = WorkspacePage()
+    qtbot.addWidget(page)
+    page.set_project(create_project("Queued Produce", tmp_path / "projects"))
+    assert page.queue_card.isHidden()
+
+    first_song = page.project.settings.song_id
+    page.add_to_render_queue()
+    assert not page.queue_card.isHidden()
+    one_job_height = page.queue_list.height()
+    page.project.settings.song_id = "epic-montage-2"
+    page.add_to_render_queue()
+
+    assert [job.plan.song_manifest["title"] for job in page.render_queue] == [first_song, "epic-montage-2"]
+    assert page.queue_title.text() == "Render Queue (2)"
+    assert page.queue_list.height() > one_job_height
+    queue_path = page.project.path / "plans" / "render-queue.json"
+    assert queue_path.is_file()
+
+    reopened_page = WorkspacePage()
+    qtbot.addWidget(reopened_page)
+    reopened_page.set_project(load_project(page.project.path))
+    assert [job.plan.song_manifest["title"] for job in reopened_page.render_queue] == [
+        first_song,
+        "epic-montage-2",
+    ]
+    assert not reopened_page.queue_card.isHidden()
+
+    page.start_render()
+    qtbot.waitUntil(lambda: page.thread is None, timeout=5000)
+
+    assert rendered_soundtracks == [first_song, "epic-montage-2"]
+    assert page.render_queue == []
+    assert page.queue_title.text() == "Render Queue (0)"
+    assert page.queue_card.isHidden()
+    assert not queue_path.exists()
+    assert page.results_list.count() == 2
 
 
 def test_full_length_workflow_uses_library_table_and_tracks_selection(qtbot, tmp_path):

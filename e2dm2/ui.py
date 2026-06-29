@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import json
 import shutil
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -63,6 +64,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSlider,
     QSplitter,
     QStackedWidget,
@@ -93,7 +95,16 @@ from .licensing_ui import (
     open_purchase_page,
 )
 from .media import VIDEO_EXTENSIONS, preview_proxy_path
-from .models import CancellationToken, ExportSize, ProgressEvent, Project, RenderRequest, WorkflowMode
+from .models import (
+    CancellationToken,
+    ExportSize,
+    ProgressEvent,
+    Project,
+    RenderPlan,
+    RenderRequest,
+    RenderResult,
+    WorkflowMode,
+)
 from .preview import ClipPreviewDialog
 from .project import (
     create_project,
@@ -747,6 +758,63 @@ class RenderWorker(QObject):
             self.failed.emit(str(exc))
 
 
+class RenderQueueWorker(QObject):
+    progress = Signal(object)
+    job_finished = Signal(int, object)
+    finished = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, plans: list[RenderPlan], cancellation: CancellationToken) -> None:
+        super().__init__()
+        self.plans = plans
+        self.cancellation = cancellation
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            LOGGER.info("Background render queue started with %d job(s)", len(self.plans))
+            outputs = []
+            total_outputs = max(1, sum(len(plan.outputs) for plan in self.plans))
+            completed_outputs = 0
+            cancelled = False
+            for job_index, plan in enumerate(self.plans):
+                if self.cancellation.cancelled:
+                    cancelled = True
+                    break
+                output_indexes = {output.output_id: index for index, output in enumerate(plan.outputs)}
+
+                def report(event: ProgressEvent, *, base=completed_outputs, indexes=output_indexes) -> None:
+                    percent = None
+                    if event.percent is not None:
+                        output_index = indexes.get(event.output_id, 0)
+                        percent = (base + output_index + event.percent / 100) / total_outputs * 100
+                    self.progress.emit(ProgressEvent(
+                        event.stage,
+                        f"Job {job_index + 1} of {len(self.plans)}: {event.message}",
+                        event.output_id,
+                        percent,
+                    ))
+
+                result = render(plan, report, self.cancellation)
+                outputs.extend(result.outputs)
+                self.job_finished.emit(job_index, result)
+                cancelled = cancelled or result.cancelled
+                completed_outputs += len(plan.outputs)
+                if cancelled:
+                    break
+            self.finished.emit(RenderResult(outputs, cancelled=cancelled))
+        except Exception as exc:
+            LOGGER.exception("Background render queue failed")
+            self.failed.emit(str(exc))
+
+
+@dataclass(slots=True)
+class QueuedRenderJob:
+    plan: RenderPlan
+    soundtrack: str
+    export_summary: str
+
+
 class BackendLogWidget(QWidget):
     def __init__(self) -> None:
         super().__init__()
@@ -1020,6 +1088,8 @@ class WorkspacePage(QWidget):
         self.thread: QThread | None = None
         self.worker: QObject | None = None
         self.cancellation: CancellationToken | None = None
+        self.render_queue: list[QueuedRenderJob] = []
+        self._active_queue_jobs: list[QueuedRenderJob] = []
         self.entitlement = entitlement or AlphaEntitlementProvider()
         self.request_pro = request_pro
         self.song_preview_player = QMediaPlayer(self)
@@ -1036,6 +1106,7 @@ class WorkspacePage(QWidget):
         self.thumb_signals = ThumbnailSignals()
         self.thumb_signals.done.connect(self._on_thumbnail_ready)
         self._build_ui()
+        self._refresh_render_queue()
         self.refresh_catalog()
         self.refresh_entitlements()
 
@@ -1579,12 +1650,58 @@ class WorkspacePage(QWidget):
         self.render_button.setObjectName("primaryButton")
         self.render_button.clicked.connect(self.start_render)
 
+        self.add_to_queue_button = QPushButton("Add to Queue")
+        self.add_to_queue_button.setObjectName("secondaryButton")
+        self.add_to_queue_button.clicked.connect(self.add_to_render_queue)
+
         self.cancel_button = QPushButton("Cancel")
         self.cancel_button.setEnabled(False)
         self.cancel_button.clicked.connect(self.cancel_operation)
 
+        config_layout.addWidget(self.add_to_queue_button)
         config_layout.addWidget(self.render_button)
         config_layout.addWidget(self.cancel_button)
+
+        self.queue_card = QFrame()
+        self.queue_card.setObjectName("mainCard")
+        self.queue_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        apply_card_shadow(self.queue_card)
+        queue_layout = QVBoxLayout(self.queue_card)
+        queue_layout.setContentsMargins(20, 18, 20, 18)
+        queue_layout.setSpacing(12)
+
+        queue_header = QHBoxLayout()
+        self.queue_title = QLabel("Render Queue (0)")
+        self.queue_title.setObjectName("cardTitle")
+        queue_header.addWidget(self.queue_title)
+        queue_header.addStretch()
+        self.remove_queue_button = QPushButton("Remove Selected")
+        self.remove_queue_button.setObjectName("secondaryButton")
+        self.remove_queue_button.clicked.connect(self.remove_selected_queue_job)
+        self.clear_queue_button = QPushButton("Clear Queue")
+        self.clear_queue_button.setObjectName("secondaryButton")
+        self.clear_queue_button.clicked.connect(self.clear_render_queue)
+        queue_header.addWidget(self.remove_queue_button)
+        queue_header.addWidget(self.clear_queue_button)
+        queue_layout.addLayout(queue_header)
+
+        queue_help = QLabel(
+            "Your queued videos are listed below. Click Produce to render them in order."
+        )
+        queue_help.setWordWrap(True)
+        queue_help.setStyleSheet("font-size: 10.5pt; color: #526173;")
+        queue_layout.addWidget(queue_help)
+
+        self.queue_empty_label = QLabel(
+            "No jobs queued. Produce will render the current project settings."
+        )
+        self.queue_empty_label.setStyleSheet("font-size: 10.5pt; color: #6c7b8c;")
+        queue_layout.addWidget(self.queue_empty_label)
+
+        self.queue_list = QListWidget()
+        self.queue_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.queue_list.currentRowChanged.connect(self._update_queue_controls)
+        queue_layout.addWidget(self.queue_list)
 
         status_card = QFrame()
         status_card.setObjectName("mainCard")
@@ -1626,6 +1743,7 @@ class WorkspacePage(QWidget):
         status_layout.addLayout(folder_layout)
 
         produce_layout.addWidget(config_card)
+        produce_layout.addWidget(self.queue_card)
         produce_layout.addWidget(status_card)
         produce_layout.addStretch(1)
 
@@ -1964,6 +2082,7 @@ class WorkspacePage(QWidget):
 
     def set_project(self, project: Project) -> None:
         self.project = project
+        self._load_render_queue()
         self._onboarding_triggered = False
         self.project_title.setText(project.settings.name)
         self.project_title_edit_button.setEnabled(True)
@@ -1977,12 +2096,13 @@ class WorkspacePage(QWidget):
         self.refresh_entitlements()
         self.refresh_media()
         self.refresh_catalog(project.settings.song_id)
-        self.workflow_changed()
+        self.workflow_changed(preserve_selection=True)
         self._update_header_details()
         self.results_list.clear()
         self.results_list.setVisible(False)
         self.status_label.setText("Ready")
         self.progress_bar.setValue(0)
+        self._refresh_render_queue()
         self.workspace_tabs.setCurrentIndex(0)
 
     def refresh_media(self) -> None:
@@ -2381,21 +2501,28 @@ class WorkspacePage(QWidget):
         }
         if table_workflows.get(sender) != self.workflow_combo.currentData():
             return
+        selection_changed = False
         if sender == self.song_table:
             row = self.song_table.currentRow()
             item = self.song_table.item(row, 0) if row >= 0 else None
             if item:
-                self.project.settings.song_id = item.data(Qt.ItemDataRole.UserRole)
+                selected_id = item.data(Qt.ItemDataRole.UserRole)
+                selection_changed = self.project.settings.song_id != selected_id
+                self.project.settings.song_id = selected_id
         elif sender == self.re_song_table:
             row = self.re_song_table.currentRow()
             item = self.re_song_table.item(row, 0) if row >= 0 else None
             if item:
-                self.project.settings.song_id = item.data(Qt.ItemDataRole.UserRole)
+                selected_id = item.data(Qt.ItemDataRole.UserRole)
+                selection_changed = self.project.settings.song_id != selected_id
+                self.project.settings.song_id = selected_id
         elif sender == self.full_song_table:
             row = self.full_song_table.currentRow()
             item = self.full_song_table.item(row, 0) if row >= 0 else None
             if item:
-                self.project.settings.full_length_track_id = item.data(Qt.ItemDataRole.UserRole)
+                selected_id = item.data(Qt.ItemDataRole.UserRole)
+                selection_changed = self.project.settings.full_length_track_id != selected_id
+                self.project.settings.full_length_track_id = selected_id
         elif sender == self.custom_song_table:
             row = self.custom_song_table.currentRow()
             item = self.custom_song_table.item(row, 0) if row >= 0 else None
@@ -2404,13 +2531,21 @@ class WorkspacePage(QWidget):
                 song = next((s for s in self.songs if s.song_id == selected_id), None)
                 if song:
                     if song.workflow == WorkflowMode.FULL_LENGTH:
+                        selection_changed = self.project.settings.full_length_track_id != selected_id
                         self.project.settings.full_length_track_id = selected_id
                     else:
+                        selection_changed = self.project.settings.song_id != selected_id
                         self.project.settings.song_id = selected_id
+                    selection_changed = selection_changed or self.project.settings.workflow != song.workflow
                     self.project.settings.workflow = song.workflow
+        if selection_changed:
+            try:
+                save_project(self.project.path, self.project.settings)
+            except OSError:
+                LOGGER.exception("Could not automatically save soundtrack selection")
         self._update_header_details()
 
-    def workflow_changed(self) -> None:
+    def workflow_changed(self, _index: int | None = None, *, preserve_selection: bool = False) -> None:
         self.stop_song_preview()
         workflow = self.workflow_combo.currentData()
         if workflow == WorkflowMode.EPIC_MONTAGE:
@@ -2430,7 +2565,10 @@ class WorkspacePage(QWidget):
 
         if table.rowCount() == 0:
             return
-        if workflow in {WorkflowMode.FULL_LENGTH, WorkflowMode.REAL_ESTATE, WorkflowMode.CUSTOM} or table.currentRow() < 0:
+        if (
+            not preserve_selection
+            and workflow in {WorkflowMode.FULL_LENGTH, WorkflowMode.REAL_ESTATE, WorkflowMode.CUSTOM}
+        ) or table.currentRow() < 0:
             table.selectRow(0)
         self._update_preview_selection(table)
 
@@ -2583,6 +2721,20 @@ class WorkspacePage(QWidget):
         if row < 0:
             return
         item = self.project.settings.media[row]
+        selected_path = item.resolve(self.project.path).resolve()
+        queued_paths = {
+            Path(path).resolve()
+            for job in self.render_queue
+            for output in job.plan.outputs
+            for path in output.media_paths
+        }
+        if selected_path in queued_paths:
+            QMessageBox.information(
+                self,
+                "Clip is queued",
+                "This clip is used by a prepared render job. Remove or clear that queue job before deleting the clip.",
+            )
+            return
         if QMessageBox.question(self, "Remove clip", f"Remove {item.original_name} from this project?") != QMessageBox.StandardButton.Yes:
             return
         removed = remove_media(self.project.settings, row)
@@ -2641,6 +2793,193 @@ class WorkspacePage(QWidget):
             exports.append(ExportSize.HD_1080)
         return exports
 
+    def _current_render_request(self) -> RenderRequest | None:
+        if not self.project:
+            return None
+        exports = self.selected_exports()
+        if not exports:
+            QMessageBox.warning(self, "Export size", "Choose at least one export size.")
+            return None
+        workflow = WorkflowMode(self.workflow_combo.currentData())
+        if workflow == WorkflowMode.CUSTOM:
+            selected_row = self.custom_song_table.currentRow()
+            if selected_row < 0:
+                QMessageBox.warning(self, "Missing song", "Choose a custom song.")
+                return None
+            item = self.custom_song_table.item(selected_row, 0)
+            selected_id = item.data(Qt.ItemDataRole.UserRole)
+            song = next((song for song in self.songs if song.song_id == selected_id), None)
+            if not song:
+                QMessageBox.warning(self, "Missing song", "Choose a custom song.")
+                return None
+            workflow = song.workflow
+            if workflow == WorkflowMode.FULL_LENGTH:
+                self.project.settings.full_length_track_id = selected_id
+                song_id = None
+            else:
+                self.project.settings.song_id = selected_id
+                song_id = selected_id
+        else:
+            song_id = self.project.settings.song_id
+
+        if workflow in {WorkflowMode.EPIC_MONTAGE, WorkflowMode.REAL_ESTATE} and not song_id:
+            message = "Choose a Real Estate song." if workflow == WorkflowMode.REAL_ESTATE else "Choose an Epic song."
+            QMessageBox.warning(self, "Missing song", message)
+            return None
+        self.project.settings.workflow = workflow
+        self.project.settings.exports = exports
+        save_project(self.project.path, self.project.settings)
+        return RenderRequest(workflow, exports, song_id, self.project.settings.full_length_track_id)
+
+    def _render_job_description(self, plan: RenderPlan) -> tuple[str, str]:
+        if plan.song_manifest:
+            title = str(plan.song_manifest.get("title", "Selected soundtrack"))
+            artist = str(plan.song_manifest.get("artist", "")).strip()
+            soundtrack = f"{title} by {artist}" if artist else title
+        else:
+            track = next(
+                (track for track in FULL_LENGTH_TRACKS if track.path.name == Path(plan.music_path).name),
+                None,
+            )
+            soundtrack = track.title if track else Path(plan.music_path).stem
+        labels = {
+            ExportSize.SOURCE: "Source resolution",
+            ExportSize.HD_1080: "1080p maximum",
+        }
+        export_sizes = list(dict.fromkeys(output.export_size for output in plan.outputs))
+        return soundtrack, ", ".join(labels[size] for size in export_sizes)
+
+    def add_to_render_queue(self) -> None:
+        if not self.project or self.thread:
+            return
+        self.workspace_tabs.setCurrentIndex(2)
+        try:
+            request = self._current_render_request()
+            if request is None:
+                return
+            plan = create_render_plan(self.project, request)
+            soundtrack, export_summary = self._render_job_description(plan)
+            self.render_queue.append(QueuedRenderJob(plan, soundtrack, export_summary))
+            try:
+                self._save_render_queue()
+            except Exception:
+                self.render_queue.pop()
+                raise
+            self._refresh_render_queue()
+            count = len(self.render_queue)
+            self.status_label.setText(f"Added to queue. {count} job{'s' if count != 1 else ''} ready to produce.")
+            self.progress_bar.setValue(0)
+            LOGGER.info("Added prepared render plan to queue; %d job(s) ready", count)
+        except Exception as exc:
+            LOGGER.exception("Render job could not be added to the queue")
+            self.operation_failed(str(exc))
+
+    def _render_queue_path(self) -> Path | None:
+        return self.project.path / "plans" / "render-queue.json" if self.project else None
+
+    def _save_render_queue(self) -> None:
+        path = self._render_queue_path()
+        if path is None:
+            return
+        if not self.render_queue:
+            path.unlink(missing_ok=True)
+            path.with_suffix(".json.partial").unlink(missing_ok=True)
+            return
+        data = {
+            "schema_version": 1,
+            "jobs": [
+                {
+                    "plan": job.plan.to_dict(),
+                    "soundtrack": job.soundtrack,
+                    "export_summary": job.export_summary,
+                }
+                for job in self.render_queue
+            ],
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".json.partial")
+        temporary.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        temporary.replace(path)
+
+    def _load_render_queue(self) -> None:
+        self.render_queue.clear()
+        path = self._render_queue_path()
+        if path is None or not path.is_file():
+            return
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if int(data.get("schema_version", 0)) != 1:
+                raise ValueError("Unsupported render queue format.")
+            for saved_job in data.get("jobs", []):
+                plan = RenderPlan.from_dict(saved_job["plan"])
+                soundtrack, export_summary = self._render_job_description(plan)
+                self.render_queue.append(QueuedRenderJob(
+                    plan,
+                    str(saved_job.get("soundtrack") or soundtrack),
+                    str(saved_job.get("export_summary") or export_summary),
+                ))
+            LOGGER.info("Loaded %d saved render queue job(s)", len(self.render_queue))
+        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+            self.render_queue.clear()
+            LOGGER.exception("Could not load saved render queue: %s", path)
+
+    def _refresh_render_queue(self) -> None:
+        self.queue_card.setVisible(bool(self.render_queue))
+        self.queue_list.clear()
+        for index, job in enumerate(self.render_queue, start=1):
+            output_count = len(job.plan.outputs)
+            self.queue_list.addItem(
+                f"{index}. {job.soundtrack} • {job.export_summary} • "
+                f"{output_count} output{'s' if output_count != 1 else ''}"
+            )
+        self.queue_title.setText(f"Render Queue ({len(self.render_queue)})")
+        self.queue_empty_label.setVisible(not self.render_queue)
+        self.queue_list.setVisible(bool(self.render_queue))
+        if self.render_queue:
+            content_height = sum(
+                max(self.queue_list.sizeHintForRow(row), self.queue_list.fontMetrics().height() + 10)
+                for row in range(self.queue_list.count())
+            )
+            self.queue_list.setFixedHeight(content_height + self.queue_list.frameWidth() * 2 + 4)
+        self._update_queue_controls()
+
+    def _update_queue_controls(self, _row: int | None = None) -> None:
+        idle = self.thread is None
+        self.remove_queue_button.setEnabled(idle and self.queue_list.currentRow() >= 0)
+        self.clear_queue_button.setEnabled(idle and bool(self.render_queue))
+
+    def remove_selected_queue_job(self) -> None:
+        row = self.queue_list.currentRow()
+        if self.thread or not 0 <= row < len(self.render_queue):
+            return
+        removed = self.render_queue.pop(row)
+        try:
+            self._save_render_queue()
+        except OSError as exc:
+            self.render_queue.insert(row, removed)
+            self._refresh_render_queue()
+            self.operation_failed(str(exc))
+            return
+        self._refresh_render_queue()
+        self.status_label.setText(
+            f"Removed from queue. {len(self.render_queue)} job{'s' if len(self.render_queue) != 1 else ''} remaining."
+        )
+
+    def clear_render_queue(self) -> None:
+        if self.thread:
+            return
+        previous_queue = list(self.render_queue)
+        self.render_queue.clear()
+        try:
+            self._save_render_queue()
+        except OSError as exc:
+            self.render_queue[:] = previous_queue
+            self._refresh_render_queue()
+            self.operation_failed(str(exc))
+            return
+        self._refresh_render_queue()
+        self.status_label.setText("Render queue cleared.")
+
     def start_render(self) -> None:
         LOGGER.info("Produce clicked")
         self.workspace_tabs.setCurrentIndex(2)
@@ -2653,48 +2992,32 @@ class WorkspacePage(QWidget):
     def _start_render(self) -> None:
         if not self.project or self.thread:
             return
-        exports = self.selected_exports()
-        if not exports:
-            QMessageBox.warning(self, "Export size", "Choose at least one export size.")
-            return
-        workflow = WorkflowMode(self.workflow_combo.currentData())
-        if workflow == WorkflowMode.CUSTOM:
-            selected_row = self.custom_song_table.currentRow()
-            if selected_row < 0:
-                QMessageBox.warning(self, "Missing song", "Choose a custom song.")
-                return
-            item = self.custom_song_table.item(selected_row, 0)
-            selected_id = item.data(Qt.ItemDataRole.UserRole)
-            song = next((s for s in self.songs if s.song_id == selected_id), None)
-            if not song:
-                QMessageBox.warning(self, "Missing song", "Choose a custom song.")
-                return
-            workflow = song.workflow
-            if workflow == WorkflowMode.FULL_LENGTH:
-                self.project.settings.full_length_track_id = selected_id
-                song_id = None
-            else:
-                self.project.settings.song_id = selected_id
-                song_id = selected_id
+        if self.render_queue:
+            jobs = list(self.render_queue)
+            worker = RenderQueueWorker([job.plan for job in jobs], CancellationToken())
+            self.cancellation = worker.cancellation
+            self._active_queue_jobs = jobs
+            self.status_label.setText(f"Starting {len(jobs)} queued render jobs...")
+            LOGGER.info("Producing %d queued render job(s)", len(jobs))
         else:
-            song_id = self.project.settings.song_id
+            request = self._current_render_request()
+            if request is None:
+                return
+            self.cancellation = CancellationToken()
+            worker = RenderWorker(self.project, request, self.cancellation)
+        self._launch_render_worker(worker)
 
-        if workflow in {WorkflowMode.EPIC_MONTAGE, WorkflowMode.REAL_ESTATE} and not song_id:
-            msg = "Choose a Real Estate song." if workflow == WorkflowMode.REAL_ESTATE else "Choose an Epic song."
-            QMessageBox.warning(self, "Missing song", msg)
-            return
-        self.project.settings.workflow = workflow
-        self.project.settings.exports = exports
-        save_project(self.project.path, self.project.settings)
-        request = RenderRequest(workflow, exports, song_id, self.project.settings.full_length_track_id)
-        self.cancellation = CancellationToken()
-        worker = RenderWorker(self.project, request, self.cancellation)
+    def _launch_render_worker(self, worker: QObject) -> None:
+        if self.cancellation is None:
+            raise RuntimeError("A cancellation token is required to start production.")
         thread = QThread(self)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.progress.connect(self.render_progress)
         worker.finished.connect(self.render_finished)
         worker.failed.connect(self.operation_failed)
+        if isinstance(worker, RenderQueueWorker):
+            worker.job_finished.connect(self.render_queue_job_finished)
         worker.finished.connect(thread.quit)
         worker.failed.connect(thread.quit)
         worker.finished.connect(worker.deleteLater)
@@ -2707,6 +3030,30 @@ class WorkspacePage(QWidget):
         self._set_busy(True)
         LOGGER.info("UI started production")
         thread.start()
+
+    def render_queue_job_finished(self, job_index: int, result: RenderResult) -> None:
+        if not 0 <= job_index < len(self._active_queue_jobs):
+            return
+        job = self._active_queue_jobs[job_index]
+        queued_job = next((queued for queued in self.render_queue if queued is job), None)
+        if queued_job is None:
+            return
+        successful_ids = {output.output_id for output in result.outputs if output.success}
+        if not successful_ids:
+            return
+        queued_job.plan.outputs = [
+            output for output in queued_job.plan.outputs if output.output_id not in successful_ids
+        ]
+        if not queued_job.plan.outputs:
+            self.render_queue.remove(queued_job)
+        else:
+            _, queued_job.export_summary = self._render_job_description(queued_job.plan)
+        try:
+            self._save_render_queue()
+        except OSError as exc:
+            LOGGER.exception("Could not update the saved render queue")
+            self.status_label.setText(f"Rendered output, but could not update the saved queue: {exc}")
+        self._refresh_render_queue()
 
     def render_progress(self, event: ProgressEvent) -> None:
         self.status_label.setText(event.message)
@@ -2753,12 +3100,16 @@ class WorkspacePage(QWidget):
         self.thread = None
         self.worker = None
         self.cancellation = None
+        self._active_queue_jobs = []
         self._set_busy(False)
         self.operation_idle.emit()
 
     def _set_busy(self, busy: bool) -> None:
         self.back_button.setEnabled(not busy)
         self.render_button.setEnabled(not busy)
+        self.add_to_queue_button.setEnabled(not busy)
+        self.source_export.setEnabled(not busy)
+        self.hd_export.setEnabled(not busy)
         self.cancel_button.setEnabled(busy)
         self.media_table.setEnabled(not busy)
         self.preview_button.setEnabled(not busy)
@@ -2770,6 +3121,7 @@ class WorkspacePage(QWidget):
         self.move_up_button.setEnabled(not busy)
         self.move_down_button.setEnabled(not busy)
         self.remove_button.setEnabled(not busy)
+        self._update_queue_controls()
 
     def open_result(self, item) -> None:
         path = item.data(Qt.ItemDataRole.UserRole)

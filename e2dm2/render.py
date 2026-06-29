@@ -149,7 +149,9 @@ def create_render_plan(
     if not request.exports:
         raise ValueError("Choose at least one export size.")
     outputs: list[RenderOutputPlan] = []
-    stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    # Sub-second uniqueness matters when several prepared jobs are added to a
+    # render queue in quick succession with the same soundtrack and settings.
+    stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S_%f")
     for group_key, media in group_media(project.settings.media).items():
         source_width, source_height, fps = media[0].width, media[0].height, media[0].fps
         source_duration = sum(item.duration for item in media)
