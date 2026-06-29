@@ -96,7 +96,7 @@ class ClickPassingWidget(QWidget):
         self.x_btn = x_btn
         
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(6, 2, 6, 2)
+        layout.setContentsMargins(6, 0, 6, 0)
         layout.setSpacing(4)
         layout.addWidget(label, 1)
         layout.addWidget(x_btn)
@@ -191,7 +191,7 @@ class MarkerTable(QWidget):
                     x_btn.setVisible(is_selected and is_editable)
                 if label:
                     if is_selected:
-                        label.setStyleSheet("background: transparent; color: #ffffff; font-size: 13px;")
+                        label.setStyleSheet("background: transparent; color: #333333; font-size: 13px;")
                     else:
                         label.setStyleSheet("background: transparent; color: #333333; font-size: 13px;")
 
@@ -207,8 +207,8 @@ class MarkerTable(QWidget):
         x_btn.setAlignment(Qt.AlignmentFlag.AlignCenter)
         x_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         x_btn.setStyleSheet(
-            "QLabel { font-weight: bold; font-size: 14px; color: #ffffff; background-color: rgba(255, 255, 255, 0.2); border-radius: 8px; padding-bottom: 2px; }"
-            "QLabel:hover { background-color: rgba(255, 255, 255, 0.4); }"
+            "QLabel { font-weight: bold; font-size: 14px; color: #333333; background-color: transparent; border-radius: 8px; padding-bottom: 2px; }"
+            "QLabel:hover { background-color: rgba(0, 0, 0, 0.08); }"
         )
         # Create wrapper
         wrapper = ClickPassingWidget(self.table, label, x_btn)
@@ -220,7 +220,7 @@ class MarkerTable(QWidget):
     def _create_effect_widget(self, effect_val: str) -> QWidget:
         wrapper = QWidget()
         layout = QHBoxLayout(wrapper)
-        layout.setContentsMargins(6, 2, 6, 2)
+        layout.setContentsMargins(6, 0, 6, 0)
         if effect_val == "none" or not effect_val:
             layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
             btn = QLabel("+")
@@ -236,7 +236,8 @@ class MarkerTable(QWidget):
             layout.addWidget(btn)
         else:
             layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-            combo = QComboBox()
+            from .ui import SoundtrackComboBox
+            combo = SoundtrackComboBox()
             for name, val in EFFECT_OPTIONS:
                 combo.addItem(name, val)
             idx = combo.findData(effect_val)
@@ -394,7 +395,8 @@ class WorkflowSelectionDialog(QDialog):
         audio_layout.addWidget(self.audio_button)
         form.addRow("Audio file", audio_row)
 
-        self.combo = QComboBox()
+        from .ui import SoundtrackComboBox
+        self.combo = SoundtrackComboBox()
         self.combo.addItem("Epic Montage", "epic_montage")
         self.combo.addItem("Full-length Video", "full_length")
         self.combo.addItem("Real Estate Showcase", "real_estate")
@@ -589,7 +591,13 @@ class SongEditorDialog(QDialog):
         footer = QHBoxLayout()
         footer.addWidget(self.status_label, 1)
         footer.addWidget(self.save_button)
+        self.new_button.setObjectName("newSongButton")
+        self.duplicate_button.setObjectName("duplicateSongButton")
+        self.delete_button.setObjectName("deleteSongButton")
+        self.save_button.setObjectName("saveButton")
+
         close_button = QPushButton("Close")
+        close_button.setObjectName("cancelButton")
         close_button.clicked.connect(self.accept)
         footer.addWidget(close_button)
         right_layout.addLayout(footer)
@@ -601,6 +609,51 @@ class SongEditorDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.addWidget(splitter)
 
+        self.setStyleSheet("""
+            QPushButton#saveButton {
+                background: #2F80ED;
+                color: #FFFFFF;
+                border: 1px solid #1B6FD1;
+                border-radius: 8px;
+                padding: 8px 20px;
+                font-size: 9.5pt;
+                font-weight: 800;
+                min-width: 90px;
+            }
+            QPushButton#saveButton:hover {
+                background: #1B6FD1;
+            }
+            QPushButton#saveButton:disabled {
+                background: #B2D4FF;
+                border-color: #A2C4EF;
+                color: #FFFFFF;
+            }
+
+            #cancelButton, #newSongButton, #duplicateSongButton, #deleteSongButton, #playButton, #addPlayheadButton {
+                background: #FFFFFF;
+                color: #526173;
+                border: 1px solid #CDD8DC;
+                border-radius: 8px;
+                padding: 8px 20px;
+                font-size: 9.5pt;
+                font-weight: 800;
+                min-width: 90px;
+            }
+            #cancelButton:hover, #newSongButton:hover, #duplicateSongButton:hover, #deleteSongButton:hover, #playButton:hover, #addPlayheadButton:hover {
+                background: #F5F7F8;
+                border-color: #B0BEC5;
+            }
+            #cancelButton:disabled, #newSongButton:disabled, #duplicateSongButton:disabled, #deleteSongButton:disabled, #playButton:disabled, #addPlayheadButton:disabled {
+                background: #F8FAFA;
+                color: #A0AEBC;
+                border-color: #E2E8EA;
+            }
+
+            QTableWidget::item {
+                padding: 0px;
+            }
+        """)
+
     def _general_tab(self) -> QWidget:
         content = QWidget()
         form = QFormLayout(content)
@@ -608,7 +661,8 @@ class SongEditorDialog(QDialog):
         self.artist_edit = QLineEdit()
         self.id_edit = QLineEdit()
         self.moods_edit = QLineEdit()
-        self.energy_combo = QComboBox()
+        from .ui import SoundtrackComboBox
+        self.energy_combo = SoundtrackComboBox()
         self.energy_combo.addItems([value.value.title() for value in EnergyLevel])
         self.bpm_spin = _spin(400, 2)
         self.bpm_spin.setSpecialValueText("Unknown")
@@ -665,6 +719,7 @@ class SongEditorDialog(QDialog):
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         controls = QHBoxLayout()
         self.play_button = QToolButton()
+        self.play_button.setObjectName("playButton")
         self.play_button.setText("Play")
         self.play_button.setToolTip("Play or pause audio")
         self.play_button.clicked.connect(self.toggle_playback)
@@ -672,7 +727,9 @@ class SongEditorDialog(QDialog):
         self.position_slider = QSlider(Qt.Orientation.Horizontal)
         self.position_slider.setRange(0, 0)
         self.position_slider.sliderMoved.connect(self.player.setPosition)
-        self.waveform_zoom = QComboBox()
+        self.position_slider.setMinimumHeight(28)
+        from .ui import SoundtrackComboBox
+        self.waveform_zoom = SoundtrackComboBox()
         self.waveform_zoom.setToolTip("Visible waveform duration")
         self.waveform_zoom.addItem("10 sec", 10.0)
         self.waveform_zoom.addItem("20 sec", 20.0)
@@ -681,6 +738,7 @@ class SongEditorDialog(QDialog):
         self.waveform_zoom.addItem("Full song", None)
         self.waveform_zoom.setCurrentIndex(2)
         self.add_playhead_button = QPushButton("Add cut at playhead")
+        self.add_playhead_button.setObjectName("addPlayheadButton")
         self.add_playhead_button.clicked.connect(lambda: self.add_cut_timestamp(self._current_playback_time()))
         controls.addWidget(self.play_button)
         controls.addWidget(self.position_label)

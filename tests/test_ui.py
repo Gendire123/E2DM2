@@ -1210,6 +1210,67 @@ def test_waveform_widget_wheel_event(qtbot):
     assert pytest.approx(positions[-1]) == 0.0
 
 
+def test_song_editor_button_styles(qtbot):
+    from e2dm2.editor import SongEditorDialog
+    from e2dm2.entitlements import AlphaEntitlementProvider
+    from PySide6.QtWidgets import QPushButton
+    
+    dialog = SongEditorDialog(AlphaEntitlementProvider())
+    qtbot.addWidget(dialog)
+    
+    assert dialog.new_button.objectName() == "newSongButton"
+    assert dialog.duplicate_button.objectName() == "duplicateSongButton"
+    assert dialog.delete_button.objectName() == "deleteSongButton"
+    assert dialog.save_button.objectName() == "saveButton"
+    
+    close_button = dialog.findChild(QPushButton, "cancelButton")
+    assert close_button is not None
+    assert close_button.text() == "Close"
+    
+    # Check that custom stylesheet is set on the dialog
+    assert "QPushButton#saveButton" in dialog.styleSheet()
+    assert "#cancelButton" in dialog.styleSheet()
+    assert "#playButton" in dialog.styleSheet()
+    assert "#addPlayheadButton" in dialog.styleSheet()
+    assert "QTableWidget::item" in dialog.styleSheet()
+    assert "padding: 0px;" in dialog.styleSheet()
+
+    # Check that cell widget content margins are 0
+    from e2dm2.editor import ClickPassingWidget
+    from PySide6.QtWidgets import QTableWidget
+    table = QTableWidget(1, 2)
+    label = QLabel("test")
+    btn = QLabel("x")
+    cell_widget = ClickPassingWidget(table, label, btn)
+    assert cell_widget.layout().contentsMargins().top() == 0
+    assert cell_widget.layout().contentsMargins().bottom() == 0
+
+    # Check that comboboxes use SoundtrackComboBox
+    from e2dm2.ui import SoundtrackComboBox
+    assert isinstance(dialog.energy_combo, SoundtrackComboBox)
+    assert isinstance(dialog.waveform_zoom, SoundtrackComboBox)
+
+    # Check WorkflowSelectionDialog combo
+    from e2dm2.editor import WorkflowSelectionDialog
+    workflow_dlg = WorkflowSelectionDialog()
+    qtbot.addWidget(workflow_dlg)
+    assert isinstance(workflow_dlg.combo, SoundtrackComboBox)
+
+    # Check that x_btn stylesheet uses color: #333333
+    ts_w = dialog.cut_markers._create_timestamp_widget(5.0)
+    assert "color: #333333;" in ts_w.x_btn.styleSheet()
+
+    # Check that selection doesn't turn label text white
+    dialog.cut_markers.add_value(10.0)
+    dialog.cut_markers.select_row(0)
+    selected_wrapper = dialog.cut_markers.table.cellWidget(0, 0)
+    assert "color: #333333;" in selected_wrapper.label.styleSheet()
+
+    # Check that position_slider has minimumHeight set to prevent clipping
+    assert dialog.position_slider.minimumHeight() >= 28
+
+
+
 
 
 
