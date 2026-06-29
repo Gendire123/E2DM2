@@ -62,4 +62,10 @@ The first time a clip is opened, E2DM2 builds a low-resolution, all-keyframe pre
 
 Built-in presets live under `e2dm2/assets/songs`. Custom presets created by the library editor live under `Documents\E2DM2\Library`. Each song folder contains its audio file and a versioned `preset.json`; projects copy a snapshot of both for reproducible renders.
 
-The alpha entitlement provider unlocks the preset editor. A future licensing provider can gate the `preset_editor` feature without changing the editor or manifest format.
+Importing custom songs and exporting at source resolution require an activated Pro license. Free users can purchase Pro or paste an emailed key from the **View** menu; keys use the paste-friendly `ABC-123-DEF-456-GHI` format.
+
+## Pro licensing development
+
+The desktop app calls the licensing Edge Functions in the configured E2DM2 Supabase project. `E2DM2_LICENSE_API_URL` can override the built-in production endpoint for staging. Database records, key generation, activation limits, and Resend delivery remain server-side. Setup and deployment details are in [supabase/README.md](supabase/README.md).
+
+Temporary **Admin Tools** are visible under **View** during development. Set `E2DM2_ENABLE_ADMIN_TOOLS=0` in a release build to remove the menu without changing licensing code. The client still needs a short-lived Supabase user token, and the server independently requires that user to be present in `license_admins`; no service-role or Resend secret is compiled into E2DM2.

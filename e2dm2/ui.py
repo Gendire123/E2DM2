@@ -81,7 +81,17 @@ from PySide6.QtWidgets import (
 
 from .catalog import FULL_LENGTH_TRACKS, default_project_root, filter_songs, load_song_catalog
 from .editor import SongEditorDialog
-from .entitlements import AlphaEntitlementProvider
+from .entitlements import (
+    AlphaEntitlementProvider,
+    LocalLicenseProvider,
+    SOURCE_RESOLUTION_FEATURE,
+)
+from .licensing_ui import (
+    ProLicenseDialog,
+    AdminToolsDialog,
+    admin_tools_enabled,
+    open_purchase_page,
+)
 from .media import VIDEO_EXTENSIONS, preview_proxy_path
 from .models import CancellationToken, ExportSize, ProgressEvent, Project, RenderRequest, WorkflowMode
 from .preview import ClipPreviewDialog
@@ -1003,14 +1013,15 @@ class WorkspacePage(QWidget):
     home_requested = Signal()
     operation_idle = Signal()
 
-    def __init__(self) -> None:
+    def __init__(self, entitlement=None, request_pro=None) -> None:
         super().__init__()
         self.project: Project | None = None
         self.songs = []
         self.thread: QThread | None = None
         self.worker: QObject | None = None
         self.cancellation: CancellationToken | None = None
-        self.entitlement = AlphaEntitlementProvider()
+        self.entitlement = entitlement or AlphaEntitlementProvider()
+        self.request_pro = request_pro
         self.song_preview_player = QMediaPlayer(self)
         self.song_preview_audio = QAudioOutput(self)
         self.song_preview_audio.setVolume(0.7)
@@ -1026,6 +1037,7 @@ class WorkspacePage(QWidget):
         self.thumb_signals.done.connect(self._on_thumbnail_ready)
         self._build_ui()
         self.refresh_catalog()
+        self.refresh_entitlements()
 
     @Slot(str, str)
     def _on_thumbnail_ready(self, clip_path: str, thumb_path: str) -> None:
@@ -1558,6 +1570,7 @@ class WorkspacePage(QWidget):
         self.source_export.setChecked(True)
         self.source_export.toggled.connect(lambda checked: self.hd_export.setChecked(False) if checked else None)
         self.hd_export.toggled.connect(lambda checked: self.source_export.setChecked(False) if checked else None)
+        self.source_export.clicked.connect(self._on_source_export_clicked)
         config_layout.addWidget(self.source_export)
         config_layout.addWidget(self.hd_export)
         config_layout.addStretch(1)
@@ -1961,6 +1974,7 @@ class WorkspacePage(QWidget):
         self.workflow_combo.blockSignals(False)
         self.source_export.setChecked(ExportSize.SOURCE in project.settings.exports)
         self.hd_export.setChecked(ExportSize.HD_1080 in project.settings.exports)
+        self.refresh_entitlements()
         self.refresh_media()
         self.refresh_catalog(project.settings.song_id)
         self.workflow_changed()
@@ -2602,6 +2616,20 @@ class WorkspacePage(QWidget):
             self.library_page.deleteLater()
             self.library_page = None
         self.refresh_catalog(selected_id)
+
+    def refresh_entitlements(self) -> None:
+        has_source = self.entitlement.has_feature(SOURCE_RESOLUTION_FEATURE)
+        if not has_source:
+            self.source_export.setChecked(False)
+            self.hd_export.setChecked(True)
+
+    def _on_source_export_clicked(self) -> None:
+        if self.source_export.isChecked() and not self.entitlement.has_feature(SOURCE_RESOLUTION_FEATURE):
+            if self.request_pro and self.request_pro("Source resolution exports"):
+                self.refresh_entitlements()
+            else:
+                self.source_export.setChecked(False)
+                self.hd_export.setChecked(True)
 
     def selected_exports(self) -> list[ExportSize]:
         exports = []
@@ -3386,9 +3414,10 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1024, 700)
         self._centered_once = False
         self.options_page = None
+        self.entitlement = LocalLicenseProvider()
         self.stack = CompactPageStack()
         self.home = HomePage()
-        self.workspace = WorkspacePage()
+        self.workspace = WorkspacePage(self.entitlement, self.show_pro_license_prompt)
         self.stack.addWidget(self.home)
         self.stack.addWidget(self.workspace)
         self.setCentralWidget(self.stack)
@@ -3406,21 +3435,25 @@ class MainWindow(QMainWindow):
         view_menu.addSeparator()
         self.options_action = view_menu.addAction("Options...")
         self.options_action.triggered.connect(self.open_options)
+        view_menu.addSeparator()
+        self.purchase_pro_action = view_menu.addAction("Purchase Pro License")
+        self.purchase_pro_action.triggered.connect(open_purchase_page)
+        self.enter_license_action = view_menu.addAction("Enter Pro License Code")
+        self.enter_license_action.triggered.connect(self.show_license_entry)
+        self.admin_tools_action = None
+        if admin_tools_enabled():
+            view_menu.addSeparator()
+            self.admin_tools_action = view_menu.addAction("Admin Tools")
+            self.admin_tools_action.triggered.connect(self.open_admin_tools)
         self.home.new_requested.connect(self.new_project)
         self.home.open_requested.connect(self.open_project)
         self.home.recent_requested.connect(lambda path: self.load_project_path(Path(path)))
         self.workspace.home_requested.connect(self.show_home)
 
         # Help Menu / Onboarding Tours
-        help_menu = self.menuBar().addMenu("Help")
-        home_tour_action = help_menu.addAction("Show Welcome Screen Tour")
-        home_tour_action.triggered.connect(self.start_onboarding_tour)
-        workspace_tour_action = help_menu.addAction("Show Workspace Tour")
-        workspace_tour_action.triggered.connect(self.start_workspace_tour)
-        soundtrack_tour_action = help_menu.addAction("Show Soundtrack Tour")
-        soundtrack_tour_action.triggered.connect(self.start_soundtrack_tour)
-        produce_tour_action = help_menu.addAction("Show Produce Tour")
-        produce_tour_action.triggered.connect(self.start_produce_tour)
+        self.help_menu = self.menuBar().addMenu("Help")
+        self.stack.currentChanged.connect(self.update_help_menu)
+        self.update_help_menu()
 
         LOGGER.info("E2DM2 main window initialized")
         self.show_home()
@@ -3521,6 +3554,22 @@ class MainWindow(QMainWindow):
         self.workspace.workspace_tabs.setCurrentIndex(2)
         QTimer.singleShot(100, self.workspace.show_produce_onboarding)
 
+    def update_help_menu(self) -> None:
+        self.help_menu.clear()
+        current = self.stack.currentWidget()
+        if isinstance(current, ClipPreviewDialog):
+            selection_tour_action = self.help_menu.addAction("Show Selection Tour")
+            selection_tour_action.triggered.connect(current.show_onboarding)
+        else:
+            home_tour_action = self.help_menu.addAction("Show Welcome Screen Tour")
+            home_tour_action.triggered.connect(self.start_onboarding_tour)
+            workspace_tour_action = self.help_menu.addAction("Show Workspace Tour")
+            workspace_tour_action.triggered.connect(self.start_workspace_tour)
+            soundtrack_tour_action = self.help_menu.addAction("Show Soundtrack Tour")
+            soundtrack_tour_action.triggered.connect(self.start_soundtrack_tour)
+            produce_tour_action = self.help_menu.addAction("Show Produce Tour")
+            produce_tour_action.triggered.connect(self.start_produce_tour)
+
     def new_project(self) -> None:
         dialog = NewProjectDialog(self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -3581,6 +3630,24 @@ class MainWindow(QMainWindow):
         self.center_on_active_screen()
         self._centered_once = True
         self.showMaximized()
+
+    def show_pro_license_prompt(self, feature_name: str) -> bool:
+        if self.entitlement.is_pro:
+            return True
+        dialog = ProLicenseDialog(self.entitlement, self, feature_name=feature_name)
+        dialog.activated.connect(self.workspace.refresh_entitlements)
+        dialog.exec()
+        return self.entitlement.is_pro
+
+    def show_license_entry(self) -> None:
+        dialog = ProLicenseDialog(self.entitlement, self, enter_code_first=True)
+        dialog.activated.connect(self.workspace.refresh_entitlements)
+        dialog.exec()
+
+    def open_admin_tools(self) -> None:
+        if not admin_tools_enabled():
+            return
+        AdminToolsDialog(self).exec()
 
 
 STYLESHEET = """
@@ -4244,6 +4311,32 @@ QSlider::handle:horizontal {
     background: #ffffff;
     border: 2px solid #084481;
     border-radius: 9px;
+}
+
+/* Custom QMenu/Popup styling to ensure readability */
+/* Custom QMenuBar styling to ensure readability and match the dark style */
+QMenuBar {
+    background-color: #141B26;
+    color: #FFFFFF;
+    border-bottom: 1px solid #1F2A3D;
+}
+
+QMenuBar::item {
+    background-color: transparent;
+    color: #FFFFFF;
+    padding: 6px 12px;
+    margin: 2px 2px;
+    border-radius: 4px;
+}
+
+QMenuBar::item:selected {
+    background-color: #243042;
+    color: #FFFFFF;
+}
+
+QMenuBar::item:pressed {
+    background-color: #0E56AA;
+    color: #FFFFFF;
 }
 
 /* Custom QMenu/Popup styling to ensure readability */

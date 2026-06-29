@@ -5,6 +5,7 @@ import subprocess
 import re
 import logging
 from pathlib import Path
+from typing import Callable
 
 LOGGER = logging.getLogger(__name__)
 
@@ -49,7 +50,7 @@ from .catalog import (
     save_custom_song,
     validate_song_manifest,
 )
-from .entitlements import PRESET_EDITOR_FEATURE, EntitlementProvider
+from .entitlements import CUSTOM_SONG_IMPORT_FEATURE, PRESET_EDITOR_FEATURE, EntitlementProvider
 from .models import (
     DarkCue,
     EnergyLevel,
@@ -509,7 +510,13 @@ class SongEditorDialog(QWidget):
     def reject(self) -> None:
         self.done(0)
 
-    def __init__(self, entitlement: EntitlementProvider, parent: QWidget | None = None, workflow_filter: WorkflowMode | None = None) -> None:
+    def __init__(
+        self,
+        entitlement: EntitlementProvider,
+        parent: QWidget | None = None,
+        workflow_filter: WorkflowMode | None = None,
+        request_pro: Callable[[str], bool] | None = None,
+    ) -> None:
         super().__init__(parent)
         self.workflow_filter = workflow_filter
         
@@ -528,6 +535,7 @@ class SongEditorDialog(QWidget):
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowMinMaxButtonsHint)
         self.resize(1220, 700)
         self.entitlement = entitlement
+        self.request_pro = request_pro
         self.songs: list[SongManifest] = []
         self.legacy_full_length_ids: set[str] = set()
         self.current: SongManifest | None = None
@@ -546,8 +554,10 @@ class SongEditorDialog(QWidget):
         QApplication.instance().installEventFilter(self)
         self.reload_catalog()
         allowed = self.entitlement.has_feature(PRESET_EDITOR_FEATURE)
-        self.new_button.setEnabled(allowed)
+        # Keep this clickable so Free users receive the Pro explanation and activation path.
+        self.new_button.setEnabled(True)
         self.duplicate_button.setEnabled(allowed)
+        self.save_button.setEnabled(allowed)
         if not allowed:
             self.status_label.setText("Preset editing requires the Pro editor entitlement.")
 
@@ -960,6 +970,12 @@ class SongEditorDialog(QWidget):
         return super().eventFilter(watched, event)
 
     def new_song(self) -> None:
+        if not self.entitlement.has_feature(CUSTOM_SONG_IMPORT_FEATURE):
+            if self.request_pro:
+                self.request_pro("Importing your own songs")
+            if not self.entitlement.has_feature(CUSTOM_SONG_IMPORT_FEATURE):
+                return
+            self.refresh_entitlements()
         try:
             epic_indices = [
                 int(match.group(1)) for song in self.songs
@@ -1028,6 +1044,17 @@ class SongEditorDialog(QWidget):
         except Exception as e:
             import traceback
             self._show_critical("Error in New Song", f"An error occurred: {str(e)}\n\n{traceback.format_exc()}")
+
+    def refresh_entitlements(self) -> None:
+        allowed = self.entitlement.has_feature(PRESET_EDITOR_FEATURE)
+        self.new_button.setEnabled(True)
+        self._set_editable(allowed)
+        is_legacy = bool(self.current and self._is_builtin_full_length(self.current))
+        self.duplicate_button.setEnabled(allowed and not is_legacy)
+        self.delete_button.setEnabled(allowed and not is_legacy)
+        self.save_button.setEnabled(allowed)
+        if allowed:
+            self.status_label.setText("Pro license active")
 
     def add_cut_timestamp(self, timestamp: float) -> None:
         # For now, built-in songs CAN be edited
