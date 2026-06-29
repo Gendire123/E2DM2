@@ -1596,13 +1596,13 @@ class WorkspacePage(QWidget):
         self.results_list.setMinimumHeight(140)
         status_layout.addWidget(self.results_list, 1)
 
-        open_folder = QPushButton("Open Renders Folder")
-        open_folder.setObjectName("secondaryButton")
-        open_folder.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
-        open_folder.clicked.connect(self.open_renders_folder)
+        self.open_renders_folder_button = QPushButton("Open Renders Folder")
+        self.open_renders_folder_button.setObjectName("secondaryButton")
+        self.open_renders_folder_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
+        self.open_renders_folder_button.clicked.connect(self.open_renders_folder)
         
         folder_layout = QHBoxLayout()
-        folder_layout.addWidget(open_folder)
+        folder_layout.addWidget(self.open_renders_folder_button)
         folder_layout.addStretch()
         status_layout.addLayout(folder_layout)
 
@@ -1678,6 +1678,10 @@ class WorkspacePage(QWidget):
             from .onboarding import soundtrack_onboarding_enabled
             if soundtrack_onboarding_enabled():
                 QTimer.singleShot(250, self.show_soundtrack_onboarding)
+        elif index == 2 and self.project:
+            from .onboarding import produce_onboarding_enabled
+            if produce_onboarding_enabled():
+                QTimer.singleShot(250, self.show_produce_onboarding)
 
     def _epic_panel(self) -> QWidget:
         panel = QWidget()
@@ -2907,6 +2911,49 @@ class WorkspacePage(QWidget):
             btn.height() + 2 * padding
         )
 
+    def show_produce_onboarding(self) -> None:
+        if hasattr(self, "onboarding_overlay") and self.onboarding_overlay and self.onboarding_overlay.isVisible():
+            return
+        from .onboarding import OnboardingOverlay
+        if not hasattr(self, "onboarding_overlay") or not self.onboarding_overlay:
+            self.onboarding_overlay = OnboardingOverlay(self, self.get_produce_onboarding_steps(), "startup/show_produce_onboarding")
+            self.onboarding_overlay.setGeometry(self.rect())
+        else:
+            self.onboarding_overlay.steps = self.get_produce_onboarding_steps()
+            self.onboarding_overlay.popup.settings_key = "startup/show_produce_onboarding"
+        self.onboarding_overlay.show_onboarding()
+
+    def get_produce_onboarding_steps(self) -> list[dict]:
+        return [
+            {
+                "target": lambda ws: ws._get_export_resolutions_rect(),
+                "title": "Export Resolution",
+                "description": "Choose your final video resolution. By default, standard 1080p is selected. Pro users can export at Source resolution to output stunning high-definition 4K footage."
+            },
+            {
+                "target": lambda ws: ws.render_button,
+                "title": "Produce Video",
+                "description": "Once you are satisfied with your selected clips, edits, and soundtrack selection, click this button to start rendering your final movie masterpiece."
+            },
+            {
+                "target": lambda ws: ws.open_renders_folder_button,
+                "title": "Access Renders",
+                "description": "When rendering finishes, click here to open the renders folder, where you can watch, share, and publish your newly exported movie."
+            }
+        ]
+
+    def _get_export_resolutions_rect(self) -> QRectF:
+        from PySide6.QtCore import QPoint, QRectF
+        top_left = self.source_export.mapTo(self, QPoint(0, 0))
+        bottom_right = self.hd_export.mapTo(self, QPoint(self.hd_export.width(), self.hd_export.height()))
+        padding = 8
+        return QRectF(
+            top_left.x() - padding,
+            top_left.y() - padding,
+            bottom_right.x() - top_left.x() + 2 * padding,
+            bottom_right.y() - top_left.y() + 2 * padding
+        )
+
 
 class AppSplashScreen(QWidget):
     def __init__(self) -> None:
@@ -3277,6 +3324,8 @@ class MainWindow(QMainWindow):
         workspace_tour_action.triggered.connect(self.start_workspace_tour)
         soundtrack_tour_action = help_menu.addAction("Show Soundtrack Tour")
         soundtrack_tour_action.triggered.connect(self.start_soundtrack_tour)
+        produce_tour_action = help_menu.addAction("Show Produce Tour")
+        produce_tour_action.triggered.connect(self.start_produce_tour)
 
         LOGGER.info("E2DM2 main window initialized")
         self.show_home()
@@ -3346,6 +3395,23 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentWidget(self.workspace)
         self.workspace.workspace_tabs.setCurrentIndex(1)
         QTimer.singleShot(100, self.workspace.show_soundtrack_onboarding)
+
+    def start_produce_tour(self) -> None:
+        if not self.workspace.project:
+            QMessageBox.information(
+                self,
+                "Produce Tour",
+                "Please open or create a project first to take the produce tour.",
+            )
+            return
+
+        settings = QSettings()
+        settings.setValue("startup/show_produce_onboarding", True)
+        settings.sync()
+
+        self.stack.setCurrentWidget(self.workspace)
+        self.workspace.workspace_tabs.setCurrentIndex(2)
+        QTimer.singleShot(100, self.workspace.show_produce_onboarding)
 
     def new_project(self) -> None:
         dialog = NewProjectDialog(self)

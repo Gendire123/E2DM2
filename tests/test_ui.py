@@ -1600,6 +1600,52 @@ def test_library_onboarding_overlay(qtbot):
     dialog.close()
 
 
+def test_produce_onboarding_overlay(qtbot):
+    from e2dm2.onboarding import OnboardingOverlay, produce_onboarding_enabled
+    from e2dm2.ui import WorkspacePage
+    from PySide6.QtCore import QSettings
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    settings = QSettings()
+    settings.setValue("startup/show_produce_onboarding", True)
+    settings.sync()
+
+    workspace = WorkspacePage()
+    qtbot.addWidget(workspace)
+    workspace.show()
+    QApplication.processEvents()
+
+    # Get onboarding steps
+    steps = workspace.get_produce_onboarding_steps()
+    assert len(steps) == 3
+
+    assert steps[0]["title"] == "Export Resolution"
+    assert steps[1]["title"] == "Produce Video"
+    assert steps[2]["title"] == "Access Renders"
+
+    overlay = OnboardingOverlay(workspace, steps, "startup/show_produce_onboarding")
+    qtbot.addWidget(overlay)
+    overlay.show_onboarding()
+    QApplication.processEvents()
+    assert overlay.isVisible()
+    assert overlay.current_step == 0
+
+    # Next step
+    overlay.next_step()
+    assert overlay.current_step == 1
+    assert overlay.popup.title_label.text() == "Produce Video"
+
+    # Verify opt-out checkbox behavior
+    assert not overlay.popup.opt_out_cb.isChecked()
+    overlay.popup.opt_out_cb.setChecked(True)
+    assert settings.value("startup/show_produce_onboarding", True, type=bool) is False
+
+    # Reset settings
+    settings.setValue("startup/show_produce_onboarding", True)
+    settings.sync()
+
+
 
 
 def test_preview_onboarding_overlay_cached(qtbot, tmp_path):

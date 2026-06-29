@@ -107,6 +107,14 @@ def library_onboarding_enabled(settings: QSettings | None = None) -> bool:
     return settings.value("startup/show_library_onboarding", True, type=bool)
 
 
+def produce_onboarding_enabled(settings: QSettings | None = None) -> bool:
+    """Check if the produce onboarding tour is enabled."""
+    if "pytest" in sys.modules or "unittest" in sys.modules:
+        return False
+    settings = settings or QSettings()
+    return settings.value("startup/show_produce_onboarding", True, type=bool)
+
+
 class WelcomeDialog(QDialog):
     """A beautiful welcome dialog shown on first startup before onboarding."""
 
