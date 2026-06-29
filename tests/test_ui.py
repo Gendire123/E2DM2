@@ -1270,6 +1270,166 @@ def test_song_editor_button_styles(qtbot):
     assert dialog.position_slider.minimumHeight() >= 28
 
 
+def test_onboarding_overlay(qtbot):
+    from e2dm2.onboarding import OnboardingOverlay, onboarding_enabled
+    from PySide6.QtWidgets import QWidget
+    from PySide6.QtCore import QSettings
+
+    # Set initial state of settings for testing
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    app.setApplicationName("E2DM2")
+    app.setOrganizationName("E2DM2")
+
+    settings = QSettings()
+    settings.setValue("startup/show_onboarding", True)
+    settings.sync()
+
+    # Create a parent widget with the target elements mock
+    parent = QWidget()
+    parent.new_button = QWidget(parent)
+    parent.open_button = QWidget(parent)
+    parent.recent_list = QWidget(parent)
+    
+    qtbot.addWidget(parent)
+    parent.show()
+    QApplication.processEvents()
+
+    overlay = OnboardingOverlay(parent)
+
+    # Show onboarding
+    overlay.show_onboarding()
+    QApplication.processEvents()
+    assert overlay.isVisible()
+    assert overlay.current_step == 0
+    assert overlay.popup.title_label.text() == "New Project"
+
+    # Go to next step
+    overlay.next_step()
+    assert overlay.current_step == 1
+    assert overlay.popup.title_label.text() == "Open Project"
+
+    # Go to next step
+    overlay.next_step()
+    assert overlay.current_step == 2
+    assert overlay.popup.title_label.text() == "Recent Projects Section"
+
+    # Go back
+    overlay.prev_step()
+    assert overlay.current_step == 1
+
+    # Verify opt-out checkbox toggles the settings correctly
+    assert not overlay.popup.opt_out_cb.isChecked()
+    overlay.popup.opt_out_cb.setChecked(True)
+    # Check that the setting is updated to False
+    assert settings.value("startup/show_onboarding", True, type=bool) is False
+
+    # Close tour
+    overlay.next_step()  # Go to step 2 (index 2)
+    overlay.next_step()  # Finish and trigger close_tour
+    qtbot.wait(350)
+    assert not overlay.isVisible()
+
+    # Reset setting
+    settings.setValue("startup/show_onboarding", True)
+    settings.sync()
+
+
+def test_welcome_dialog(qtbot):
+    from e2dm2.onboarding import WelcomeDialog, welcome_modal_enabled
+    from PySide6.QtCore import QSettings
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    app.setApplicationName("E2DM2")
+    app.setOrganizationName("E2DM2")
+
+    settings = QSettings()
+    settings.setValue("startup/show_welcome_modal", True)
+    settings.sync()
+
+    # Instantiate dialog
+    dialog = WelcomeDialog()
+    qtbot.addWidget(dialog)
+
+    # Initially opt_out is unchecked
+    assert not dialog.opt_out_cb.isChecked()
+
+    # Check it
+    dialog.opt_out_cb.setChecked(True)
+    
+    # Save settings check on reject
+    dialog.reject()
+    
+    # Check that settings are updated
+    assert settings.value("startup/show_welcome_modal", True, type=bool) is False
+
+    # Restore settings
+    settings.setValue("startup/show_welcome_modal", True)
+    settings.sync()
+
+
+def test_workspace_onboarding_overlay(qtbot):
+    from e2dm2.onboarding import OnboardingOverlay, workspace_onboarding_enabled
+    from e2dm2.ui import WorkspacePage
+    from PySide6.QtCore import QSettings
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    app.setApplicationName("E2DM2")
+    app.setOrganizationName("E2DM2")
+
+    settings = QSettings()
+    settings.setValue("startup/show_workspace_onboarding", True)
+    settings.sync()
+
+    # Instantiate workspace page
+    workspace = WorkspacePage()
+    qtbot.addWidget(workspace)
+    workspace.show()
+    QApplication.processEvents()
+
+    # Get onboarding steps
+    steps = workspace.get_onboarding_steps()
+    assert len(steps) == 8
+
+    # Create overlay
+    overlay = OnboardingOverlay(workspace, steps, "startup/show_workspace_onboarding")
+    qtbot.addWidget(overlay)
+
+    # Show onboarding
+    overlay.show_onboarding()
+    QApplication.processEvents()
+    assert overlay.isVisible()
+    assert overlay.current_step == 0
+    assert overlay.popup.title_label.text() == "Three Sections, Three Steps"
+
+    # Go through a few steps to ensure rect targets resolve correctly
+    overlay.next_step()
+    assert overlay.current_step == 1
+    assert overlay.popup.title_label.text() == "Import files by Drag & Drop"
+
+    overlay.next_step()
+    assert overlay.current_step == 2
+    assert overlay.popup.title_label.text() == "Import via Add Files / Folder"
+
+    overlay.next_step()
+    assert overlay.current_step == 3
+    assert overlay.popup.title_label.text() == "Preview and Edit Clips"
+
+    # Verify opt-out updates settings
+    assert not overlay.popup.opt_out_cb.isChecked()
+    overlay.popup.opt_out_cb.setChecked(True)
+    assert settings.value("startup/show_workspace_onboarding", True, type=bool) is False
+
+    # Reset settings
+    settings.setValue("startup/show_workspace_onboarding", True)
+    settings.sync()
+
+
+
+
+
 
 
 

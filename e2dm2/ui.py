@@ -838,14 +838,14 @@ class HomePage(QWidget):
         )
         subtitle.setObjectName("homeSubtitle")
         subtitle.setWordWrap(True)
-        new_button = QPushButton("New Project")
-        new_button.setObjectName("primaryButton")
+        self.new_button = QPushButton("New Project")
+        self.new_button.setObjectName("primaryButton")
         self.open_button = QPushButton("Open Project")
         self.open_button.setObjectName("secondaryButton")
-        new_button.clicked.connect(self.new_requested)
+        self.new_button.clicked.connect(self.new_requested)
         self.open_button.clicked.connect(self.open_preferred_project)
         actions = QHBoxLayout()
-        actions.addWidget(new_button)
+        actions.addWidget(self.new_button)
         actions.addWidget(self.open_button)
         actions.addStretch()
 
@@ -992,6 +992,11 @@ class HomePage(QWidget):
             LOGGER.exception("Could not delete project: %s", path)
             QMessageBox.critical(self, "Could not delete project", str(exc))
 
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, "onboarding_overlay") and self.onboarding_overlay:
+            self.onboarding_overlay.setGeometry(self.rect())
+
 
 class WorkspacePage(QWidget):
     home_requested = Signal()
@@ -1080,12 +1085,20 @@ class WorkspacePage(QWidget):
         if hasattr(self, "_active_sidebar_index"):
             self._place_nav_highlight(self._active_sidebar_index)
 
+        # Trigger workspace onboarding check after shown
+        if self.project and not getattr(self, "_onboarding_triggered", False):
+            self._onboarding_triggered = True
+            QTimer.singleShot(250, self.check_onboarding)
+
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         self.layout().activate()
         self._align_sidebar_controls()
         if hasattr(self, "_active_sidebar_index"):
             self._place_nav_highlight(self._active_sidebar_index)
+
+        if hasattr(self, "onboarding_overlay") and self.onboarding_overlay:
+            self.onboarding_overlay.setGeometry(self.rect())
 
     def _align_sidebar_controls(self) -> None:
         if not hasattr(self, "sidebar_logo_spacer") or not hasattr(self, "workspace_tabs"):
@@ -1159,10 +1172,10 @@ class WorkspacePage(QWidget):
         self.nav_soundtrack.clicked.connect(lambda: self.workspace_tabs.setCurrentIndex(1))
         self.nav_produce.clicked.connect(lambda: self.workspace_tabs.setCurrentIndex(2))
 
-        settings_button = QPushButton("  Settings")
-        settings_button.setObjectName("sidebarSettings")
-        settings_button.setIcon(QIcon(str(Path(__file__).parent / "assets" / "icons" / "settings.svg")))
-        settings_button.clicked.connect(lambda: OptionsDialog(self).exec())
+        self.settings_button = QPushButton("  Settings")
+        self.settings_button.setObjectName("sidebarSettings")
+        self.settings_button.setIcon(QIcon(str(Path(__file__).parent / "assets" / "icons" / "settings.svg")))
+        self.settings_button.clicked.connect(lambda: OptionsDialog(self).exec())
 
         self.back_button = QPushButton("  Back to projects")
         self.back_button.setObjectName("sidebarBack")
@@ -1189,7 +1202,7 @@ class WorkspacePage(QWidget):
 
         controls_layout.addStretch(1)
 
-        controls_layout.addWidget(settings_button)
+        controls_layout.addWidget(self.settings_button)
         controls_layout.addWidget(self.back_button)
 
         self.nav_selection_highlight = QFrame(controls)
@@ -1260,12 +1273,12 @@ class WorkspacePage(QWidget):
         metric_created = self._metric_item(
             self.metric_created_value, "Created", QIcon(str(icon_root / "hero-calendar.svg")),
         )
-        metric_target_duration = self._metric_item(
+        self.metric_target_duration = self._metric_item(
             self.metric_target_duration_value, "Target Duration", QIcon(str(icon_root / "hero-clock.svg")),
         )
 
         metrics_layout.addWidget(metric_created)
-        metrics_layout.addWidget(metric_target_duration)
+        metrics_layout.addWidget(self.metric_target_duration)
         metrics_layout.addStretch(1)
 
         left_layout.addLayout(metrics_layout)
@@ -1923,6 +1936,7 @@ class WorkspacePage(QWidget):
 
     def set_project(self, project: Project) -> None:
         self.project = project
+        self._onboarding_triggered = False
         self.project_title.setText(project.settings.name)
         self.project_title_edit_button.setEnabled(True)
         self.project_path.setText(str(project.path))
@@ -2691,6 +2705,114 @@ class WorkspacePage(QWidget):
                 renders_path = self.project.path / "renders"
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(renders_path)))
 
+    def check_onboarding(self) -> None:
+        from .onboarding import workspace_onboarding_enabled
+        if workspace_onboarding_enabled():
+            self.show_onboarding()
+
+    def show_onboarding(self) -> None:
+        if hasattr(self, "onboarding_overlay") and self.onboarding_overlay and self.onboarding_overlay.isVisible():
+            return
+        from .onboarding import OnboardingOverlay
+        if not hasattr(self, "onboarding_overlay") or not self.onboarding_overlay:
+            self.onboarding_overlay = OnboardingOverlay(self, self.get_onboarding_steps(), "startup/show_workspace_onboarding")
+            self.onboarding_overlay.setGeometry(self.rect())
+        else:
+            self.onboarding_overlay.steps = self.get_onboarding_steps()
+        self.onboarding_overlay.show_onboarding()
+
+    def get_onboarding_steps(self) -> list[dict]:
+        return [
+            {
+                "target": lambda ws: ws._get_sidebar_nav_rect(),
+                "title": "Three Sections, Three Steps",
+                "description": "Navigate between Footage (Import), Soundtrack, and Produce to guide your film editing step-by-step."
+            },
+            {
+                "target": lambda ws: ws._get_table_drop_rect(),
+                "title": "Import files by Drag & Drop",
+                "description": "Simply drag and drop your drone video files directly into this central area to import them."
+            },
+            {
+                "target": lambda ws: ws._get_add_buttons_rect(),
+                "title": "Import via Add Files / Folder",
+                "description": "Alternatively, use the Add Files or Add Folder buttons to select footage from your directories."
+            },
+            {
+                "target": lambda ws: ws.preview_button,
+                "title": "Preview and Edit Clips",
+                "description": "Once files are imported, select any clip and click Preview / Edit to view it or mark key highlights."
+            },
+            {
+                "target": lambda ws: ws._get_move_buttons_rect(),
+                "title": "Change Clip Order",
+                "description": "Use the Up and Down arrow buttons to change the order in which clips appear in your final movie."
+            },
+            {
+                "target": lambda ws: ws.remove_button,
+                "title": "Delete Selected Videos",
+                "description": "Remove selected clips from the list by clicking the red X button, or by pressing the Delete key on your keyboard."
+            },
+            {
+                "target": lambda ws: ws.settings_button,
+                "title": "Application Settings",
+                "description": "Access the Settings here to adjust application preferences and how the E2DM2 backend behaves."
+            },
+            {
+                "target": lambda ws: ws.metric_target_duration,
+                "title": "Target Production Duration",
+                "description": "This shows the target duration for your movie, which updates automatically based on the soundtrack you select."
+            }
+        ]
+
+    def _get_sidebar_nav_rect(self) -> QRectF:
+        from PySide6.QtCore import QPoint, QRectF
+        top_left = self.nav_footage.mapTo(self, QPoint(0, 0))
+        bottom_right = self.nav_produce.mapTo(self, QPoint(self.nav_produce.width(), self.nav_produce.height()))
+        padding = 8
+        return QRectF(
+            top_left.x() - padding,
+            top_left.y() - padding,
+            bottom_right.x() - top_left.x() + 2 * padding,
+            bottom_right.y() - top_left.y() + 2 * padding
+        )
+
+    def _get_table_drop_rect(self) -> QRectF:
+        from PySide6.QtCore import QPoint, QRectF
+        viewport = self.media_table.viewport()
+        pos = viewport.mapTo(self, QPoint(0, 0))
+        margin = 24
+        return QRectF(
+            pos.x() + margin,
+            pos.y() + margin,
+            viewport.width() - 2 * margin,
+            viewport.height() - 2 * margin
+        )
+
+    def _get_add_buttons_rect(self) -> QRectF:
+        from PySide6.QtCore import QPoint, QRectF
+        top_left = self.add_files_button.mapTo(self, QPoint(0, 0))
+        bottom_right = self.add_folder_button.mapTo(self, QPoint(self.add_folder_button.width(), self.add_folder_button.height()))
+        padding = 8
+        return QRectF(
+            top_left.x() - padding,
+            top_left.y() - padding,
+            bottom_right.x() - top_left.x() + 2 * padding,
+            bottom_right.y() - top_left.y() + 2 * padding
+        )
+
+    def _get_move_buttons_rect(self) -> QRectF:
+        from PySide6.QtCore import QPoint, QRectF
+        top_left = self.move_up_button.mapTo(self, QPoint(0, 0))
+        bottom_right = self.move_down_button.mapTo(self, QPoint(self.move_down_button.width(), self.move_down_button.height()))
+        padding = 8
+        return QRectF(
+            top_left.x() - padding,
+            top_left.y() - padding,
+            bottom_right.x() - top_left.x() + 2 * padding,
+            bottom_right.y() - top_left.y() + 2 * padding
+        )
+
 
 class AppSplashScreen(QWidget):
     def __init__(self) -> None:
@@ -3052,6 +3174,14 @@ class MainWindow(QMainWindow):
         self.home.open_requested.connect(self.open_project)
         self.home.recent_requested.connect(lambda path: self.load_project_path(Path(path)))
         self.workspace.home_requested.connect(self.show_home)
+
+        # Help Menu / Onboarding Tours
+        help_menu = self.menuBar().addMenu("Help")
+        home_tour_action = help_menu.addAction("Show Welcome Screen Tour")
+        home_tour_action.triggered.connect(self.start_onboarding_tour)
+        workspace_tour_action = help_menu.addAction("Show Workspace Tour")
+        workspace_tour_action.triggered.connect(self.start_workspace_tour)
+
         LOGGER.info("E2DM2 main window initialized")
         self.show_home()
 
@@ -3061,6 +3191,47 @@ class MainWindow(QMainWindow):
     def show_home(self) -> None:
         self.home.refresh()
         self.stack.setCurrentWidget(self.home)
+
+    def check_onboarding(self) -> None:
+        from .onboarding import onboarding_enabled, welcome_modal_enabled, WelcomeDialog
+        if welcome_modal_enabled():
+            dialog = WelcomeDialog(self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                self.show_onboarding()
+            return
+
+        if onboarding_enabled():
+            self.show_onboarding()
+
+    def show_onboarding(self) -> None:
+        from .onboarding import OnboardingOverlay
+        if not hasattr(self.home, "onboarding_overlay") or not self.home.onboarding_overlay:
+            self.home.onboarding_overlay = OnboardingOverlay(self.home)
+            self.home.onboarding_overlay.setGeometry(self.home.rect())
+        self.home.onboarding_overlay.show_onboarding()
+
+    def start_onboarding_tour(self) -> None:
+        settings = QSettings()
+        settings.setValue("startup/show_onboarding", True)
+        settings.sync()
+        self.show_home()
+        QTimer.singleShot(100, self.show_onboarding)
+
+    def start_workspace_tour(self) -> None:
+        if not self.workspace.project:
+            QMessageBox.information(
+                self,
+                "Workspace Tour",
+                "Please open or create a project first to take the workspace tour.",
+            )
+            return
+
+        settings = QSettings()
+        settings.setValue("startup/show_workspace_onboarding", True)
+        settings.sync()
+
+        self.stack.setCurrentWidget(self.workspace)
+        QTimer.singleShot(100, self.workspace.show_onboarding)
 
     def new_project(self) -> None:
         dialog = NewProjectDialog(self)
@@ -3104,6 +3275,11 @@ class MainWindow(QMainWindow):
         if not self._centered_once:
             self._centered_once = True
             QTimer.singleShot(0, self.center_on_active_screen)
+
+        # Trigger onboarding after the window is shown and layouts settle
+        if not getattr(self, "_onboarding_triggered", False):
+            self._onboarding_triggered = True
+            QTimer.singleShot(200, self.check_onboarding)
 
     def center_on_active_screen(self) -> None:
         screen = QGuiApplication.screenAt(QCursor.pos()) or self.screen() or QApplication.primaryScreen()
