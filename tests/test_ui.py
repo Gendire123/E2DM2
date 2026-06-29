@@ -1534,6 +1534,73 @@ def test_soundtrack_onboarding_overlay(qtbot):
     settings.sync()
 
 
+def test_library_onboarding_overlay(qtbot):
+    from e2dm2.onboarding import OnboardingOverlay, library_onboarding_enabled
+    from e2dm2.editor import SongEditorDialog
+    from PySide6.QtCore import QSettings
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    settings = QSettings()
+    settings.setValue("startup/show_library_onboarding", True)
+    settings.sync()
+
+    dialog = SongEditorDialog(AlphaEntitlementProvider())
+    qtbot.addWidget(dialog)
+    dialog.show()
+    QApplication.processEvents()
+
+    # Get onboarding steps
+    steps = dialog.get_onboarding_steps()
+    assert len(steps) == 12
+
+    # Verify tab rectangles and column sections
+    assert steps[0]["title"] == "Songs Catalog"
+    assert steps[5]["title"] == "Timing Cuts"
+
+    # Overlay
+    overlay = OnboardingOverlay(dialog, steps, "startup/show_library_onboarding")
+    dialog.onboarding_overlay = overlay
+    qtbot.addWidget(overlay)
+    overlay.show_onboarding()
+    QApplication.processEvents()
+    assert overlay.isVisible()
+
+    # Go to step 5 (timing cuts)
+    for _ in range(5):
+        overlay.next_step()
+    assert overlay.current_step == 5
+    assert overlay.popup.next_btn.isVisible()
+    assert dialog.tabs.currentIndex() == 0
+
+    # Advance to step 6 (triggers programmatic tab switch to Cuts)
+    overlay.next_step()
+    QApplication.processEvents()
+    assert dialog.tabs.currentIndex() == 1
+    assert overlay.current_step == 6
+
+    # Return to step 5 (triggers programmatic tab switch back to General)
+    overlay.prev_step()
+    QApplication.processEvents()
+    assert dialog.tabs.currentIndex() == 0
+    assert overlay.current_step == 5
+
+    # Advance back to step 6 for the remainder of the test
+    overlay.next_step()
+    QApplication.processEvents()
+
+    # Test settings opt-out checked updates
+    assert not overlay.popup.opt_out_cb.isChecked()
+    overlay.popup.opt_out_cb.setChecked(True)
+    assert settings.value("startup/show_library_onboarding", True, type=bool) is False
+
+    # Reset settings
+    settings.setValue("startup/show_library_onboarding", True)
+    settings.sync()
+    dialog.close()
+
+
+
 
 def test_preview_onboarding_overlay_cached(qtbot, tmp_path):
     from e2dm2.onboarding import OnboardingOverlay

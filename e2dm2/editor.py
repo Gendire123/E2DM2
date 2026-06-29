@@ -497,8 +497,16 @@ class WorkflowSelectionDialog(QDialog):
         super().accept()
 
 
-class SongEditorDialog(QDialog):
+class SongEditorDialog(QWidget):
     catalog_changed = Signal()
+    accepted = Signal()
+    rejected = Signal()
+
+    def accept(self) -> None:
+        self.done(1)
+
+    def reject(self) -> None:
+        self.done(0)
 
     def __init__(self, entitlement: EntitlementProvider, parent: QWidget | None = None, workflow_filter: WorkflowMode | None = None) -> None:
         super().__init__(parent)
@@ -1285,4 +1293,131 @@ class SongEditorDialog(QDialog):
                     return
         
         self.player.stop()
-        super().done(result)
+        if result == 1:
+            self.accepted.emit()
+        else:
+            self.rejected.emit()
+
+
+
+    def showEvent(self, event) -> None:
+        from PySide6.QtGui import QShowEvent
+        super().showEvent(event)
+        if not getattr(self, "_onboarding_triggered", False):
+            self._onboarding_triggered = True
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(250, self.check_onboarding)
+
+    def resizeEvent(self, event) -> None:
+        from PySide6.QtGui import QResizeEvent
+        super().resizeEvent(event)
+        if hasattr(self, "onboarding_overlay") and self.onboarding_overlay:
+            self.onboarding_overlay.setGeometry(self.rect())
+
+    def check_onboarding(self) -> None:
+        from .onboarding import library_onboarding_enabled
+        if library_onboarding_enabled():
+            self.show_onboarding()
+
+    def show_onboarding(self) -> None:
+        if hasattr(self, "onboarding_overlay") and self.onboarding_overlay and self.onboarding_overlay.isVisible():
+            return
+        from .onboarding import OnboardingOverlay
+        self.onboarding_overlay = OnboardingOverlay(self, self.get_onboarding_steps(), "startup/show_library_onboarding")
+        self.onboarding_overlay.setGeometry(self.rect())
+        self.onboarding_overlay.show_onboarding()
+
+    def get_onboarding_steps(self) -> list[dict]:
+        from PySide6.QtCore import QRectF
+        return [
+            {
+                "target": lambda dialog: dialog.song_list,
+                "title": "Songs Catalog",
+                "description": "Select the song from the catalog that you want to edit."
+            },
+            {
+                "target": lambda dialog: dialog.new_button,
+                "title": "New Song Preset",
+                "description": "Create a new custom song template (requires a Pro entitlement license)."
+            },
+            {
+                "target": lambda dialog: dialog.duplicate_button,
+                "title": "Duplicate Song Preset",
+                "description": "Duplicate the selected song alongside all of its timing cuts and visual effects to quickly build a new version."
+            },
+            {
+                "target": lambda dialog: dialog.delete_button,
+                "title": "Delete Song Preset",
+                "description": "Delete a custom song template from your library catalog."
+            },
+            {
+                "target": lambda dialog: dialog._get_tab_rect(0),
+                "title": "General Metadata",
+                "description": "View and edit basic information about the song, such as the title, artist name, and energy level."
+            },
+            {
+                "target": lambda dialog: dialog._get_tab_rect(1),
+                "title": "Timing Cuts",
+                "description": "This is where you manually add video cut times for custom songs.",
+                "on_next": lambda dialog: dialog.tabs.setCurrentIndex(1)
+            },
+            {
+                "target": lambda dialog: dialog.play_button,
+                "title": "Preview Audio",
+                "description": "Play or pause the song to listen to it while editing.",
+                "on_back": lambda dialog: dialog.tabs.setCurrentIndex(0)
+            },
+            {
+                "target": lambda dialog: dialog.waveform_zoom,
+                "title": "Waveform Zoom",
+                "description": "Select how granular you want to view the audio waveform timeline (from 10 seconds up to the full song duration)."
+            },
+            {
+                "target": lambda dialog: dialog.add_playhead_button,
+                "title": "Add Cut at Playhead",
+                "description": "Press this button while listening to the song to drop a new cut marker at the current playback position."
+            },
+            {
+                "target": lambda dialog: dialog.waveform,
+                "title": "Audio Waveform Timeline",
+                "description": "Click to set the playhead, use the mouse wheel to navigate, and click-and-drag markers to align your cuts perfectly to the audio beat."
+            },
+            {
+                "target": lambda dialog: dialog._get_timestamp_column_rect(),
+                "title": "Cuts List",
+                "description": "View all the specific timestamps where a video cut will be triggered during production."
+            },
+            {
+                "target": lambda dialog: dialog._get_effects_column_rect(),
+                "title": "Visual Effects",
+                "description": "Add cinematic visual transitions to a specific cut timestamp by clicking the '+' button and choosing an effect.",
+                "position": "left"
+            }
+        ]
+
+    def _get_tab_rect(self, index: int) -> QRectF:
+        from PySide6.QtCore import QPoint, QRectF
+        tab_bar = self.tabs.tabBar()
+        rect = tab_bar.tabRect(index)
+        top_left = tab_bar.mapTo(self, rect.topLeft())
+        return QRectF(top_left.x(), top_left.y(), rect.width(), rect.height())
+
+    def _get_timestamp_column_rect(self) -> QRectF:
+        from PySide6.QtCore import QPoint, QRectF
+        table = self.cut_markers.table
+        header = table.horizontalHeader()
+        x = header.sectionPosition(0)
+        w = header.sectionSize(0)
+        top_left = table.viewport().mapTo(self, QPoint(x, 0))
+        h = table.viewport().height()
+        return QRectF(top_left.x(), top_left.y(), w, h)
+
+    def _get_effects_column_rect(self) -> QRectF:
+        from PySide6.QtCore import QPoint, QRectF
+        table = self.cut_markers.table
+        header = table.horizontalHeader()
+        x = header.sectionPosition(1)
+        w = header.sectionSize(1)
+        top_left = table.viewport().mapTo(self, QPoint(x, 0))
+        h = table.viewport().height()
+        return QRectF(top_left.x(), top_left.y(), w, h)

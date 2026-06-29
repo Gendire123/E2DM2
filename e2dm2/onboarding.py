@@ -99,6 +99,14 @@ def soundtrack_onboarding_enabled(settings: QSettings | None = None) -> bool:
     return settings.value("startup/show_soundtrack_onboarding", True, type=bool)
 
 
+def library_onboarding_enabled(settings: QSettings | None = None) -> bool:
+    """Check if the library editor onboarding tour is enabled."""
+    if "pytest" in sys.modules or "unittest" in sys.modules:
+        return False
+    settings = settings or QSettings()
+    return settings.value("startup/show_library_onboarding", True, type=bool)
+
+
 class WelcomeDialog(QDialog):
     """A beautiful welcome dialog shown on first startup before onboarding."""
 
@@ -458,7 +466,7 @@ class OnboardingPopup(QFrame):
         self.opt_out_cb.setChecked(not settings.value(self.settings_key, True, type=bool))
         self.opt_out_cb.blockSignals(False)
 
-    def set_step(self, step_num: int, total_steps: int, title: str, description: str) -> None:
+    def set_step(self, step_num: int, total_steps: int, title: str, description: str, disable_next: bool = False) -> None:
         self.title_label.setText(title)
         self.desc_label.setText(description)
         
@@ -484,6 +492,8 @@ class OnboardingPopup(QFrame):
             self.next_btn.setText("Finish")
         else:
             self.next_btn.setText("Next")
+            
+        self.next_btn.setVisible(not disable_next)
 
 
 class OnboardingOverlay(QWidget):
@@ -554,8 +564,11 @@ class OnboardingOverlay(QWidget):
         # Start with full-page spotlight (closes in on first target)
         self.set_spotlight_rect(QRectF(self.rect()))
         
+        import sys
+        is_testing = "pytest" in sys.modules or "unittest" in sys.modules
+        
         self.fade_anim = QPropertyAnimation(self, b"maskAlpha")
-        self.fade_anim.setDuration(300)
+        self.fade_anim.setDuration(0 if is_testing else 300)
         self.fade_anim.setStartValue(0)
         self.fade_anim.setEndValue(BACKGROUND_MASK_OPACITY)
         self.fade_anim.start()
@@ -587,12 +600,15 @@ class OnboardingOverlay(QWidget):
         
         self.popup.set_step(index + 1, len(self.steps), step_data["title"], step_data["description"])
         
+        import sys
+        is_testing = "pytest" in sys.modules or "unittest" in sys.modules
+
         # Animate spotlight and popup position in parallel
         self.anim_group = QParallelAnimationGroup(self)
         
         # Spotlight ease anim
         self.spotlight_anim = QPropertyAnimation(self, b"spotlightRect")
-        self.spotlight_anim.setDuration(450)
+        self.spotlight_anim.setDuration(0 if is_testing else 450)
         self.spotlight_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
         self.spotlight_anim.setStartValue(self.spotlightRect)
         self.spotlight_anim.setEndValue(target_rect)
@@ -602,11 +618,14 @@ class OnboardingOverlay(QWidget):
         popup_size = self.popup.sizeHint()
         self.popup.resize(popup_size)
         
+        disable_next = step_data.get("disable_next", False)
+        self.popup.set_step(index + 1, len(self.steps), step_data["title"], step_data["description"], disable_next=disable_next)
+        
         position = step_data.get("position", "bottom")
         target_popup_pos = self.calculate_popup_position(target_rect, popup_size, position)
         
         self.popup_anim = QPropertyAnimation(self.popup, b"pos")
-        self.popup_anim.setDuration(450)
+        self.popup_anim.setDuration(0 if is_testing else 450)
         self.popup_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
         self.popup_anim.setStartValue(self.popup.pos() if index > 0 else target_popup_pos - QPoint(0, 20))
         self.popup_anim.setEndValue(target_popup_pos)
@@ -668,6 +687,12 @@ class OnboardingOverlay(QWidget):
         self.popup.move(self.calculate_popup_position(target_rect, popup_size, position))
 
     def next_step(self) -> None:
+        if 0 <= self.current_step < len(self.steps):
+            step_data = self.steps[self.current_step]
+            on_next = step_data.get("on_next")
+            if on_next:
+                on_next(self.parent())
+                
         if self.current_step < len(self.steps) - 1:
             self.goToStep(self.current_step + 1)
         else:
@@ -675,11 +700,18 @@ class OnboardingOverlay(QWidget):
 
     def prev_step(self) -> None:
         if self.current_step > 0:
+            step_data = self.steps[self.current_step]
+            on_back = step_data.get("on_back")
+            if on_back:
+                on_back(self.parent())
             self.goToStep(self.current_step - 1)
 
     def close_tour(self) -> None:
+        import sys
+        is_testing = "pytest" in sys.modules or "unittest" in sys.modules
+
         self.fade_out = QPropertyAnimation(self, b"maskAlpha")
-        self.fade_out.setDuration(250)
+        self.fade_out.setDuration(0 if is_testing else 250)
         self.fade_out.setStartValue(self.maskAlpha)
         self.fade_out.setEndValue(0)
         self.fade_out.finished.connect(self._do_hide)
@@ -728,7 +760,43 @@ class OnboardingOverlay(QWidget):
         painter.end()
 
     def mousePressEvent(self, event) -> None:
+        if self.spotlightRect.contains(event.position()):
+            self.hide()
+            widget = self.parent().childAt(event.position().toPoint())
+            self.show()
+            self.raise_()
+            if widget:
+                local_pos = widget.mapFrom(self, event.position().toPoint())
+                from PySide6.QtGui import QMouseEvent
+                from PySide6.QtCore import QPointF, QCoreApplication
+                forwarded_event = QMouseEvent(
+                    event.type(),
+                    QPointF(local_pos),
+                    event.button(),
+                    event.buttons(),
+                    event.modifiers()
+                )
+                QCoreApplication.sendEvent(widget, forwarded_event)
+                return
         event.accept()
 
     def mouseReleaseEvent(self, event) -> None:
+        if self.spotlightRect.contains(event.position()):
+            self.hide()
+            widget = self.parent().childAt(event.position().toPoint())
+            self.show()
+            self.raise_()
+            if widget:
+                local_pos = widget.mapFrom(self, event.position().toPoint())
+                from PySide6.QtGui import QMouseEvent
+                from PySide6.QtCore import QPointF, QCoreApplication
+                forwarded_event = QMouseEvent(
+                    event.type(),
+                    QPointF(local_pos),
+                    event.button(),
+                    event.buttons(),
+                    event.modifiers()
+                )
+                QCoreApplication.sendEvent(widget, forwarded_event)
+                return
         event.accept()

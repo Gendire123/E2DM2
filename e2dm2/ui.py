@@ -2573,10 +2573,24 @@ class WorkspacePage(QWidget):
         self.refresh_media()
 
     def open_library(self) -> None:
-        dialog = SongEditorDialog(self.entitlement, self, workflow_filter=self.workflow_combo.currentData())
+        main_window = self.window()
+        self.library_page = SongEditorDialog(self.entitlement, main_window, workflow_filter=self.workflow_combo.currentData())
         selected_id = self.project.settings.song_id if self.project else None
-        dialog.catalog_changed.connect(lambda: self.refresh_catalog(selected_id))
-        dialog.exec()
+        self.library_page.catalog_changed.connect(lambda: self.refresh_catalog(selected_id))
+        self.library_page.accepted.connect(lambda: self.on_library_closed(selected_id))
+        self.library_page.rejected.connect(lambda: self.on_library_closed(selected_id))
+        
+        main_window.stack.addWidget(self.library_page)
+        main_window.stack.setCurrentWidget(self.library_page)
+
+    def on_library_closed(self, selected_id: str | None) -> None:
+        if hasattr(self, "library_page") and self.library_page:
+            self.library_page.player.stop()
+            main_window = self.window()
+            main_window.stack.setCurrentWidget(self)
+            main_window.stack.removeWidget(self.library_page)
+            self.library_page.deleteLater()
+            self.library_page = None
         self.refresh_catalog(selected_id)
 
     def selected_exports(self) -> list[ExportSize]:
