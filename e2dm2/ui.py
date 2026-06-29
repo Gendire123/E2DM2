@@ -1674,6 +1674,11 @@ class WorkspacePage(QWidget):
             if w:
                 w.setGraphicsEffect(None)
 
+        if index == 1 and self.project:
+            from .onboarding import soundtrack_onboarding_enabled
+            if soundtrack_onboarding_enabled():
+                QTimer.singleShot(250, self.show_soundtrack_onboarding)
+
     def _epic_panel(self) -> QWidget:
         panel = QWidget()
         self.song_search = QLineEdit()
@@ -1684,12 +1689,12 @@ class WorkspacePage(QWidget):
         self.mood_filter.currentIndexChanged.connect(self.apply_song_filters)
         self.energy_filter.addItems(["All energies", "Low", "Medium", "High"])
         self.energy_filter.currentIndexChanged.connect(self.apply_song_filters)
-        manage = QPushButton("Manage Library")
-        manage.clicked.connect(self.open_library)
+        self.manage_button = QPushButton("Manage Library")
+        self.manage_button.clicked.connect(self.open_library)
         filters = QHBoxLayout()
         filters.addWidget(self.song_search, 1)
         filters.addWidget(self.mood_filter)
-        filters.addWidget(manage)
+        filters.addWidget(self.manage_button)
         self.song_table = SmoothTableWidget(0, 4)
         self.song_table.setHorizontalHeaderLabels(["Song", "Mood", "Cuts", "Length"])
         self.song_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -2836,6 +2841,58 @@ class WorkspacePage(QWidget):
             bottom_right.y() - top_left.y() + 2 * padding
         )
 
+    def show_soundtrack_onboarding(self) -> None:
+        if hasattr(self, "onboarding_overlay") and self.onboarding_overlay and self.onboarding_overlay.isVisible():
+            return
+        from .onboarding import OnboardingOverlay
+        if not hasattr(self, "onboarding_overlay") or not self.onboarding_overlay:
+            self.onboarding_overlay = OnboardingOverlay(self, self.get_soundtrack_onboarding_steps(), "startup/show_soundtrack_onboarding")
+            self.onboarding_overlay.setGeometry(self.rect())
+        else:
+            self.onboarding_overlay.steps = self.get_soundtrack_onboarding_steps()
+            self.onboarding_overlay.popup.settings_key = "startup/show_soundtrack_onboarding"
+        self.onboarding_overlay.show_onboarding()
+
+    def get_soundtrack_onboarding_steps(self) -> list[dict]:
+        return [
+            {
+                "target": lambda ws: ws.workflow_combo,
+                "title": "Choose Editing Workflow",
+                "description": "Select how you want to build your video:\n• Epic Montage: Cuts clips dynamically to match music beats.\n• Full-length Video: Keeps full clips matched to music.\n• Real Estate Showcase: Special timing optimized for showcasing properties.\n• Custom: Build your own timings."
+            },
+            {
+                "target": lambda ws: ws.song_table,
+                "title": "Music Library",
+                "description": "Browse the available soundtracks. Click on any song row to select it as the soundtrack for your final video production."
+            },
+            {
+                "target": lambda ws: ws._get_song_play_btn_rect(),
+                "title": "Preview Soundtrack",
+                "description": "Click the Play button on any song to listen to the music track before choosing it."
+            },
+            {
+                "target": lambda ws: ws.manage_button,
+                "title": "Manage Music Library",
+                "description": "Click here to view song details, edit track metadata, or (with a Pro license) import your own custom soundtracks.",
+                "position": "left"
+            }
+        ]
+
+    def _get_song_play_btn_rect(self) -> QRectF:
+        from PySide6.QtCore import QPoint, QRectF
+        cell = self.song_table.cellWidget(0, 0)
+        if not cell or not hasattr(cell, "play_button"):
+            return QRectF()
+        btn = cell.play_button
+        top_left = btn.mapTo(self, QPoint(0, 0))
+        padding = 4
+        return QRectF(
+            top_left.x() - padding,
+            top_left.y() - padding,
+            btn.width() + 2 * padding,
+            btn.height() + 2 * padding
+        )
+
 
 class AppSplashScreen(QWidget):
     def __init__(self) -> None:
@@ -3204,6 +3261,8 @@ class MainWindow(QMainWindow):
         home_tour_action.triggered.connect(self.start_onboarding_tour)
         workspace_tour_action = help_menu.addAction("Show Workspace Tour")
         workspace_tour_action.triggered.connect(self.start_workspace_tour)
+        soundtrack_tour_action = help_menu.addAction("Show Soundtrack Tour")
+        soundtrack_tour_action.triggered.connect(self.start_soundtrack_tour)
 
         LOGGER.info("E2DM2 main window initialized")
         self.show_home()
@@ -3254,7 +3313,25 @@ class MainWindow(QMainWindow):
         settings.sync()
 
         self.stack.setCurrentWidget(self.workspace)
+        self.workspace.workspace_tabs.setCurrentIndex(0)
         QTimer.singleShot(100, self.workspace.show_onboarding)
+
+    def start_soundtrack_tour(self) -> None:
+        if not self.workspace.project:
+            QMessageBox.information(
+                self,
+                "Soundtrack Tour",
+                "Please open or create a project first to take the soundtrack tour.",
+            )
+            return
+
+        settings = QSettings()
+        settings.setValue("startup/show_soundtrack_onboarding", True)
+        settings.sync()
+
+        self.stack.setCurrentWidget(self.workspace)
+        self.workspace.workspace_tabs.setCurrentIndex(1)
+        QTimer.singleShot(100, self.workspace.show_soundtrack_onboarding)
 
     def new_project(self) -> None:
         dialog = NewProjectDialog(self)

@@ -91,6 +91,14 @@ def preview_onboarding_enabled(settings: QSettings | None = None) -> bool:
     return settings.value("startup/show_preview_onboarding", True, type=bool)
 
 
+def soundtrack_onboarding_enabled(settings: QSettings | None = None) -> bool:
+    """Check if the soundtrack onboarding tour is enabled."""
+    if "pytest" in sys.modules or "unittest" in sys.modules:
+        return False
+    settings = settings or QSettings()
+    return settings.value("startup/show_soundtrack_onboarding", True, type=bool)
+
+
 class WelcomeDialog(QDialog):
     """A beautiful welcome dialog shown on first startup before onboarding."""
 
@@ -444,11 +452,28 @@ class OnboardingPopup(QFrame):
         settings.setValue(self.settings_key, not self.opt_out_cb.isChecked())
         settings.sync()
 
+    def update_opt_out_checkbox(self) -> None:
+        settings = QSettings()
+        self.opt_out_cb.blockSignals(True)
+        self.opt_out_cb.setChecked(not settings.value(self.settings_key, True, type=bool))
+        self.opt_out_cb.blockSignals(False)
+
     def set_step(self, step_num: int, total_steps: int, title: str, description: str) -> None:
         self.title_label.setText(title)
         self.desc_label.setText(description)
+        
+        # Force label width restrictions so standard wrap metrics calculate correct size hints
+        self.title_label.setFixedWidth(288)
+        self.desc_label.setFixedWidth(288)
+        
         self.step_label.setText(f"{step_num} / {total_steps}")
         
+        # Recreate dots indicator if total steps count changed between tours
+        if self.dots and len(self.dots.dots) != total_steps:
+            self.progress_layout.removeWidget(self.dots)
+            self.dots.deleteLater()
+            self.dots = None
+
         if not self.dots:
             self.dots = DotIndicator(total_steps, self)
             self.progress_layout.insertWidget(0, self.dots)
@@ -524,6 +549,8 @@ class OnboardingOverlay(QWidget):
         self.show()
         self.raise_()
         
+        self.popup.update_opt_out_checkbox()
+        
         # Start with full-page spotlight (closes in on first target)
         self.set_spotlight_rect(QRectF(self.rect()))
         
@@ -575,7 +602,8 @@ class OnboardingOverlay(QWidget):
         popup_size = self.popup.sizeHint()
         self.popup.resize(popup_size)
         
-        target_popup_pos = self.calculate_popup_position(target_rect, popup_size)
+        position = step_data.get("position", "bottom")
+        target_popup_pos = self.calculate_popup_position(target_rect, popup_size, position)
         
         self.popup_anim = QPropertyAnimation(self.popup, b"pos")
         self.popup_anim.setDuration(450)
@@ -586,12 +614,24 @@ class OnboardingOverlay(QWidget):
         
         self.anim_group.start()
 
-    def calculate_popup_position(self, spotlight_rect: QRectF, popup_size: QSize) -> QPoint:
-        y = spotlight_rect.bottom() + POPUP_MARGIN
-        if y + popup_size.height() > self.height() - 16:
+    def calculate_popup_position(self, spotlight_rect: QRectF, popup_size: QSize, position: str = "bottom") -> QPoint:
+        if position == "left":
+            x = spotlight_rect.left() - popup_size.width() - POPUP_MARGIN
+            y = spotlight_rect.center().y() - popup_size.height() / 2
+        elif position == "right":
+            x = spotlight_rect.right() + POPUP_MARGIN
+            y = spotlight_rect.center().y() - popup_size.height() / 2
+        elif position == "top":
+            x = spotlight_rect.center().x() - popup_size.width() / 2
             y = spotlight_rect.top() - popup_size.height() - POPUP_MARGIN
-            
-        x = spotlight_rect.center().x() - popup_size.width() / 2
+        else: # "bottom"
+            x = spotlight_rect.center().x() - popup_size.width() / 2
+            y = spotlight_rect.bottom() + POPUP_MARGIN
+            # fallback to top if bottom overlaps screen bottom
+            if y + popup_size.height() > self.height() - 16:
+                y = spotlight_rect.top() - popup_size.height() - POPUP_MARGIN
+
+        # Clamping to screen boundaries
         x = max(16, min(x, self.width() - popup_size.width() - 16))
         y = max(16, min(y, self.height() - popup_size.height() - 16))
         
@@ -623,7 +663,9 @@ class OnboardingOverlay(QWidget):
         self.set_spotlight_rect(target_rect)
         popup_size = self.popup.sizeHint()
         self.popup.resize(popup_size)
-        self.popup.move(self.calculate_popup_position(target_rect, popup_size))
+        
+        position = step_data.get("position", "bottom")
+        self.popup.move(self.calculate_popup_position(target_rect, popup_size, position))
 
     def next_step(self) -> None:
         if self.current_step < len(self.steps) - 1:

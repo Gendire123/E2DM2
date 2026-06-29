@@ -1486,6 +1486,55 @@ def test_preview_onboarding_overlay(qtbot):
     dialog.close()
 
 
+def test_soundtrack_onboarding_overlay(qtbot):
+    from e2dm2.onboarding import OnboardingOverlay, soundtrack_onboarding_enabled
+    from e2dm2.ui import WorkspacePage
+    from PySide6.QtCore import QSettings
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    settings = QSettings()
+    settings.setValue("startup/show_soundtrack_onboarding", True)
+    settings.sync()
+
+    workspace = WorkspacePage()
+    qtbot.addWidget(workspace)
+    workspace.show()
+    QApplication.processEvents()
+
+    # Get onboarding steps
+    steps = workspace.get_soundtrack_onboarding_steps()
+    assert len(steps) == 4
+
+    # Target 0 is workflow combo
+    assert steps[0]["title"] == "Choose Editing Workflow"
+
+    # Overlay creation
+    overlay = OnboardingOverlay(workspace, steps, "startup/show_soundtrack_onboarding")
+    qtbot.addWidget(overlay)
+
+    # Show onboarding
+    overlay.show_onboarding()
+    QApplication.processEvents()
+    assert overlay.isVisible()
+    assert overlay.current_step == 0
+
+    # Next step
+    overlay.next_step()
+    assert overlay.current_step == 1
+    assert overlay.popup.title_label.text() == "Music Library"
+
+    # Verify opt-out updates settings
+    assert not overlay.popup.opt_out_cb.isChecked()
+    overlay.popup.opt_out_cb.setChecked(True)
+    assert settings.value("startup/show_soundtrack_onboarding", True, type=bool) is False
+
+    # Reset settings
+    settings.setValue("startup/show_soundtrack_onboarding", True)
+    settings.sync()
+
+
+
 def test_preview_onboarding_overlay_cached(qtbot, tmp_path):
     from e2dm2.onboarding import OnboardingOverlay
     from e2dm2.preview import ClipPreviewDialog
