@@ -8,6 +8,7 @@ from PySide6.QtGui import QBrush, QColor, QIcon, QKeySequence, QMouseEvent, QPai
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
+    QBoxLayout,
     QButtonGroup,
     QDialog,
     QDialogButtonBox,
@@ -716,6 +717,7 @@ class ClipPreviewDialog(QDialog):
         self._hover_warming = False
         self._pending_hover_position: int | None = None
         self._normal_geometry = None
+        self._fullscreen_compact = False
         self.hover_seek_timer = QTimer(self)
         self.hover_seek_timer.setSingleShot(True)
         self.hover_seek_timer.setInterval(25)
@@ -829,17 +831,17 @@ class ClipPreviewDialog(QDialog):
         self.video_container = AspectWidget(self.video, 16.0 / 9.0)
         self.video_container.on_resize_callback = self.adjust_controls_margins
 
-        right_container = QWidget()
-        right_layout = QVBoxLayout(right_container)
+        self.preview_container = QWidget()
+        right_layout = QVBoxLayout(self.preview_container)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(6)
         right_layout.addWidget(self.video_container, 1)
         right_layout.addLayout(self.controls_layout)
 
-        top_split = QHBoxLayout()
-        top_split.setSpacing(10)
-        top_split.addWidget(self.selection_mode_panel, 1)
-        top_split.addWidget(right_container, 1)
+        self.top_split = QHBoxLayout()
+        self.top_split.setSpacing(10)
+        self.top_split.addWidget(self.selection_mode_panel, 1)
+        self.top_split.addWidget(self.preview_container, 1)
 
         legend_row = QHBoxLayout()
         legend_row.setContentsMargins(14, 0, 14, 0)
@@ -860,7 +862,7 @@ class ClipPreviewDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(6)
-        layout.addLayout(top_split)
+        layout.addLayout(self.top_split)
         layout.addWidget(self.timeline)
         layout.addLayout(legend_row)
         layout.addWidget(self.selection_table, 1)
@@ -929,9 +931,9 @@ class ClipPreviewDialog(QDialog):
         panel = QFrame()
         panel.setObjectName("selectionModePanel")
 
-        outer = QVBoxLayout(panel)
-        outer.setContentsMargins(16, 16, 16, 16)
-        outer.setSpacing(12)
+        self.selection_mode_outer = QVBoxLayout(panel)
+        self.selection_mode_outer.setContentsMargins(16, 16, 16, 16)
+        self.selection_mode_outer.setSpacing(12)
 
         # Top row: title + subtitle on the left, shortcut badges on the right
         top_row = QHBoxLayout()
@@ -943,28 +945,32 @@ class ClipPreviewDialog(QDialog):
         title_layout.setContentsMargins(0, 0, 0, 0)
         title_layout.setSpacing(2)
         
-        title_label = QLabel("Selection Mode")
-        title_label.setStyleSheet("font-size: 16pt; font-weight: 800; color: #142033;")
+        self.selection_mode_title_label = QLabel("Selection Mode")
+        self.selection_mode_title_label.setStyleSheet("font-size: 16pt; font-weight: 800; color: #142033;")
         
-        subtitle_label = QLabel("Paint on timeline")
-        subtitle_label.setStyleSheet("font-size: 9.5pt; color: #526173; font-weight: 500;")
+        self.selection_mode_subtitle_label = QLabel("Paint on timeline")
+        self.selection_mode_subtitle_label.setStyleSheet("font-size: 9.5pt; color: #526173; font-weight: 500;")
         
-        title_layout.addWidget(title_label)
-        title_layout.addWidget(subtitle_label)
+        title_layout.addWidget(self.selection_mode_title_label)
+        title_layout.addWidget(self.selection_mode_subtitle_label)
         
         # Right side: Shortcut badges
         badge_layout = QHBoxLayout()
         badge_layout.setContentsMargins(0, 0, 0, 0)
         badge_layout.setSpacing(12)
-        badge_layout.addWidget(self.create_shortcut_badge("E", "Exclude"), alignment=Qt.AlignmentFlag.AlignVCenter)
-        badge_layout.addWidget(self.create_shortcut_badge("R", "Required"), alignment=Qt.AlignmentFlag.AlignVCenter)
-        badge_layout.addWidget(self.create_shortcut_badge("Delete", "Remove"), alignment=Qt.AlignmentFlag.AlignVCenter)
+        self.selection_mode_shortcuts = [
+            self.create_shortcut_badge("E", "Exclude"),
+            self.create_shortcut_badge("R", "Required"),
+            self.create_shortcut_badge("Delete", "Remove"),
+        ]
+        for shortcut in self.selection_mode_shortcuts:
+            badge_layout.addWidget(shortcut, alignment=Qt.AlignmentFlag.AlignVCenter)
         
         top_row.addWidget(title_container)
         top_row.addStretch(1)
         top_row.addLayout(badge_layout)
         
-        outer.addLayout(top_row)
+        self.selection_mode_outer.addLayout(top_row)
 
         # Timeline help text below title row
         self.timeline_help_label = QLabel(
@@ -973,11 +979,11 @@ class ClipPreviewDialog(QDialog):
         self.timeline_help_label.setObjectName("timelineHelpLabel")
         self.timeline_help_label.setStyleSheet("color: #526173; font-size: 9.5pt;")
         self.timeline_help_label.setWordWrap(True)
-        outer.addWidget(self.timeline_help_label)
-        outer.addStretch(1)
+        self.selection_mode_outer.addWidget(self.timeline_help_label)
+        self.selection_mode_stretch = self.selection_mode_outer.addStretch(1)
 
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(24)
+        self.selection_mode_button_row = QHBoxLayout()
+        self.selection_mode_button_row.setSpacing(24)
 
         # Generate Exclude and Required button icons
         self.exclude_btn_inactive, self.exclude_btn_active = self.create_exclude_button_icons()
@@ -1096,11 +1102,11 @@ class ClipPreviewDialog(QDialog):
         current_layout.addWidget(self.current_mode_icon)
         current_layout.addLayout(text_layout, 1)
 
-        btn_row.addWidget(self.exclude_tool)
-        btn_row.addWidget(self.required_tool)
+        self.selection_mode_button_row.addWidget(self.exclude_tool)
+        self.selection_mode_button_row.addWidget(self.required_tool)
 
-        outer.addLayout(btn_row)
-        outer.addWidget(self.current_mode_card)
+        self.selection_mode_outer.addLayout(self.selection_mode_button_row)
+        self.selection_mode_outer.addWidget(self.current_mode_card)
 
         return panel
 
@@ -1164,12 +1170,51 @@ class ClipPreviewDialog(QDialog):
         widget.style().polish(widget)
         widget.update()
 
+    def _set_fullscreen_layout(self, enabled: bool) -> None:
+        """Switch between the editing layout and a video-first fullscreen layout."""
+        self._fullscreen_compact = enabled
+
+        self.top_split.removeWidget(self.selection_mode_panel)
+        self.top_split.removeWidget(self.preview_container)
+        if enabled:
+            self.top_split.setDirection(QBoxLayout.Direction.TopToBottom)
+            self.top_split.addWidget(self.preview_container, 1)
+            self.top_split.addWidget(self.selection_mode_panel, 0)
+        else:
+            self.top_split.setDirection(QBoxLayout.Direction.LeftToRight)
+            self.top_split.addWidget(self.selection_mode_panel, 1)
+            self.top_split.addWidget(self.preview_container, 1)
+
+        self.selection_mode_subtitle_label.setVisible(not enabled)
+        self.timeline_help_label.setVisible(not enabled)
+        self.current_mode_card.setVisible(not enabled)
+        self.exclude_subtitle_label.setVisible(not enabled)
+        self.required_subtitle_label.setVisible(not enabled)
+
+        margins = (14, 10, 14, 10) if enabled else (16, 16, 16, 16)
+        self.selection_mode_outer.setContentsMargins(*margins)
+        self.selection_mode_outer.setSpacing(6 if enabled else 12)
+        self.selection_mode_button_row.setSpacing(10 if enabled else 24)
+        self.selection_mode_panel.setMaximumHeight(108 if enabled else 16_777_215)
+
+        for button in (self.exclude_tool, self.required_tool):
+            button.setMinimumHeight(44 if enabled else 68)
+            button.setMaximumHeight(44 if enabled else 16_777_215)
+            button.setMaximumWidth(220 if enabled else 16_777_215)
+
+        self.selection_mode_title_label.setStyleSheet(
+            f"font-size: {'12pt' if enabled else '16pt'}; font-weight: 800; color: #142033;"
+        )
+        self.top_split.invalidate()
+        self.selection_mode_outer.invalidate()
+
     def exit_fullscreen(self) -> None:
         if not self.isFullScreen():
             return
         self.showNormal()
         if self._normal_geometry is not None:
             self.setGeometry(self._normal_geometry)
+        self._set_fullscreen_layout(False)
         self.selection_table.setVisible(True)
         self.button_box.setVisible(True)
         self.proxy_status.setVisible(bool(self.proxy_status.text()))
@@ -1186,6 +1231,7 @@ class ClipPreviewDialog(QDialog):
             self.selection_table, self.proxy_status, self.proxy_progress, self.warning, self.button_box,
         ):
             widget.setVisible(False)
+        self._set_fullscreen_layout(True)
         self.fullscreen_button.setText("Exit Full Screen")
         self.showFullScreen()
 

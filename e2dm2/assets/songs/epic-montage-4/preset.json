@@ -9,17 +9,25 @@
   ],
   "bpm": null,
   "energy": "high",
-  "total_duration_seconds": 186.581333,
-  "minimum_source_duration_seconds": 186.581333,
+  "total_duration_seconds": 186.581,
+  "minimum_source_duration_seconds": 186.581,
   "opening_fade_seconds": 0.0,
-  "cuts_end_seconds": 186.581333,
+  "cuts_end_seconds": 186.581,
   "fade_out_seconds": 0.0,
   "escalation_seconds": 0.0,
   "cut_timestamps": [
-    0.0
-  ],
-  "effects": [
-    "none"
+    0.0,
+    9.534901,
+    19.31506,
+    27.441513,
+    31.948366,
+    32.646225,
+    33.222407,
+    33.771456,
+    43.454796,
+    49.046554,
+    54.602636,
+    59.95186
   ],
   "transitions": {
     "duration_seconds": 0.25,
@@ -35,5 +43,21 @@
     "fade_seconds": 0.5
   },
   "dark_cue": null,
-  "flash_cue": null
+  "flash_cue": null,
+  "effects": [
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none"
+  ],
+  "workflow": "epic_montage",
+  "readonly": true
 }
