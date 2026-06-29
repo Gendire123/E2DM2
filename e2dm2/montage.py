@@ -6,6 +6,7 @@ from .models import SegmentPlan, SongManifest
 
 
 MINIMUM_CLIP_SECONDS = 0.1
+REQUIRED_CUT_BUFFER_SECONDS = 5.0
 
 
 def _build_legacy_montage_segment_plan(video_duration: float, song: SongManifest) -> list[SegmentPlan]:
@@ -124,6 +125,47 @@ def _intersections(intervals: list[_Interval], start: float, end: float) -> list
     ]
 
 
+def _required_cut_free_ranges(
+    video_duration: float,
+    required_ranges: list[tuple[float, float]],
+    excluded_ranges: list[tuple[float, float]],
+    source_boundaries: list[float],
+) -> list[tuple[float, float]]:
+    """Expand required footage into cut-free source ranges.
+
+    A buffer cannot cross into another source clip or explicitly excluded footage.
+    Overlapping buffers are merged so they do not introduce a cut between nearby
+    required selections.
+    """
+    boundaries = sorted({0.0, video_duration, *(value for value in source_boundaries if 0 < value < video_duration)})
+    usable = _subtract_ranges(
+        [_Interval(start, end) for start, end in zip(boundaries, boundaries[1:])],
+        excluded_ranges,
+    )
+    expanded: list[tuple[float, float]] = []
+    for required_start, required_end in sorted(required_ranges):
+        containing = next(
+            (
+                interval for interval in usable
+                if interval.start <= required_start + 0.000001 and interval.end >= required_end - 0.000001
+            ),
+            None,
+        )
+        if containing is None:
+            raise ValueError("Required footage conflicts with excluded footage or a source clip boundary.")
+        start = max(containing.start, required_start - REQUIRED_CUT_BUFFER_SECONDS)
+        end = min(containing.end, required_end + REQUIRED_CUT_BUFFER_SECONDS)
+        shares_usable_interval = bool(expanded) and (
+            containing.start <= expanded[-1][0] + 0.000001
+            and containing.end >= expanded[-1][1] - 0.000001
+        )
+        if shares_usable_interval and start <= expanded[-1][1] + 0.000001:
+            expanded[-1] = (expanded[-1][0], max(expanded[-1][1], end))
+        else:
+            expanded.append((start, end))
+    return expanded
+
+
 class _IntervalCursor:
     def __init__(self, intervals: list[_Interval]) -> None:
         self.intervals = intervals
@@ -201,7 +243,9 @@ def _build_constrained_montage_segment_plan(
         shortage = song.minimum_source_duration_seconds - usable_duration
         raise ValueError(f"Excluded footage leaves the group {shortage:.3f} seconds short of this song's requirement.")
 
-    required = sorted(required_ranges)
+    required = _required_cut_free_ranges(
+        video_duration, required_ranges, excluded_ranges, source_boundaries,
+    )
     required_duration = sum(end - start for start, end in required)
     if required_duration > song.total_duration_seconds + 0.000001:
         shortage = required_duration - song.total_duration_seconds

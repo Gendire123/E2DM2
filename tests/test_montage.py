@@ -78,12 +78,12 @@ def test_constrained_plan_excludes_red_and_preserves_green_once():
     )
     protected = [segment for segment in plan if segment.protected]
     assert len(protected) == 1
-    assert (protected[0].source_start, protected[0].source_duration, protected[0].speed) == (50, 10, 1)
+    assert (protected[0].source_start, protected[0].source_duration, protected[0].speed) == (45, 20, 1)
     assert protected[0].style == "natural"
     assert protected[0].zoom == 1
     assert not protected[0].motion_blur
     assert not any(
-        not segment.protected and segment.source_start < 60 and segment.source_start + segment.source_duration > 50
+        not segment.protected and segment.source_start < 65 and segment.source_start + segment.source_duration > 45
         for segment in plan
     )
     protected_end = protected[0].visible_start + protected[0].visible_duration
@@ -97,8 +97,31 @@ def test_multiple_required_ranges_stay_in_source_order():
     song = next(s for s in load_song_catalog(custom_root=Path("missing-library")) if s.song_id == "epic-montage-1")
     plan = build_montage_segment_plan(240, song, required_ranges=[(40, 45), (150, 158)])
     protected = [segment for segment in plan if segment.protected]
-    assert [segment.source_start for segment in protected] == [40, 150]
+    assert [segment.source_start for segment in protected] == [35, 145]
     assert [segment.visible_start for segment in protected] == sorted(segment.visible_start for segment in protected)
+
+
+def test_required_cut_buffer_clamps_to_clip_boundaries():
+    song = next(s for s in load_song_catalog(custom_root=Path("missing-library")) if s.song_id == "epic-montage-1")
+    plan = build_montage_segment_plan(220, song, required_ranges=[(112, 116)], source_boundaries=[110])
+    protected = [segment for segment in plan if segment.protected]
+    assert [(segment.source_start, segment.source_duration) for segment in protected] == [(110, 11)]
+
+
+def test_overlapping_required_cut_buffers_form_one_uncut_segment():
+    song = next(s for s in load_song_catalog(custom_root=Path("missing-library")) if s.song_id == "epic-montage-1")
+    plan = build_montage_segment_plan(220, song, required_ranges=[(50, 53), (58, 61)])
+    protected = [segment for segment in plan if segment.protected]
+    assert [(segment.source_start, segment.source_duration) for segment in protected] == [(45, 21)]
+
+
+def test_required_cut_buffers_do_not_merge_across_source_clips():
+    song = next(s for s in load_song_catalog(custom_root=Path("missing-library")) if s.song_id == "epic-montage-1")
+    plan = build_montage_segment_plan(
+        220, song, required_ranges=[(105, 108), (112, 115)], source_boundaries=[110],
+    )
+    protected = [segment for segment in plan if segment.protected]
+    assert [(segment.source_start, segment.source_duration) for segment in protected] == [(100, 10), (110, 10)]
 
 
 def test_infeasible_required_and_excluded_constraints_are_rejected():
