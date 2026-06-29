@@ -24,6 +24,34 @@ Run tests with:
 .\.venv\Scripts\python -m pytest
 ```
 
+## Windows standalone build
+
+The release build compiles the Python modules with Nuitka, bundles Qt, the app
+assets, FFmpeg, and FFprobe, then creates a per-user installer with Inno Setup.
+End users do not need Python or FFmpeg installed.
+
+Build requirements are Python 3.12, FFmpeg/FFprobe on `PATH`, and Inno Setup 6.
+From PowerShell:
+
+```powershell
+.\packaging\build_windows.ps1 -Version 0.1.0
+```
+
+If the project drive has limited free space, place the compiler workspace and
+installer output on another drive:
+
+```powershell
+.\packaging\build_windows.ps1 -WorkRoot D:\E2DM2-build -OutputRoot D:\E2DM2-release
+```
+
+The standalone application folder is written below `build\windows`; the final
+installer is `dist\E2DM2-Setup-0.1.0.exe`. The distribution contains compiled
+application code rather than the original `.py` files. As with any desktop
+software delivered to a customer-controlled computer, compilation raises the
+reverse-engineering barrier but cannot provide absolute source-code secrecy.
+When the repository path contains non-ASCII characters, the script automatically
+uses the compiler-safe temporary path `C:\E2DM2-build`.
+
 ## Footage Marking
 
 Select an imported clip and choose **Preview / Edit**, or double-click the clip. Drag on the full-video timeline with the red tool to exclude footage or the green tool to require an uncut segment. Required ranges are limited to 20 seconds. Saved markings are restored with the project and are enforced by every production workflow.

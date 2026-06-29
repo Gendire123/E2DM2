@@ -7,10 +7,12 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QMessageBox
 
 from .logging_setup import configure_logging
+from .runtime import configure_bundled_tools
 from .ui import AppSplashScreen, MainWindow, create_application, splash_screen_enabled
 
 
 def main() -> int:
+    configure_bundled_tools()
     configure_logging()
     app = create_application()
     if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):

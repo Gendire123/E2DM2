@@ -16,6 +16,11 @@ dev = [
     "pytest>=8.3",
     "pytest-qt>=4.4",
 ]
+build = [
+    "Nuitka>=2.7,<3",
+    "ordered-set>=4.1",
+    "zstandard>=0.23",
+]
 
 [project.scripts]
 e2dm2 = "e2dm2.__main__:main"
@@ -30,4 +35,3 @@ e2dm2 = ["assets/**/*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
-
