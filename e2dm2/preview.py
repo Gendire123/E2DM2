@@ -1319,8 +1319,13 @@ class ClipPreviewDialog(QWidget):
         if not self._hover_warming:
             return
         self._hover_warming = False
-        self.player.pause()
-        self.audio.setMuted(False)
+        try:
+            self.player.pause()
+            self.audio.setMuted(False)
+        except RuntimeError:
+            # A queued frame callback can arrive while the preview dialog is
+            # being destroyed and its multimedia children are already gone.
+            return
         self.apply_pending_hover()
         # Repeating the paused seek after the state transition makes WMF render
         # the requested frame instead of leaving its initial frame on screen.
@@ -1330,7 +1335,10 @@ class ClipPreviewDialog(QWidget):
         if self._pending_hover_position is None:
             return
         position = self._pending_hover_position
-        self.player.setPosition(position)
+        try:
+            self.player.setPosition(position)
+        except RuntimeError:
+            return
         self.position_changed(position)
 
     def playback_error(self, *_args) -> None:
@@ -1672,4 +1680,3 @@ class ClipPreviewDialog(QWidget):
             bottom_right.x() - top_left.x() + 2 * padding,
             bottom_right.y() - top_left.y() + 2 * padding
         )
-

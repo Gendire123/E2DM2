@@ -1014,9 +1014,36 @@ def test_splash_screen(qtbot):
     status = splash.findChild(QLabel, "splashStatus")
     assert status is not None
     assert status.text() == "Initializing workflows..."
+    assert splash.findChild(QLabel, "splashProBadge") is None
     
     # The splash screen should start visible
     assert splash.isVisible()
+
+
+def test_pro_splash_celebrates_license_owner(qtbot):
+    from e2dm2.ui import AppSplashScreen
+
+    class ProEntitlement:
+        is_pro = True
+
+    splash = AppSplashScreen(ProEntitlement())
+    qtbot.addWidget(splash)
+    splash.show()
+    qtbot.wait(10)
+
+    badge = splash.findChild(QLabel, "splashProBadge")
+    status = splash.findChild(QLabel, "splashStatus")
+
+    assert splash.findChild(QWidget, "splashCardPro") is not None
+    assert badge is not None and badge.text() == "PRO LICENSE OWNER"
+    assert splash.findChild(QLabel, "splashProMessage") is None
+    assert status is not None and status.text() == "Initializing your Pro workspace..."
+    assert splash.width() > 360
+    assert splash.height() > 390
+    screen_center = splash.screen().availableGeometry().center()
+    splash_center = splash.geometry().center()
+    assert abs(splash_center.x() - screen_center.x()) <= 1
+    assert abs(splash_center.y() - screen_center.y()) <= 1
 
 
 def test_sidebar_navigation_changes_workspace_pages(qtbot):

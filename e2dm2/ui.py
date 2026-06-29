@@ -3344,13 +3344,14 @@ class WorkspacePage(QWidget):
 
 
 class AppSplashScreen(QWidget):
-    def __init__(self) -> None:
+    def __init__(self, entitlement: LocalLicenseProvider | None = None) -> None:
         super().__init__()
+        self.is_pro = bool(entitlement and entitlement.is_pro)
         self.setWindowFlags(Qt.WindowType.SplashScreen | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
         container = QFrame()
-        container.setObjectName("splashCard")
+        container.setObjectName("splashCardPro" if self.is_pro else "splashCard")
 
         container_layout = QVBoxLayout(container)
         container_layout.setContentsMargins(30, 30, 30, 30)
@@ -3378,7 +3379,15 @@ class AppSplashScreen(QWidget):
         version_label.setObjectName("splashVersion")
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        status_label = QLabel("Initializing workflows...")
+        self.pro_badge = None
+        if self.is_pro:
+            self.pro_badge = QLabel("PRO LICENSE OWNER")
+            self.pro_badge.setObjectName("splashProBadge")
+            self.pro_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        status_label = QLabel(
+            "Initializing your Pro workspace..." if self.is_pro else "Initializing workflows..."
+        )
         status_label.setObjectName("splashStatus")
         status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -3387,6 +3396,8 @@ class AppSplashScreen(QWidget):
         copyright_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         container_layout.addWidget(self.logo_label)
+        if self.pro_badge is not None:
+            container_layout.addWidget(self.pro_badge, 0, Qt.AlignmentFlag.AlignCenter)
         container_layout.addWidget(version_label)
         container_layout.addWidget(status_label)
         container_layout.addSpacing(10)
@@ -3396,15 +3407,22 @@ class AppSplashScreen(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(container)
 
-        self.resize(360, 390)
+        self.resize(380 if self.is_pro else 360, 420 if self.is_pro else 390)
         self.center_on_screen()
 
     def center_on_screen(self) -> None:
-        screen = QGuiApplication.primaryScreen()
+        screen = QGuiApplication.screenAt(QCursor.pos()) or self.screen() or QGuiApplication.primaryScreen()
         if screen:
-            geo = self.frameGeometry()
-            geo.moveCenter(screen.availableGeometry().center())
-            self.move(geo.topLeft())
+            available = screen.availableGeometry()
+            self.move(
+                available.x() + (available.width() - self.width()) // 2,
+                available.y() + (available.height() - self.height()) // 2,
+            )
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        self.center_on_screen()
+        QTimer.singleShot(0, self.center_on_screen)
 
 
 class VisibleCheckBox(QCheckBox):
@@ -4578,8 +4596,23 @@ QFrame#splashCard {
     border: 2px solid #0E56AA;
     border-radius: 12px;
 }
-QFrame#splashCard QLabel {
+QFrame#splashCardPro {
+    background-color: #FFFFFF;
+    border: 3px solid #D2A93B;
+    border-radius: 12px;
+}
+QFrame#splashCard QLabel, QFrame#splashCardPro QLabel {
     background: transparent;
+}
+QLabel#splashProBadge {
+    background-color: #102A4C;
+    color: #F5D77A;
+    border: 1px solid #D2A93B;
+    border-radius: 13px;
+    padding: 5px 18px;
+    font-size: 9pt;
+    font-weight: 800;
+    letter-spacing: 1px;
 }
 QLabel#splashVersion {
     font-size: 11pt;

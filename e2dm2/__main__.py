@@ -6,6 +6,7 @@ import sys
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QMessageBox
 
+from .entitlements import LocalLicenseProvider
 from .logging_setup import configure_logging
 from .runtime import configure_bundled_tools
 from .ui import AppSplashScreen, MainWindow, create_application, splash_screen_enabled
@@ -19,11 +20,12 @@ def main() -> int:
         QMessageBox.critical(None, "FFmpeg required", "FFmpeg and FFprobe must be available through PATH.")
         return 1
 
+    entitlement = LocalLicenseProvider()
     if splash_screen_enabled():
-        splash = AppSplashScreen()
+        splash = AppSplashScreen(entitlement)
         splash.show()
         app.processEvents()
-        window = MainWindow()
+        window = MainWindow(entitlement)
 
         def start_app() -> None:
             splash.close()
@@ -31,7 +33,7 @@ def main() -> int:
 
         QTimer.singleShot(3000, start_app)
     else:
-        window = MainWindow()
+        window = MainWindow(entitlement)
         window.show_maximized_on_active_screen()
     return app.exec()
 
