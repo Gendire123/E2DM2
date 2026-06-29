@@ -89,6 +89,40 @@ class LicenseApiClient:
             raise LicenseActivationError("The license service did not return an activation receipt.")
         return result
 
+    def deactivate(self, activation_token: str, device_id: str) -> None:
+        payload = json.dumps(
+            {
+                "action": "deactivate",
+                "activation_token": activation_token,
+                "device_id": device_id,
+            }
+        ).encode("utf-8")
+        request = urllib.request.Request(
+            self.endpoint,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                result = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            try:
+                detail = json.loads(exc.read().decode("utf-8")).get("error")
+            except (ValueError, AttributeError):
+                detail = None
+            raise LicenseActivationError(
+                detail or "This copy could not be deactivated."
+            ) from exc
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            raise LicenseActivationError(
+                "E2DM2 could not reach the license service. Check your internet connection and try again."
+            ) from exc
+        except (ValueError, TypeError) as exc:
+            raise LicenseActivationError("The license service returned an invalid response.") from exc
+        if not isinstance(result, dict) or not result.get("deactivated"):
+            raise LicenseActivationError("The license service did not confirm deactivation.")
+
 
 class LocalLicenseProvider:
     """Persist the locally activated Pro state; validation happens at the API boundary."""
@@ -129,6 +163,16 @@ class LocalLicenseProvider:
         self.settings.setValue("license/pro_active", True)
         self.settings.setValue("license/code_hint", normalized[-3:])
         self.settings.setValue("license/activation_token", result["activation_token"])
+        self.settings.sync()
+
+    def deactivate(self) -> None:
+        token = str(self.settings.value("license/activation_token", "")).strip()
+        if not self.is_pro or not token:
+            raise LicenseActivationError("This copy does not have an active Pro license.")
+        self.api_client.deactivate(token, self.device_id())
+        self.settings.remove("license/pro_active")
+        self.settings.remove("license/code_hint")
+        self.settings.remove("license/activation_token")
         self.settings.sync()
 
 

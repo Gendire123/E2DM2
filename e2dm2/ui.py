@@ -2622,6 +2622,8 @@ class WorkspacePage(QWidget):
         if not has_source:
             self.source_export.setChecked(False)
             self.hd_export.setChecked(True)
+        if hasattr(self, "library_page") and self.library_page:
+            self.library_page.refresh_entitlements()
 
     def _on_source_export_clicked(self) -> None:
         if self.source_export.isChecked() and not self.entitlement.has_feature(SOURCE_RESOLUTION_FEATURE):
@@ -3647,7 +3649,9 @@ class MainWindow(QMainWindow):
     def open_admin_tools(self) -> None:
         if not admin_tools_enabled():
             return
-        AdminToolsDialog(self).exec()
+        dialog = AdminToolsDialog(self, self.entitlement)
+        dialog.license_deactivated.connect(self.workspace.refresh_entitlements)
+        dialog.exec()
 
 
 STYLESHEET = """

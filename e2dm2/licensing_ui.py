@@ -222,8 +222,15 @@ class ProLicenseDialog(QDialog):
 class AdminToolsDialog(QDialog):
     """Development-only client; all authorization remains in the Edge Function."""
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    license_deactivated = Signal()
+
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        license_provider: LocalLicenseProvider | None = None,
+    ) -> None:
         super().__init__(parent)
+        self.license_provider = license_provider
         self.setWindowTitle("Admin Tools — Development Only")
         self.setMinimumWidth(520)
         layout = QVBoxLayout(self)
@@ -242,11 +249,17 @@ class AdminToolsDialog(QDialog):
         self.issue_button = QPushButton("License bought")
         self.issue_button.setObjectName("primaryButton")
         self.issue_button.clicked.connect(self.issue_license)
+        self.deactivate_button = QPushButton("Deactivate this copy")
+        self.deactivate_button.setEnabled(
+            bool(self.license_provider and self.license_provider.is_pro)
+        )
+        self.deactivate_button.clicked.connect(self.deactivate_copy)
         close_button = QPushButton("Close")
         close_button.clicked.connect(self.reject)
 
         buttons = QHBoxLayout()
         buttons.addWidget(close_button)
+        buttons.addWidget(self.deactivate_button)
         buttons.addStretch(1)
         buttons.addWidget(self.issue_button)
         layout.addWidget(warning)
@@ -294,3 +307,30 @@ class AdminToolsDialog(QDialog):
             self.email_edit.clear()
         finally:
             self.issue_button.setEnabled(True)
+
+    def deactivate_copy(self) -> None:
+        if not self.license_provider or not self.license_provider.is_pro:
+            self.status.setText("This copy does not have an active Pro license.")
+            self.deactivate_button.setEnabled(False)
+            return
+        answer = QMessageBox.question(
+            self,
+            "Deactivate E2DM2 Pro?",
+            "Deactivate Pro on this copy and release its activation slot?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.deactivate_button.setEnabled(False)
+        self.status.setText("Deactivating this copy…")
+        try:
+            self.license_provider.deactivate()
+        except LicenseActivationError as exc:
+            self.status.setText(f"Could not deactivate this copy: {exc}")
+            self.deactivate_button.setEnabled(True)
+            return
+        self.status.setText(
+            "This copy has been deactivated. The activation slot is available again."
+        )
+        self.license_deactivated.emit()

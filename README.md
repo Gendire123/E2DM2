@@ -69,3 +69,5 @@ Importing custom songs and exporting at source resolution require an activated P
 The desktop app calls the licensing Edge Functions in the configured E2DM2 Supabase project. `E2DM2_LICENSE_API_URL` can override the built-in production endpoint for staging. Database records, key generation, activation limits, and Resend delivery remain server-side. Setup and deployment details are in [supabase/README.md](supabase/README.md).
 
 Temporary **Admin Tools** are visible under **View** during development. Set `E2DM2_ENABLE_ADMIN_TOOLS=0` in a release build to remove the menu without changing licensing code. The client still needs a short-lived Supabase user token, and the server independently requires that user to be present in `license_admins`; no service-role or Resend secret is compiled into E2DM2.
+
+An activated installation can use **Deactivate this copy** in Admin Tools to remove its local Pro entitlement and securely release its server-side activation slot.

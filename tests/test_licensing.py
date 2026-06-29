@@ -4,6 +4,7 @@ from io import BytesIO
 from urllib.error import HTTPError
 
 from PySide6.QtCore import QSettings
+from PySide6.QtWidgets import QMessageBox
 
 from e2dm2.editor import SongEditorDialog
 from e2dm2.entitlements import (
@@ -31,6 +32,9 @@ class FakeLicenseApi:
     def activate(self, code: str, device_id: str) -> dict:
         self.calls.append((code, device_id))
         return {"valid": True, "activation_token": "server-token"}
+
+    def deactivate(self, token: str, device_id: str) -> None:
+        self.calls.append(("deactivate", token, device_id))
 
 
 class MutableEntitlement:
@@ -73,6 +77,21 @@ def test_local_license_rejects_malformed_code_without_network(tmp_path):
     else:
         raise AssertionError("Malformed key should not activate")
     assert api.calls == []
+
+
+def test_local_license_deactivation_releases_receipt_and_keeps_device_id(tmp_path):
+    settings = QSettings(str(tmp_path / "license.ini"), QSettings.Format.IniFormat)
+    api = FakeLicenseApi()
+    provider = LocalLicenseProvider(settings, api)
+    provider.activate("E43-SD2-DFD-QW2-FDQ")
+    device_id = provider.device_id()
+
+    provider.deactivate()
+
+    assert not provider.is_pro
+    assert not settings.contains("license/activation_token")
+    assert provider.device_id() == device_id
+    assert api.calls[-1] == ("deactivate", "server-token", device_id)
 
 
 def test_source_resolution_click_prompts_free_user(qtbot):
@@ -201,3 +220,25 @@ def test_admin_dialog_shows_safe_backend_error(qtbot, monkeypatch):
     dialog.issue_button.click()
 
     assert dialog.status.text() == "Could not issue license: Resend rejected the sender domain."
+
+
+def test_admin_dialog_can_deactivate_this_copy(qtbot, tmp_path, monkeypatch):
+    settings = QSettings(str(tmp_path / "license.ini"), QSettings.Format.IniFormat)
+    provider = LocalLicenseProvider(settings, FakeLicenseApi())
+    provider.activate("E43-SD2-DFD-QW2-FDQ")
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *_args, **_kwargs: QMessageBox.StandardButton.Yes,
+    )
+    dialog = AdminToolsDialog(license_provider=provider)
+    qtbot.addWidget(dialog)
+    deactivated = []
+    dialog.license_deactivated.connect(lambda: deactivated.append(True))
+
+    dialog.deactivate_button.click()
+
+    assert not provider.is_pro
+    assert not dialog.deactivate_button.isEnabled()
+    assert deactivated == [True]
+    assert "activation slot is available again" in dialog.status.text()
