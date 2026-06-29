@@ -172,6 +172,25 @@ def test_view_menu_contains_temporary_admin_tools(qtbot, monkeypatch):
     assert window.admin_tools_action.text() == "Admin Tools"
 
 
+def test_purchase_menu_actions_follow_live_license_state(qtbot, tmp_path):
+    settings = QSettings(str(tmp_path / "license.ini"), QSettings.Format.IniFormat)
+    provider = LocalLicenseProvider(settings, FakeLicenseApi())
+    window = MainWindow(provider)
+    qtbot.addWidget(window)
+
+    assert window.purchase_pro_action.isVisible()
+    assert window.enter_license_action.isVisible()
+    provider.activate("E43-SD2-DFD-QW2-FDQ")
+    window.license_activated()
+    assert not window.purchase_pro_action.isVisible()
+    assert not window.enter_license_action.isVisible()
+
+    provider.deactivate()
+    window.license_deactivated()
+    assert window.purchase_pro_action.isVisible()
+    assert window.enter_license_action.isVisible()
+
+
 def test_admin_license_bought_button_calls_protected_endpoint(qtbot, monkeypatch):
     class Response:
         def __enter__(self):

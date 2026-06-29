@@ -3408,7 +3408,7 @@ class OptionsDialog(QWidget):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self) -> None:
+    def __init__(self, entitlement: LocalLicenseProvider | None = None) -> None:
         super().__init__()
         self.setWindowTitle("Easy Epic Drone Movie Maker - E2DM2")
         self.setWindowIcon(QIcon(str(APP_ICON_PATH)))
@@ -3416,7 +3416,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1024, 700)
         self._centered_once = False
         self.options_page = None
-        self.entitlement = LocalLicenseProvider()
+        self.entitlement = entitlement if entitlement is not None else LocalLicenseProvider()
         self.stack = CompactPageStack()
         self.home = HomePage()
         self.workspace = WorkspacePage(self.entitlement, self.show_pro_license_prompt)
@@ -3437,7 +3437,7 @@ class MainWindow(QMainWindow):
         view_menu.addSeparator()
         self.options_action = view_menu.addAction("Options...")
         self.options_action.triggered.connect(self.open_options)
-        view_menu.addSeparator()
+        self.pro_menu_separator = view_menu.addSeparator()
         self.purchase_pro_action = view_menu.addAction("Purchase Pro License")
         self.purchase_pro_action.triggered.connect(open_purchase_page)
         self.enter_license_action = view_menu.addAction("Enter Pro License Code")
@@ -3447,6 +3447,7 @@ class MainWindow(QMainWindow):
             view_menu.addSeparator()
             self.admin_tools_action = view_menu.addAction("Admin Tools")
             self.admin_tools_action.triggered.connect(self.open_admin_tools)
+        self.refresh_license_menu()
         self.home.new_requested.connect(self.new_project)
         self.home.open_requested.connect(self.open_project)
         self.home.recent_requested.connect(lambda path: self.load_project_path(Path(path)))
@@ -3637,20 +3638,34 @@ class MainWindow(QMainWindow):
         if self.entitlement.is_pro:
             return True
         dialog = ProLicenseDialog(self.entitlement, self, feature_name=feature_name)
-        dialog.activated.connect(self.workspace.refresh_entitlements)
+        dialog.activated.connect(self.license_activated)
         dialog.exec()
         return self.entitlement.is_pro
 
     def show_license_entry(self) -> None:
         dialog = ProLicenseDialog(self.entitlement, self, enter_code_first=True)
-        dialog.activated.connect(self.workspace.refresh_entitlements)
+        dialog.activated.connect(self.license_activated)
         dialog.exec()
+
+    def refresh_license_menu(self) -> None:
+        show_purchase_actions = not self.entitlement.is_pro
+        self.pro_menu_separator.setVisible(show_purchase_actions)
+        self.purchase_pro_action.setVisible(show_purchase_actions)
+        self.enter_license_action.setVisible(show_purchase_actions)
+
+    def license_activated(self) -> None:
+        self.workspace.refresh_entitlements()
+        self.refresh_license_menu()
+
+    def license_deactivated(self) -> None:
+        self.workspace.refresh_entitlements()
+        self.refresh_license_menu()
 
     def open_admin_tools(self) -> None:
         if not admin_tools_enabled():
             return
         dialog = AdminToolsDialog(self, self.entitlement)
-        dialog.license_deactivated.connect(self.workspace.refresh_entitlements)
+        dialog.license_deactivated.connect(self.license_deactivated)
         dialog.exec()
 
 
