@@ -83,6 +83,14 @@ def workspace_onboarding_enabled(settings: QSettings | None = None) -> bool:
     return settings.value("startup/show_workspace_onboarding", True, type=bool)
 
 
+def preview_onboarding_enabled(settings: QSettings | None = None) -> bool:
+    """Check if the preview onboarding tour is enabled."""
+    if "pytest" in sys.modules or "unittest" in sys.modules:
+        return False
+    settings = settings or QSettings()
+    return settings.value("startup/show_preview_onboarding", True, type=bool)
+
+
 class WelcomeDialog(QDialog):
     """A beautiful welcome dialog shown on first startup before onboarding."""
 

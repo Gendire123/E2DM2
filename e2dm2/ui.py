@@ -2500,17 +2500,40 @@ class WorkspacePage(QWidget):
             QMessageBox.information(self, "Preview footage", "Select a clip to preview.")
             return
         media = self.project.settings.media[row]
-        dialog = ClipPreviewDialog(
+        
+        main_window = self.window()
+        self.preview_page = ClipPreviewDialog(
             media,
             str(media.resolve(self.project.path)),
-            self,
+            main_window,
             str(preview_proxy_path(self.project.path, media)),
         )
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.project.settings.schema_version = 2
-            save_project(self.project.path, self.project.settings)
-            self.refresh_media()
-            self.media_table.selectRow(row)
+        self.preview_page.accepted.connect(lambda: self.on_preview_accepted(row))
+        self.preview_page.rejected.connect(self.on_preview_rejected)
+        
+        main_window.stack.addWidget(self.preview_page)
+        main_window.stack.setCurrentWidget(self.preview_page)
+
+    def on_preview_accepted(self, row: int) -> None:
+        if not self.project:
+            return
+        self.project.settings.schema_version = 2
+        save_project(self.project.path, self.project.settings)
+        self.refresh_media()
+        self.media_table.selectRow(row)
+        self.cleanup_preview_page()
+
+    def on_preview_rejected(self) -> None:
+        self.cleanup_preview_page()
+
+    def cleanup_preview_page(self) -> None:
+        if hasattr(self, "preview_page") and self.preview_page:
+            self.preview_page.done(0)
+            main_window = self.window()
+            main_window.stack.setCurrentWidget(self)
+            main_window.stack.removeWidget(self.preview_page)
+            self.preview_page.deleteLater()
+            self.preview_page = None
 
     def move_selected(self, direction: int) -> None:
         if not self.project:

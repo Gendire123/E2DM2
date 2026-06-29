@@ -538,7 +538,16 @@ class AspectWidget(QWidget):
 
 
 
-class ClipPreviewDialog(QDialog):
+class ClipPreviewDialog(QWidget):
+    accepted = Signal()
+    rejected = Signal()
+
+    def accept(self) -> None:
+        self.accepted.emit()
+
+    def reject(self) -> None:
+        self.rejected.emit()
+
     def create_exclude_table_icon(self) -> QIcon:
         pixmap = QPixmap(64, 64)
         pixmap.fill(Qt.GlobalColor.transparent)
@@ -1536,4 +1545,131 @@ class ClipPreviewDialog(QDialog):
             self.proxy_partial_path.unlink(missing_ok=True)
         self.player.stop()
         self.video.setFullScreen(False)
-        super().done(result)
+
+    def showEvent(self, event) -> None:
+        from PySide6.QtGui import QShowEvent
+        super().showEvent(event)
+        if not getattr(self, "_onboarding_triggered", False):
+            self._onboarding_triggered = True
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(250, self.check_onboarding)
+
+    def resizeEvent(self, event) -> None:
+        from PySide6.QtGui import QResizeEvent
+        super().resizeEvent(event)
+        if hasattr(self, "onboarding_overlay") and self.onboarding_overlay:
+            self.onboarding_overlay.setGeometry(self.rect())
+        if hasattr(self, "video_placeholder") and self.video_placeholder and self.video_placeholder.isVisible():
+            self.video_placeholder.setGeometry(self.video.geometry())
+
+    def check_onboarding(self) -> None:
+        from .onboarding import preview_onboarding_enabled
+        if preview_onboarding_enabled():
+            self.show_onboarding()
+
+    def show_onboarding(self) -> None:
+        if hasattr(self, "onboarding_overlay") and self.onboarding_overlay and self.onboarding_overlay.isVisible():
+            return
+            
+        # Hide hardware-accelerated video widget to prevent Z-order occlusion issues on Windows.
+        # Show a matching dark QFrame placeholder in its place.
+        if not hasattr(self, "video_placeholder") or not self.video_placeholder:
+            self.video_placeholder = QFrame(self.video_container)
+            self.video_placeholder.setObjectName("videoPlaceholder")
+            self.video_placeholder.setStyleSheet("background-color: #1A1A1A; border-radius: 4px;")
+            self.video_placeholder.setGeometry(self.video.geometry())
+            
+        self.video_placeholder.setGeometry(self.video.geometry())
+        self.video_placeholder.show()
+        self.video.hide()
+
+        from .onboarding import OnboardingOverlay
+        if not hasattr(self, "onboarding_overlay") or not self.onboarding_overlay:
+            self.onboarding_overlay = OnboardingOverlay(self, self.get_onboarding_steps(), "startup/show_preview_onboarding")
+            self.onboarding_overlay.setGeometry(self.rect())
+            self.onboarding_overlay.finished.connect(self._on_onboarding_finished)
+        else:
+            self.onboarding_overlay.steps = self.get_onboarding_steps()
+        self.onboarding_overlay.show_onboarding()
+
+    def _on_onboarding_finished(self) -> None:
+        if hasattr(self, "video_placeholder") and self.video_placeholder:
+            self.video_placeholder.hide()
+        self.video.show()
+
+    def get_onboarding_steps(self) -> list[dict]:
+        from PySide6.QtCore import QRectF
+        steps = [
+            {
+                "target": lambda dialog: QRectF(0, 0, dialog.width(), dialog.height()),
+                "title": "Welcome to Preview & Edit",
+                "description": "This tool allows you to select which segments of your drone footage you want to keep or remove for the final production. Let's take a quick tour!"
+            }
+        ]
+        
+        # Only show proxy building step if a preview build is currently underway
+        # (i.e. not using a cached proxy)
+        if not (self.proxy_path is not None and preview_proxy_is_current(self.original_media_path, self.proxy_path)):
+            steps.append({
+                "target": lambda dialog: dialog._get_proxy_section_rect(),
+                "title": "Fast Low-Resolution Preview",
+                "description": "When you first open a clip, the app generates a low-resolution preview in the background to ensure playback and editing are completely smooth. This process runs only once per video file."
+            })
+            
+        steps.extend([
+            {
+                "target": lambda dialog: dialog._get_shortcuts_rect(),
+                "title": "Keyboard Shortcuts",
+                "description": "Quickly toggle tools using keyboard shortcuts: press 'E' for Exclude, 'R' for Required, and 'Delete' or 'Backspace' to remove a highlighted segment."
+            },
+            {
+                "target": lambda dialog: dialog.exclude_tool,
+                "title": "Exclude Tool",
+                "description": "Select this tool to mark segments of the video that you want to remove from your final movie production."
+            },
+            {
+                "target": lambda dialog: dialog.required_tool,
+                "title": "Required Tool",
+                "description": "Select this tool to mark segments that are absolutely essential to keep in your final movie production."
+            },
+            {
+                "target": lambda dialog: dialog.timeline,
+                "title": "Timeline Painter",
+                "description": "Use your mouse to draw on the timeline: left-click and drag to paint Exclude (red) or Required (green) segments. You can also click and drag existing segments to move them, or drag their left/right edges to adjust their start and end points."
+            },
+            {
+                "target": lambda dialog: dialog.selection_table,
+                "title": "Selected Segments List",
+                "description": "This table lists all the marked segments for the current clip. Double-click any row to jump directly to that point in the video, or select a row and press Delete to remove it."
+            }
+        ])
+        return steps
+
+    def _get_proxy_section_rect(self) -> QRectF:
+        from PySide6.QtCore import QPoint, QRectF
+        top_left = self.proxy_status.mapTo(self, QPoint(0, 0))
+        bottom_right = self.proxy_progress.mapTo(self, QPoint(self.proxy_progress.width(), self.proxy_progress.height()))
+        padding = 8
+        return QRectF(
+            top_left.x() - padding,
+            top_left.y() - padding,
+            bottom_right.x() - top_left.x() + 2 * padding,
+            bottom_right.y() - top_left.y() + 2 * padding
+        )
+
+    def _get_shortcuts_rect(self) -> QRectF:
+        from PySide6.QtCore import QPoint, QRectF
+        if not hasattr(self, "selection_mode_shortcuts") or not self.selection_mode_shortcuts:
+            return QRectF()
+        first = self.selection_mode_shortcuts[0]
+        last = self.selection_mode_shortcuts[-1]
+        top_left = first.mapTo(self, QPoint(0, 0))
+        bottom_right = last.mapTo(self, QPoint(last.width(), last.height()))
+        padding = 8
+        return QRectF(
+            top_left.x() - padding,
+            top_left.y() - padding,
+            bottom_right.x() - top_left.x() + 2 * padding,
+            bottom_right.y() - top_left.y() + 2 * padding
+        )
+

@@ -1427,6 +1427,100 @@ def test_workspace_onboarding_overlay(qtbot):
     settings.sync()
 
 
+def test_preview_onboarding_overlay(qtbot):
+    from e2dm2.onboarding import OnboardingOverlay, preview_onboarding_enabled
+    from e2dm2.preview import ClipPreviewDialog
+    from e2dm2.models import MediaItem
+    from PySide6.QtCore import QSettings
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    app.setApplicationName("E2DM2")
+    app.setOrganizationName("E2DM2")
+
+    settings = QSettings()
+    settings.setValue("startup/show_preview_onboarding", True)
+    settings.sync()
+
+    # Create dummy MediaItem
+    media = MediaItem("source/test.mp4", "test.mp4", 320, 180, 30, 30.0, "h264", 1)
+    
+    # Instantiate dialog
+    dialog = ClipPreviewDialog(media, "test.mp4")
+    qtbot.addWidget(dialog)
+    dialog.show()
+    QApplication.processEvents()
+
+    # Get onboarding steps
+    steps = dialog.get_onboarding_steps()
+    assert len(steps) == 7
+
+    # Create overlay
+    overlay = OnboardingOverlay(dialog, steps, "startup/show_preview_onboarding")
+    qtbot.addWidget(overlay)
+
+    # Show onboarding
+    overlay.show_onboarding()
+    QApplication.processEvents()
+    assert overlay.isVisible()
+    assert overlay.current_step == 0
+    assert overlay.popup.title_label.text() == "Welcome to Preview & Edit"
+
+    # Go to next step
+    overlay.next_step()
+    assert overlay.current_step == 1
+    assert overlay.popup.title_label.text() == "Fast Low-Resolution Preview"
+
+    overlay.next_step()
+    assert overlay.current_step == 2
+    assert overlay.popup.title_label.text() == "Keyboard Shortcuts"
+
+    # Verify opt-out updates settings
+    assert not overlay.popup.opt_out_cb.isChecked()
+    overlay.popup.opt_out_cb.setChecked(True)
+    assert settings.value("startup/show_preview_onboarding", True, type=bool) is False
+
+    # Reset settings
+    settings.setValue("startup/show_preview_onboarding", True)
+    settings.sync()
+    dialog.close()
+
+
+def test_preview_onboarding_overlay_cached(qtbot, tmp_path):
+    from e2dm2.onboarding import OnboardingOverlay
+    from e2dm2.preview import ClipPreviewDialog
+    from e2dm2.models import MediaItem
+    from PySide6.QtCore import QSettings
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    settings = QSettings()
+    settings.setValue("startup/show_preview_onboarding", True)
+    settings.sync()
+
+    # Create dummy media and mock proxy files
+    media = MediaItem("source/test.mp4", "test.mp4", 320, 180, 30, 30.0, "h264", 1)
+    source_file = tmp_path / "test.mp4"
+    source_file.write_text("mock content")
+    proxy_file = tmp_path / "test.proxy.mp4"
+    proxy_file.write_text("mock proxy content")
+
+    # Instantiate dialog with existing proxy
+    dialog = ClipPreviewDialog(media, str(source_file), proxy_path=str(proxy_file))
+    qtbot.addWidget(dialog)
+
+    # Get onboarding steps (since proxy is current, it should skip the proxy step)
+    steps = dialog.get_onboarding_steps()
+    assert len(steps) == 6 # Skipped "Fast Low-Resolution Preview"
+    
+    # Step 1 should be shortcuts instead of proxy
+    assert steps[1]["title"] == "Keyboard Shortcuts"
+
+    dialog.close()
+
+
+
+
 
 
 
