@@ -1345,27 +1345,51 @@ def test_welcome_dialog(qtbot):
     app.setOrganizationName("E2DM2")
 
     settings = QSettings()
+    
+    # 1. Test Accept (Take the Tour) with welcome checkbox checked (only welcome screen disabled)
     settings.setValue("startup/show_welcome_modal", True)
+    settings.setValue("startup/show_onboarding", True)
+    settings.setValue("startup/show_workspace_onboarding", True)
+    settings.setValue("startup/show_preview_onboarding", True)
+    settings.setValue("startup/show_soundtrack_onboarding", True)
+    settings.setValue("startup/show_library_onboarding", True)
+    settings.setValue("startup/show_produce_onboarding", True)
     settings.sync()
 
-    # Instantiate dialog
     dialog = WelcomeDialog()
     qtbot.addWidget(dialog)
-
-    # Initially opt_out is unchecked
-    assert not dialog.opt_out_cb.isChecked()
-
-    # Check it
     dialog.opt_out_cb.setChecked(True)
-    
-    # Save settings check on reject
-    dialog.reject()
-    
-    # Check that settings are updated
+    dialog.accept()
+
     assert settings.value("startup/show_welcome_modal", True, type=bool) is False
+    assert settings.value("startup/show_onboarding", True, type=bool) is True
+    assert settings.value("startup/show_workspace_onboarding", True, type=bool) is True
+    assert settings.value("startup/show_preview_onboarding", True, type=bool) is True
+    assert settings.value("startup/show_soundtrack_onboarding", True, type=bool) is True
+    assert settings.value("startup/show_library_onboarding", True, type=bool) is True
+    assert settings.value("startup/show_produce_onboarding", True, type=bool) is True
+
+    # 2. Test Reject (Explore on My Own) - Disables all onboarding
+    dialog2 = WelcomeDialog()
+    qtbot.addWidget(dialog2)
+    dialog2.reject()
+
+    assert settings.value("startup/show_welcome_modal", True, type=bool) is False
+    assert settings.value("startup/show_onboarding", True, type=bool) is False
+    assert settings.value("startup/show_workspace_onboarding", True, type=bool) is False
+    assert settings.value("startup/show_preview_onboarding", True, type=bool) is False
+    assert settings.value("startup/show_soundtrack_onboarding", True, type=bool) is False
+    assert settings.value("startup/show_library_onboarding", True, type=bool) is False
+    assert settings.value("startup/show_produce_onboarding", True, type=bool) is False
 
     # Restore settings
     settings.setValue("startup/show_welcome_modal", True)
+    settings.setValue("startup/show_onboarding", True)
+    settings.setValue("startup/show_workspace_onboarding", True)
+    settings.setValue("startup/show_preview_onboarding", True)
+    settings.setValue("startup/show_soundtrack_onboarding", True)
+    settings.setValue("startup/show_library_onboarding", True)
+    settings.setValue("startup/show_produce_onboarding", True)
     settings.sync()
 
 
@@ -1679,6 +1703,85 @@ def test_preview_onboarding_overlay_cached(qtbot, tmp_path):
     assert steps[1]["title"] == "Keyboard Shortcuts"
 
     dialog.close()
+
+
+def test_options_onboarding_reset(qtbot):
+    from e2dm2.ui import OptionsDialog
+    from PySide6.QtCore import QSettings
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    settings = QSettings()
+    
+    # Disable onboarding features
+    settings.setValue("startup/show_welcome_modal", False)
+    settings.setValue("startup/show_onboarding", False)
+    settings.setValue("startup/show_workspace_onboarding", False)
+    settings.setValue("startup/show_preview_onboarding", False)
+    settings.setValue("startup/show_soundtrack_onboarding", False)
+    settings.setValue("startup/show_library_onboarding", False)
+    settings.setValue("startup/show_produce_onboarding", False)
+    settings.sync()
+
+    dialog = OptionsDialog(settings=settings)
+    qtbot.addWidget(dialog)
+    dialog.show()
+    QApplication.processEvents()
+
+    # Assert checkbox is unchecked initially since startup/show_welcome_modal is False
+    assert dialog.welcome_checkbox.isChecked() is False
+
+    # Trigger reset button click programmatically
+    # We mock QMessageBox.information to not block the test
+    from unittest.mock import patch
+    with patch("PySide6.QtWidgets.QMessageBox.information") as mock_info:
+        dialog.reset_onboarding_btn.click()
+        mock_info.assert_called_once()
+
+    # Verify welcome_checkbox is now checked
+    assert dialog.welcome_checkbox.isChecked() is True
+
+    # Verify all onboarding keys have been restored to True
+    assert settings.value("startup/show_welcome_modal", False, type=bool) is True
+    assert settings.value("startup/show_onboarding", False, type=bool) is True
+    assert settings.value("startup/show_workspace_onboarding", False, type=bool) is True
+    assert settings.value("startup/show_preview_onboarding", False, type=bool) is True
+    assert settings.value("startup/show_soundtrack_onboarding", False, type=bool) is True
+    assert settings.value("startup/show_library_onboarding", False, type=bool) is True
+    assert settings.value("startup/show_produce_onboarding", False, type=bool) is True
+
+    # Test toggling the welcome checkbox manually
+    dialog.welcome_checkbox.setChecked(False)
+    assert settings.value("startup/show_welcome_modal", True, type=bool) is False
+
+    dialog.close()
+
+
+def test_mainwindow_open_close_options(qtbot):
+    from e2dm2.ui import MainWindow
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    QApplication.processEvents()
+
+    # Initial state
+    assert window.options_page is None
+
+    # Open options
+    window.open_options()
+    assert window.options_page is not None
+    assert window.stack.currentWidget() == window.options_page
+
+    # Close options
+    window.options_page.close_options()
+    QApplication.processEvents()
+    assert window.options_page is None
+    assert window.stack.currentWidget() == window.home
+
+    window.close()
 
 
 

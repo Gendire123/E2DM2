@@ -1175,7 +1175,7 @@ class WorkspacePage(QWidget):
         self.settings_button = QPushButton("  Settings")
         self.settings_button.setObjectName("sidebarSettings")
         self.settings_button.setIcon(QIcon(str(Path(__file__).parent / "assets" / "icons" / "settings.svg")))
-        self.settings_button.clicked.connect(lambda: OptionsDialog(self).exec())
+        self.settings_button.clicked.connect(lambda: self.window().open_options())
 
         self.back_button = QPushButton("  Back to projects")
         self.back_button.setObjectName("sidebarBack")
@@ -3049,12 +3049,13 @@ class VisibleCheckBox(QCheckBox):
             painter.drawLine(QPointF(x + width * 0.43, y + height * 0.72), QPointF(x + width * 0.78, y + height * 0.30))
 
 
-class OptionsDialog(QDialog):
+class OptionsDialog(QWidget):
+    closed = Signal()
+
     def __init__(self, parent: QWidget | None = None, settings: QSettings | None = None) -> None:
         super().__init__(parent)
         self.settings = settings or QSettings()
         self.setWindowTitle("Options")
-        self.setModal(True)
         self.setMinimumWidth(520)
 
         title = QLabel("Options")
@@ -3097,6 +3098,23 @@ class OptionsDialog(QDialog):
         card_layout.addSpacing(4)
         card_layout.addWidget(self.splash_checkbox)
 
+        card_layout.addSpacing(12)
+
+        welcome_title = QLabel("Welcome screen")
+        welcome_title.setObjectName("optionTitle")
+        welcome_desc = QLabel("Show the welcome dialog and tour selection on application startup.")
+        welcome_desc.setObjectName("optionDescription")
+        welcome_desc.setWordWrap(True)
+        self.welcome_checkbox = VisibleCheckBox("Show welcome screen on startup")
+        self.welcome_checkbox.setObjectName("welcomeScreenOption")
+        self.welcome_checkbox.setChecked(self.settings.value("startup/show_welcome_modal", True, type=bool))
+        self.welcome_checkbox.toggled.connect(self._save_welcome_preference)
+
+        card_layout.addWidget(welcome_title)
+        card_layout.addWidget(welcome_desc)
+        card_layout.addSpacing(4)
+        card_layout.addWidget(self.welcome_checkbox)
+
         card_layout.addSpacing(16)
         
         output_section = QLabel("OUTPUT")
@@ -3132,6 +3150,44 @@ class OptionsDialog(QDialog):
         card_layout.addWidget(output_desc)
         card_layout.addSpacing(4)
         card_layout.addLayout(output_row)
+
+        card_layout.addSpacing(16)
+        
+        onboarding_section = QLabel("ONBOARDING")
+        onboarding_section.setObjectName("optionsSection")
+        onboarding_title = QLabel("Reset tutorials")
+        onboarding_title.setObjectName("optionTitle")
+        onboarding_desc = QLabel("Re-enable all welcome screens, workspace tours, and editing walkthroughs.")
+        onboarding_desc.setObjectName("optionDescription")
+        onboarding_desc.setWordWrap(True)
+        
+        self.reset_onboarding_btn = QPushButton("Reset Onboarding Tutorials")
+        self.reset_onboarding_btn.setObjectName("resetOnboardingOption")
+        self.reset_onboarding_btn.clicked.connect(self._reset_onboarding_preferences)
+        self.reset_onboarding_btn.setMinimumHeight(32)
+        self.reset_onboarding_btn.setStyleSheet("""
+            QPushButton#resetOnboardingOption {
+                background: #F1F5F9;
+                color: #0F172A;
+                border: 1px solid #E2E8F0;
+                border-radius: 8px;
+                padding: 6px 16px;
+                font-weight: bold;
+            }
+            QPushButton#resetOnboardingOption:hover {
+                background: #E2E8F0;
+            }
+        """)
+
+        card_layout.addWidget(onboarding_section)
+        card_layout.addWidget(onboarding_title)
+        card_layout.addWidget(onboarding_desc)
+        card_layout.addSpacing(4)
+        
+        reset_row = QHBoxLayout()
+        reset_row.addWidget(self.reset_onboarding_btn)
+        reset_row.addStretch()
+        card_layout.addLayout(reset_row)
 
         general_layout.addWidget(card)
         self.tab_widget.addTab(general_tab, "General")
@@ -3239,8 +3295,14 @@ class OptionsDialog(QDialog):
         hint.setObjectName("optionsHint")
         hint.setWordWrap(True)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        buttons.rejected.connect(self.reject)
+        close_btn = QPushButton("Close")
+        close_btn.setObjectName("primaryButton")
+        close_btn.setFixedWidth(140)
+        close_btn.clicked.connect(self.close_options)
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        button_layout.addWidget(close_btn)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 22, 24, 20)
@@ -3249,10 +3311,17 @@ class OptionsDialog(QDialog):
         layout.addWidget(subtitle)
         layout.addWidget(self.tab_widget)
         layout.addWidget(hint)
-        layout.addWidget(buttons)
+        layout.addLayout(button_layout)
+
+    def close_options(self) -> None:
+        self.closed.emit()
 
     def _save_splash_preference(self, enabled: bool) -> None:
         self.settings.setValue(SHOW_SPLASH_SETTING, enabled)
+        self.settings.sync()
+
+    def _save_welcome_preference(self, enabled: bool) -> None:
+        self.settings.setValue("startup/show_welcome_modal", enabled)
         self.settings.sync()
 
     def _browse_output_folder(self) -> None:
@@ -3281,6 +3350,22 @@ class OptionsDialog(QDialog):
         self.settings.setValue("hardware_acceleration", self.hw_accel_checkbox.isChecked())
         self.settings.sync()
 
+    def _reset_onboarding_preferences(self) -> None:
+        self.settings.setValue("startup/show_welcome_modal", True)
+        self.settings.setValue("startup/show_onboarding", True)
+        self.settings.setValue("startup/show_workspace_onboarding", True)
+        self.settings.setValue("startup/show_preview_onboarding", True)
+        self.settings.setValue("startup/show_soundtrack_onboarding", True)
+        self.settings.setValue("startup/show_library_onboarding", True)
+        self.settings.setValue("startup/show_produce_onboarding", True)
+        self.settings.sync()
+        self.welcome_checkbox.setChecked(True)
+        QMessageBox.information(
+            self,
+            "Onboarding Reset",
+            "All onboarding tutorials and walkthroughs have been re-enabled.",
+        )
+
 
 
 class MainWindow(QMainWindow):
@@ -3291,6 +3376,7 @@ class MainWindow(QMainWindow):
         self.resize(1180, 820)
         self.setMinimumSize(1024, 700)
         self._centered_once = False
+        self.options_page = None
         self.stack = CompactPageStack()
         self.home = HomePage()
         self.workspace = WorkspacePage()
@@ -3331,7 +3417,20 @@ class MainWindow(QMainWindow):
         self.show_home()
 
     def open_options(self) -> None:
-        OptionsDialog(self).exec()
+        if hasattr(self, "options_page") and self.options_page:
+            return
+        self.options_page = OptionsDialog(self)
+        self.options_page.closed.connect(self.close_options)
+        self.stack.addWidget(self.options_page)
+        self.prev_stacked_widget = self.stack.currentWidget()
+        self.stack.setCurrentWidget(self.options_page)
+
+    def close_options(self) -> None:
+        if hasattr(self, "options_page") and self.options_page:
+            self.stack.setCurrentWidget(self.prev_stacked_widget)
+            self.stack.removeWidget(self.options_page)
+            self.options_page.deleteLater()
+            self.options_page = None
 
     def show_home(self) -> None:
         self.home.refresh()

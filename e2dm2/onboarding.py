@@ -291,7 +291,15 @@ class WelcomeDialog(QDialog):
         super().accept()
 
     def reject(self) -> None:
-        self.save_settings()
+        settings = QSettings()
+        settings.setValue("startup/show_welcome_modal", False)
+        settings.setValue("startup/show_onboarding", False)
+        settings.setValue("startup/show_workspace_onboarding", False)
+        settings.setValue("startup/show_preview_onboarding", False)
+        settings.setValue("startup/show_soundtrack_onboarding", False)
+        settings.setValue("startup/show_library_onboarding", False)
+        settings.setValue("startup/show_produce_onboarding", False)
+        settings.sync()
         super().reject()
 
 
