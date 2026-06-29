@@ -3780,13 +3780,13 @@ class OptionsDialog(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self, entitlement: LocalLicenseProvider | None = None) -> None:
         super().__init__()
-        self.setWindowTitle("Easy Epic Drone Movie Maker - E2DM2")
         self.setWindowIcon(QIcon(str(APP_ICON_PATH)))
         self.resize(1180, 820)
         self.setMinimumSize(1024, 700)
         self._centered_once = False
         self.options_page = None
         self.entitlement = entitlement if entitlement is not None else LocalLicenseProvider()
+        self.refresh_application_title()
         self.stack = CompactPageStack()
         self.home = HomePage()
         self.workspace = WorkspacePage(self.entitlement, self.show_pro_license_prompt)
@@ -4026,10 +4026,18 @@ class MainWindow(QMainWindow):
     def license_activated(self) -> None:
         self.workspace.refresh_entitlements()
         self.refresh_license_menu()
+        self.refresh_application_title()
 
     def license_deactivated(self) -> None:
         self.workspace.refresh_entitlements()
         self.refresh_license_menu()
+        self.refresh_application_title()
+
+    def refresh_application_title(self) -> None:
+        title = "Easy Epic Drone Movie Maker - E2DM2"
+        if self.entitlement.is_pro:
+            title += " - Pro"
+        self.setWindowTitle(title)
 
     def open_admin_tools(self) -> None:
         if not admin_tools_enabled():

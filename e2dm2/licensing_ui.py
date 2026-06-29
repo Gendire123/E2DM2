@@ -5,10 +5,23 @@ import os
 import urllib.error
 import urllib.request
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QEasingCurve, QPointF, QPropertyAnimation, QRectF, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import (
+    QColor,
+    QCursor,
+    QDesktopServices,
+    QGuiApplication,
+    QLinearGradient,
+    QPainter,
+    QPen,
+    QPixmap,
+    QPolygonF,
+    QShowEvent,
+)
 from PySide6.QtWidgets import (
     QDialog,
+    QFrame,
+    QGraphicsDropShadowEffect,
     QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
@@ -34,6 +47,45 @@ ADMIN_TOOLS_ENV = "E2DM2_ENABLE_ADMIN_TOOLS"
 ADMIN_API_ENV = "E2DM2_LICENSE_ADMIN_URL"
 ADMIN_TOKEN_ENV = "E2DM2_ADMIN_ACCESS_TOKEN"
 DEFAULT_ADMIN_API_URL = f"{SUPABASE_PROJECT_URL}/functions/v1/license-admin"
+
+
+def _pro_shield_pixmap(size: int = 68) -> QPixmap:
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+    painter.setPen(QPen(QColor("#B9DDF6"), 1.5))
+    painter.setBrush(QColor("#EAF6FF"))
+    painter.drawEllipse(QRectF(2, 2, size - 4, size - 4))
+
+    scale = size / 68
+    shield = QPolygonF([
+        QPointF(34 * scale, 11 * scale),
+        QPointF(54 * scale, 19 * scale),
+        QPointF(51 * scale, 43 * scale),
+        QPointF(34 * scale, 57 * scale),
+        QPointF(17 * scale, 43 * scale),
+        QPointF(14 * scale, 19 * scale),
+    ])
+    gradient = QLinearGradient(18 * scale, 14 * scale, 50 * scale, 54 * scale)
+    gradient.setColorAt(0, QColor("#39A6F4"))
+    gradient.setColorAt(1, QColor("#0759C7"))
+    painter.setPen(QPen(QColor("#0873D5"), 1.5))
+    painter.setBrush(gradient)
+    painter.drawPolygon(shield)
+
+    check_pen = QPen(QColor("#FFFFFF"), 4 * scale)
+    check_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    check_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    painter.setPen(check_pen)
+    painter.drawPolyline(QPolygonF([
+        QPointF(25 * scale, 33 * scale),
+        QPointF(32 * scale, 40 * scale),
+        QPointF(44 * scale, 26 * scale),
+    ]))
+    painter.end()
+    return pixmap
 
 
 def open_purchase_page() -> bool:
@@ -71,6 +123,7 @@ class ProLicenseDialog(QDialog):
         self.pages.setObjectName("proLicensePages")
         self.info_page = self._build_info_page()
         self.code_page = self._build_code_page()
+        self.success_page: QWidget | None = None
         self.pages.addWidget(self.info_page)
         self.pages.addWidget(self.code_page)
 
@@ -79,6 +132,24 @@ class ProLicenseDialog(QDialog):
         layout.addWidget(self.pages)
         if enter_code_first:
             self.pages.setCurrentWidget(self.code_page)
+        self.resize(520, 310 if enter_code_first else 250)
+
+    def _center_on_screen(self) -> None:
+        parent = self.parentWidget()
+        screen = (
+            parent.screen() if parent is not None else None
+        ) or QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
+        if screen is None:
+            return
+        available = screen.availableGeometry()
+        frame = self.frameGeometry()
+        frame.moveCenter(available.center())
+        self.move(frame.topLeft())
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        self._center_on_screen()
+        QTimer.singleShot(0, self._center_on_screen)
 
     def _build_info_page(self) -> QWidget:
         page = QWidget()
@@ -140,8 +211,6 @@ class ProLicenseDialog(QDialog):
         self.code_error.setStyleSheet("color: #B42318;")
         self.code_error.setWordWrap(True)
 
-        back_button = QPushButton("Back")
-        back_button.clicked.connect(lambda: self._switch_page(self.info_page))
         close_button = QPushButton("Close")
         close_button.clicked.connect(self.reject)
         self.activate_button = QPushButton("Activate Pro")
@@ -149,7 +218,6 @@ class ProLicenseDialog(QDialog):
         self.activate_button.clicked.connect(self.activate)
 
         buttons = QHBoxLayout()
-        buttons.addWidget(back_button)
         buttons.addWidget(close_button)
         buttons.addStretch(1)
         buttons.addWidget(self.activate_button)
@@ -160,6 +228,110 @@ class ProLicenseDialog(QDialog):
         layout.addWidget(self.code_error)
         layout.addStretch(1)
         layout.addLayout(buttons)
+        return page
+
+    def _build_success_page(self) -> QWidget:
+        page = QWidget()
+        page.setObjectName("licenseSuccessPage")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(14)
+
+        verification_card = QFrame()
+        verification_card.setObjectName("licenseVerificationCard")
+        verification_card.setFixedSize(360, 108)
+        verification_card.setStyleSheet(
+            "QFrame#licenseVerificationCard { background: #F8FBFF; border: 1px solid #BFD8EE; "
+            "border-radius: 12px; }"
+        )
+        card_shadow = QGraphicsDropShadowEffect(verification_card)
+        card_shadow.setBlurRadius(22)
+        card_shadow.setOffset(0, 5)
+        card_shadow.setColor(QColor(16, 55, 94, 65))
+        verification_card.setGraphicsEffect(card_shadow)
+
+        verification_layout = QHBoxLayout(verification_card)
+        verification_layout.setContentsMargins(22, 15, 22, 15)
+        verification_layout.setSpacing(17)
+        shield = QLabel()
+        shield.setObjectName("licenseVerificationShield")
+        shield.setFixedSize(72, 72)
+        shield.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        shield.setPixmap(_pro_shield_pixmap())
+
+        verification_copy = QVBoxLayout()
+        verification_copy.setSpacing(5)
+        verification_copy.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        verification_title = QLabel("Pro License Active")
+        verification_title.setObjectName("licenseVerificationTitle")
+        verification_title.setStyleSheet("font-size: 13pt; font-weight: 750; color: #142033;")
+        verification_detail = QLabel("You're a verified E2DM2 Pro owner.")
+        verification_detail.setObjectName("licenseVerificationDetail")
+        verification_detail.setStyleSheet("font-size: 9.5pt; color: #526173;")
+        verification_copy.addWidget(verification_title)
+        verification_copy.addWidget(verification_detail)
+        verification_layout.addWidget(shield)
+        verification_layout.addLayout(verification_copy, 1)
+
+        title = QLabel("Welcome to E2DM2 Pro")
+        title.setObjectName("licenseSuccessTitle")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("font-size: 20pt; font-weight: 750; color: #142033;")
+
+        description = QLabel(
+            "Thanks for choosing E2DM2. Your Pro license is active, and these creative tools are now unlocked:"
+        )
+        description.setObjectName("licenseSuccessDescription")
+        description.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        description.setWordWrap(True)
+        description.setStyleSheet("font-size: 10.5pt; color: #526173;")
+
+        features = QFrame()
+        features.setObjectName("licenseSuccessFeatures")
+        features.setStyleSheet(
+            "QFrame#licenseSuccessFeatures { background: #F5F9FD; border: 1px solid #D6E4F0; "
+            "border-radius: 10px; }"
+        )
+        features_layout = QVBoxLayout(features)
+        features_layout.setContentsMargins(18, 14, 18, 14)
+        features_layout.setSpacing(12)
+        for feature_title, feature_description in (
+            ("Custom soundtracks", "Import your own songs and build videos around your music."),
+            ("Source-resolution rendering", "Export at your footage's original resolution for maximum detail."),
+            ("Advanced song presets", "Create and edit cut timing, transitions, and visual effects."),
+        ):
+            row = QHBoxLayout()
+            row.setSpacing(11)
+            icon = QLabel("✓")
+            icon.setFixedSize(24, 24)
+            icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            icon.setStyleSheet(
+                "background: #0E62B7; color: white; border-radius: 12px; font-size: 10pt; font-weight: 800;"
+            )
+            copy = QVBoxLayout()
+            copy.setSpacing(1)
+            feature_label = QLabel(feature_title)
+            feature_label.setStyleSheet("font-size: 10.5pt; font-weight: 700; color: #142033;")
+            feature_detail = QLabel(feature_description)
+            feature_detail.setWordWrap(True)
+            feature_detail.setStyleSheet("font-size: 9.5pt; color: #526173;")
+            copy.addWidget(feature_label)
+            copy.addWidget(feature_detail)
+            row.addWidget(icon, 0, Qt.AlignmentFlag.AlignTop)
+            row.addLayout(copy, 1)
+            features_layout.addLayout(row)
+
+        start_button = QPushButton("Start creating")
+        start_button.setObjectName("primaryButton")
+        start_button.setMinimumHeight(44)
+        start_button.clicked.connect(self.accept)
+
+        layout.addWidget(verification_card, 0, Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title)
+        layout.addWidget(description)
+        layout.addWidget(features)
+        layout.addSpacing(2)
+        layout.addWidget(start_button)
         return page
 
     def _format_code(self, value: str) -> None:
@@ -185,6 +357,7 @@ class ProLicenseDialog(QDialog):
 
         def show_target() -> None:
             self.pages.setCurrentWidget(target)
+            self.resize(max(self.width(), 520), 310 if target is self.code_page else 250)
             fade_in = QPropertyAnimation(effect, b"opacity", self)
             fade_in.setDuration(170)
             fade_in.setStartValue(0.0)
@@ -215,8 +388,15 @@ class ProLicenseDialog(QDialog):
             self.activate_button.setEnabled(True)
             return
         self.activated.emit()
-        QMessageBox.information(self, "E2DM2 Pro", "Your Pro license is now active.")
-        self.accept()
+        self.setWindowTitle("Welcome to E2DM2 Pro")
+        if self.success_page is None:
+            self.success_page = self._build_success_page()
+            self.pages.addWidget(self.success_page)
+        self.setMinimumSize(560, 570)
+        self.resize(560, 570)
+        self.pages.setCurrentWidget(self.success_page)
+        self._center_on_screen()
+        QTimer.singleShot(0, self._center_on_screen)
 
 
 class AdminToolsDialog(QDialog):

@@ -1532,6 +1532,12 @@ def test_welcome_dialog(qtbot):
 
     dialog = WelcomeDialog()
     qtbot.addWidget(dialog)
+    dialog.show()
+    qtbot.wait(10)
+    screen_center = dialog.screen().availableGeometry().center()
+    dialog_center = dialog.frameGeometry().center()
+    assert abs(dialog_center.x() - screen_center.x()) <= 1
+    assert abs(dialog_center.y() - screen_center.y()) <= 1
     dialog.opt_out_cb.setChecked(True)
     dialog.accept()
 

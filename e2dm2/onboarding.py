@@ -20,11 +20,14 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QColor,
+    QCursor,
+    QGuiApplication,
     QPainter,
     QPainterPath,
     QPen,
     QBrush,
     QPixmap,
+    QShowEvent,
 )
 from PySide6.QtWidgets import (
     QWidget,
@@ -280,6 +283,22 @@ class WelcomeDialog(QDialog):
         dialog_layout = QVBoxLayout(self)
         dialog_layout.setContentsMargins(20, 20, 20, 20)
         dialog_layout.addWidget(card)
+
+    def _center_on_screen(self) -> None:
+        parent = self.parentWidget()
+        screen = (
+            parent.screen() if parent is not None else None
+        ) or QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
+        if screen is None:
+            return
+        frame = self.frameGeometry()
+        frame.moveCenter(screen.availableGeometry().center())
+        self.move(frame.topLeft())
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        self._center_on_screen()
+        QTimer.singleShot(0, self._center_on_screen)
 
     def save_settings(self) -> None:
         settings = QSettings()

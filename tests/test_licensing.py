@@ -4,7 +4,7 @@ from io import BytesIO
 from urllib.error import HTTPError
 
 from PySide6.QtCore import QSettings
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QDialog, QLabel, QMessageBox, QPushButton
 
 from e2dm2.editor import SongEditorDialog
 from e2dm2.entitlements import (
@@ -153,6 +153,50 @@ def test_license_dialog_formats_pasted_code(qtbot, tmp_path):
 
     assert dialog.code_edit.text() == "E43-SD2-DFD-QW2-FDQ"
     assert dialog.pages.currentWidget() is dialog.code_page
+    assert dialog.height() <= 330
+
+
+def test_successful_activation_shows_branded_pro_summary(qtbot, tmp_path):
+    provider = LocalLicenseProvider(
+        QSettings(str(tmp_path / "license.ini"), QSettings.Format.IniFormat),
+        FakeLicenseApi(),
+    )
+    dialog = ProLicenseDialog(provider, enter_code_first=True)
+    qtbot.addWidget(dialog)
+    dialog.show()
+    activated = []
+    dialog.activated.connect(lambda: activated.append(True))
+    dialog.code_edit.setText("E43-SD2-DFD-QW2-FDQ")
+
+    dialog.activate()
+    qtbot.wait(10)
+
+    labels = [label.text() for label in dialog.success_page.findChildren(QLabel)]
+    assert provider.is_pro
+    assert activated == [True]
+    assert dialog.success_page is not None
+    assert dialog.pages.currentWidget() is dialog.success_page
+    assert dialog.success_page.findChild(QLabel, "licenseSuccessCheckmark") is None
+    assert dialog.success_page.findChild(QLabel, "licenseSuccessBadge") is None
+    assert dialog.success_page.findChild(QLabel, "licenseVerificationShield") is not None
+    assert "Pro License Active" in labels
+    assert "You're a verified E2DM2 Pro owner." in labels
+    assert "Welcome to E2DM2 Pro" in labels
+    assert "Custom soundtracks" in labels
+    assert "Source-resolution rendering" in labels
+    assert "Advanced song presets" in labels
+    assert not any("Your Pro license is now active" in text for text in labels)
+    screen_center = dialog.screen().availableGeometry().center()
+    dialog_center = dialog.frameGeometry().center()
+    assert abs(dialog_center.x() - screen_center.x()) <= 1
+    assert abs(dialog_center.y() - screen_center.y()) <= 1
+
+    start_button = next(
+        button for button in dialog.success_page.findChildren(QPushButton)
+        if button.text() == "Start creating"
+    )
+    start_button.click()
+    assert dialog.result() == QDialog.DialogCode.Accepted
 
 
 def test_admin_tools_are_visible_by_default_and_can_be_disabled(monkeypatch):
@@ -178,15 +222,18 @@ def test_purchase_menu_actions_follow_live_license_state(qtbot, tmp_path):
     window = MainWindow(provider)
     qtbot.addWidget(window)
 
+    assert window.windowTitle() == "Easy Epic Drone Movie Maker - E2DM2"
     assert window.purchase_pro_action.isVisible()
     assert window.enter_license_action.isVisible()
     provider.activate("E43-SD2-DFD-QW2-FDQ")
     window.license_activated()
+    assert window.windowTitle() == "Easy Epic Drone Movie Maker - E2DM2 - Pro"
     assert not window.purchase_pro_action.isVisible()
     assert not window.enter_license_action.isVisible()
 
     provider.deactivate()
     window.license_deactivated()
+    assert window.windowTitle() == "Easy Epic Drone Movie Maker - E2DM2"
     assert window.purchase_pro_action.isVisible()
     assert window.enter_license_action.isVisible()
 
