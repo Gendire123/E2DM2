@@ -207,14 +207,14 @@ def test_admin_tools_are_visible_by_default_and_can_be_disabled(monkeypatch):
     assert not admin_tools_enabled()
 
 
-def test_view_menu_shows_temporary_admin_tools(qtbot, monkeypatch):
+def test_view_menu_hides_temporary_admin_tools(qtbot, monkeypatch):
     monkeypatch.delenv(ADMIN_TOOLS_ENV, raising=False)
     window = MainWindow()
     qtbot.addWidget(window)
 
     assert window.admin_tools_action is not None
     assert window.admin_tools_action.text() == "Admin Tools"
-    assert window.admin_tools_action.isVisible()
+    assert not window.admin_tools_action.isVisible()
 
 
 def test_purchase_menu_actions_follow_live_license_state(qtbot, tmp_path):
