@@ -16,7 +16,12 @@
   "fade_out_seconds": 0.0,
   "escalation_seconds": 0.0,
   "cut_timestamps": [
-    0.0
+    0.0,
+    12.096427,
+    24.106749,
+    36.135251,
+    48.133583,
+    56.67645
   ],
   "transitions": {
     "duration_seconds": 0.25,
@@ -34,6 +39,11 @@
   "dark_cue": null,
   "flash_cue": null,
   "effects": [
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
     "none"
   ],
   "workflow": "real_estate",

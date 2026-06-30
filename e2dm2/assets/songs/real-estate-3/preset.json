@@ -16,7 +16,20 @@
   "fade_out_seconds": 0.0,
   "escalation_seconds": 0.0,
   "cut_timestamps": [
-    0.0
+    0.0,
+    11.435346,
+    22.723389,
+    33.895251,
+    45.141588,
+    56.274308,
+    67.471592,
+    73.140758,
+    78.728919,
+    90.112962,
+    101.462265,
+    112.796938,
+    124.1251,
+    132.724294
   ],
   "transitions": {
     "duration_seconds": 0.25,
@@ -34,6 +47,19 @@
   "dark_cue": null,
   "flash_cue": null,
   "effects": [
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
     "none"
   ],
   "workflow": "real_estate",

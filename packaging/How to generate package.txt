@@ -1,6 +1,6 @@
 Run from the project folder:
 
-.\packaging\build_windows.ps1 -Version 0.1.1
+.\packaging\build_windows.ps1 -Version 1.0.0
 
 
 This machine already has every prerequisite configured. The installer will appear in dist, and version 0.1.0 already exists at [E2DM2-Setup-0.1.0.exe](C:/Users/Félix/Desktop/Drone/dist/E2DM2-Setup-0.1.0.exe).
