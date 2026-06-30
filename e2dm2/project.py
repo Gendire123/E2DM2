@@ -10,10 +10,12 @@ from typing import Callable, Iterable
 
 from .catalog import default_project_root
 from .media import VIDEO_EXTENSIONS, probe_media
-from .models import CancellationToken, MediaItem, Project, ProjectSettings
+from .models import CancellationToken, MediaItem, Project, ProjectSettings, WorkflowMode
 
 
 LOGGER = logging.getLogger(__name__)
+LAST_RENDERED_SONG_FILE = "last-rendered-song.json"
+DEFAULT_SONG_ID = "epic-montage-1"
 
 
 def _now() -> str:
@@ -23,6 +25,33 @@ def _now() -> str:
 def slugify(value: str) -> str:
     slug = re.sub(r"[^A-Za-z0-9]+", "-", value).strip("-").lower()
     return slug or "drone-project"
+
+
+def remember_rendered_song(project_path: Path, workflow: WorkflowMode, song_id: str) -> None:
+    """Persist the soundtrack from a render that produced at least one output."""
+    state_path = project_path.parent / LAST_RENDERED_SONG_FILE
+    temporary = state_path.with_suffix(".json.partial")
+    temporary.write_text(json.dumps({
+        "schema_version": 1,
+        "workflow": WorkflowMode(workflow).value,
+        "song_id": song_id,
+    }, indent=2), encoding="utf-8")
+    temporary.replace(state_path)
+
+
+def last_rendered_song(root: Path) -> tuple[WorkflowMode, str] | None:
+    state_path = root / LAST_RENDERED_SONG_FILE
+    if not state_path.is_file():
+        return None
+    try:
+        data = json.loads(state_path.read_text(encoding="utf-8"))
+        song_id = str(data["song_id"]).strip()
+        if not song_id:
+            return None
+        return WorkflowMode(data["workflow"]), song_id
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+        LOGGER.warning("Ignoring invalid last rendered song state: %s", state_path)
+        return None
 
 
 def create_project(name: str, root: Path | None = None) -> Project:
@@ -38,6 +67,16 @@ def create_project(name: str, root: Path | None = None) -> Project:
         (project_path / folder).mkdir(parents=True, exist_ok=True)
     now = _now()
     settings = ProjectSettings(schema_version=2, name=name.strip() or "Drone Project", created_at=now, updated_at=now)
+    previous_song = last_rendered_song(root)
+    if previous_song:
+        workflow, song_id = previous_song
+        settings.workflow = workflow
+        if workflow == WorkflowMode.FULL_LENGTH:
+            settings.full_length_track_id = song_id
+        else:
+            settings.song_id = song_id
+    else:
+        settings.song_id = DEFAULT_SONG_ID
     save_project(project_path, settings)
     remember_project(project_path)
     LOGGER.info("Created project '%s' at %s", settings.name, project_path)

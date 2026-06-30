@@ -70,12 +70,20 @@ def test_generated_fixture_renders_with_cpu(tmp_path):
         "fixture", "320x180_30fps", [str(video)], 320, 180, 30, 1,
         ExportSize.SOURCE, str(destination), 1000, [],
     )
-    plan = RenderPlan(1, str(project), "Fixture", WorkflowMode.FULL_LENGTH, str(audio), None, "libx264", [output])
+    plan = RenderPlan(
+        1, str(project), "Fixture", WorkflowMode.FULL_LENGTH, str(audio), None,
+        "libx264", [output], "drone-music-3",
+    )
     events = []
     result = render(plan, events.append)
     assert result.successful_outputs
     assert destination.is_file()
     assert any(event.stage == "rendering" for event in events)
+    assert json.loads((tmp_path / "last-rendered-song.json").read_text(encoding="utf-8")) == {
+        "schema_version": 1,
+        "workflow": "full_length",
+        "song_id": "drone-music-3",
+    }
 
 
 def test_pre_cancelled_render_does_not_start_outputs(tmp_path):

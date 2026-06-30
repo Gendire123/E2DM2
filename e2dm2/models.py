@@ -329,6 +329,7 @@ class RenderPlan:
     song_manifest: dict[str, Any] | None
     encoder: str
     outputs: list[RenderOutputPlan]
+    soundtrack_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -354,6 +355,7 @@ class RenderPlan:
             song_manifest=data.get("song_manifest"),
             encoder=str(data["encoder"]),
             outputs=outputs,
+            soundtrack_id=data.get("soundtrack_id"),
         )
 
 

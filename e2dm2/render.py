@@ -220,6 +220,7 @@ def create_render_plan(
         song_manifest=song_data,
         encoder=encoder.codec,
         outputs=outputs,
+        soundtrack_id=request.song_id or request.full_length_track_id,
     )
     plan_path = project.path / "plans" / f"render-plan_{stamp}.json"
     temporary = plan_path.with_suffix(".json.partial")
@@ -545,4 +546,13 @@ def render(
         finally:
             concat.unlink(missing_ok=True)
             filter_path.unlink(missing_ok=True)
-    return RenderResult(results, cancelled=cancellation.cancelled)
+    result = RenderResult(results, cancelled=cancellation.cancelled)
+    if result.successful_outputs and plan.soundtrack_id:
+        try:
+            from .project import remember_rendered_song
+            remember_rendered_song(project_path, plan.workflow, plan.soundtrack_id)
+        except OSError:
+            # A completed video remains successful even if this convenience
+            # preference cannot be persisted.
+            LOGGER.exception("Could not remember the rendered soundtrack")
+    return result

@@ -16,6 +16,7 @@ from e2dm2.project import (
     delete_project,
     import_media,
     load_project,
+    remember_rendered_song,
     move_media,
     recent_projects,
     remember_project,
@@ -47,6 +48,24 @@ def test_project_round_trip_and_media_import(tmp_path):
     assert loaded.settings.workflow == WorkflowMode.FULL_LENGTH
     assert loaded.settings.exports == [ExportSize.SOURCE, ExportSize.HD_1080]
     assert loaded.settings.media[0].width == 320
+
+
+def test_new_project_uses_last_rendered_song(tmp_path):
+    root = tmp_path / "projects"
+    rendered_project = create_project("Rendered", root)
+    remember_rendered_song(rendered_project.path, WorkflowMode.REAL_ESTATE, "real-estate-2")
+
+    project = create_project("Next", root)
+
+    assert project.settings.workflow is WorkflowMode.REAL_ESTATE
+    assert project.settings.song_id == "real-estate-2"
+
+
+def test_new_project_defaults_to_epic_montage_one_without_a_render(tmp_path):
+    project = create_project("First", tmp_path / "projects")
+
+    assert project.settings.workflow is WorkflowMode.EPIC_MONTAGE
+    assert project.settings.song_id == "epic-montage-1"
 
 
 def test_import_cleans_partial_file_on_cancellation(tmp_path):
