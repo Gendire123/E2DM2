@@ -4,7 +4,28 @@ import pytest
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QSignalSpy
 
-from e2dm2.waveform import WaveformData, WaveformWidget, extract_waveform
+from e2dm2.waveform import (
+    WaveformData,
+    WaveformWidget,
+    automatic_cut_timestamps,
+    beat_synced_cut_timestamps,
+    extract_waveform,
+)
+
+
+def test_automatic_cut_grid_creates_three_cuts_per_minute():
+    assert automatic_cut_timestamps(180) == [0.0, 20.0, 40.0, 60.0, 80.0, 100.0, 120.0, 140.0, 160.0]
+
+
+def test_automatic_cut_grid_snaps_to_nearby_music_onsets():
+    peaks = [0.1] * 1800
+    beat_times = [19.6, 40.3, 59.7, 80.2, 99.8, 120.1, 139.7, 160.2]
+    for beat_time in beat_times:
+        peaks[round(beat_time * 10)] = 1.0
+
+    timestamps = beat_synced_cut_timestamps(WaveformData(peaks, 10, 180))
+
+    assert timestamps == pytest.approx([0.0, *beat_times], abs=0.05)
 
 
 def test_ffmpeg_waveform_extraction_and_cache(tmp_path, monkeypatch):

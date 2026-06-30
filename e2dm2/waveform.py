@@ -21,6 +21,7 @@ LOGGER = logging.getLogger(__name__)
 WAVEFORM_VERSION = 1
 SAMPLE_RATE = 800
 PEAKS_PER_SECOND = 25
+DEFAULT_CUTS_PER_MINUTE = 3
 _ACTIVE_WAVEFORM_TASKS: set["WaveformTask"] = set()
 
 
@@ -29,6 +30,61 @@ class WaveformData:
     peaks: list[float]
     peaks_per_second: float
     duration_seconds: float
+
+
+def automatic_cut_timestamps(duration_seconds: float, cuts_per_minute: int = DEFAULT_CUTS_PER_MINUTE) -> list[float]:
+    """Return an evenly spaced cut grid, including the required cut at zero."""
+    duration_seconds = max(0.0, float(duration_seconds))
+    if duration_seconds <= 0 or cuts_per_minute <= 0:
+        return [0.0]
+    cut_count = max(1, math.floor(duration_seconds * cuts_per_minute / 60.0 + 0.5))
+    interval = duration_seconds / cut_count
+    return [round(index * interval, 6) for index in range(cut_count)]
+
+
+def beat_synced_cut_timestamps(
+    data: WaveformData,
+    cuts_per_minute: int = DEFAULT_CUTS_PER_MINUTE,
+) -> list[float]:
+    """Snap the automatic cut grid to nearby prominent waveform onsets."""
+    targets = automatic_cut_timestamps(data.duration_seconds, cuts_per_minute)
+    if len(targets) == 1 or not data.peaks or data.peaks_per_second <= 0:
+        return targets
+
+    interval = data.duration_seconds / len(targets)
+    search_seconds = min(3.0, interval * 0.2)
+    history_size = max(2, round(data.peaks_per_second * 0.32))
+    last_index = len(data.peaks) - 1
+    snapped = [0.0]
+
+    for target in targets[1:]:
+        center = round(target * data.peaks_per_second)
+        radius = max(1, round(search_seconds * data.peaks_per_second))
+        start = max(1, center - radius)
+        end = min(last_index - 1, center + radius)
+        best: tuple[float, float, int] | None = None
+
+        for index in range(start, end + 1):
+            peak = data.peaks[index]
+            if peak < data.peaks[index - 1] or peak < data.peaks[index + 1]:
+                continue
+            history_start = max(0, index - history_size)
+            history = data.peaks[history_start:index]
+            baseline = sum(history) / len(history) if history else peak
+            rise = max(0.0, peak - baseline)
+            prominence = max(0.0, peak - (data.peaks[index - 1] + data.peaks[index + 1]) / 2)
+            onset_score = rise + prominence * 0.25
+            distance = abs(index / data.peaks_per_second - target)
+            candidate = (onset_score, -distance, index)
+            if best is None or candidate > best:
+                best = candidate
+
+        # A flat or nearly silent waveform has no trustworthy beat to snap to.
+        if best is None or best[0] < 0.015:
+            snapped.append(target)
+        else:
+            snapped.append(round(best[2] / data.peaks_per_second, 6))
+    return snapped
 
 
 def _cache_path(audio_path: Path) -> Path:

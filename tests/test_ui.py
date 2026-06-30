@@ -744,6 +744,22 @@ def test_cut_table_and_waveform_selection_stay_synchronized(qtbot):
     assert len(dialog.cut_markers.values()) == original_count - 1
 
 
+def test_cut_effect_stays_attached_when_another_cut_is_added(qtbot):
+    dialog = SongEditorDialog(AlphaEntitlementProvider())
+    qtbot.addWidget(dialog)
+    epic_row = next(
+        row for row, song in enumerate(dialog.filtered_songs)
+        if song.song_id == "epic-montage-1"
+    )
+    dialog._load_selected(epic_row)
+    dialog.cut_markers.set_values_and_effects([0.0, 10.0], ["none", "sepia"])
+
+    dialog.add_cut_timestamp(5.0)
+
+    effects_by_timestamp = dict(zip(dialog.cut_markers.values(), dialog.cut_markers.effects()))
+    assert effects_by_timestamp == {0.0: "none", 5.0: "none", 10.0: "sepia"}
+
+
 def test_song_editor_space_shortcut_is_limited_to_cuts_tab(qtbot):
     dialog = SongEditorDialog(AlphaEntitlementProvider())
     qtbot.addWidget(dialog)

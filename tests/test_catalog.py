@@ -274,8 +274,8 @@ def test_new_song_workflow_dialog(monkeypatch, tmp_path, qtbot):
         return songs
     monkeypatch.setattr("e2dm2.editor.load_song_catalog", mocked_load_song_catalog)
     
-    monkeypatch.setattr("e2dm2.catalog.probe_audio_duration", lambda path: 10.0)
-    monkeypatch.setattr("e2dm2.editor.probe_audio_duration", lambda path: 10.0)
+    monkeypatch.setattr("e2dm2.catalog.probe_audio_duration", lambda path: 180.0)
+    monkeypatch.setattr("e2dm2.editor.probe_audio_duration", lambda path: 180.0)
     
     def accept_epic_workflow(workflow_dialog):
         workflow_dialog.choose_audio()
@@ -304,6 +304,7 @@ def test_new_song_workflow_dialog(monkeypatch, tmp_path, qtbot):
     assert dialog.current.song_id == "test-track"
     assert dialog.current.audio_file == f"EpicMusic{next_idx}.m4a"
     assert dialog.current.artist == "User"
+    assert dialog.current.cut_timestamps == [0.0, 20.0, 40.0, 60.0, 80.0, 100.0, 120.0, 140.0, 160.0]
     expected_path = library_dir / "test-track" / f"EpicMusic{next_idx}.m4a"
     assert dialog.audio_edit.text() == str(expected_path)
 

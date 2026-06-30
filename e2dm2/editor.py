@@ -61,7 +61,13 @@ from .models import (
     TransitionSettings,
     WorkflowMode,
 )
-from .waveform import WaveformData, WaveformTask, WaveformWidget
+from .waveform import (
+    WaveformData,
+    WaveformTask,
+    WaveformWidget,
+    automatic_cut_timestamps,
+    beat_synced_cut_timestamps,
+)
 
 
 def _seconds_text(milliseconds: int) -> str:
@@ -543,6 +549,7 @@ class SongEditorDialog(QWidget):
         self.waveform_source = ""
         self.snapshot = None
         self.waveform_tasks: dict[str, WaveformTask] = {}
+        self.pending_automatic_cuts: dict[str, list[float]] = {}
         self.waveform_pool = QThreadPool.globalInstance()
         self.selecting_from_waveform = False
         self.player = QMediaPlayer(self)
@@ -1009,6 +1016,13 @@ class SongEditorDialog(QWidget):
             is_builtin = wf_dialog.is_builtin()
             title = wf_dialog.song_title()
             song_id = wf_dialog.song_id()
+            try:
+                audio_duration = probe_audio_duration(path)
+            except ValueError:
+                audio_duration = 1.0
+
+            should_create_cuts = workflow_type != WorkflowMode.FULL_LENGTH.value
+            cut_timestamps = automatic_cut_timestamps(audio_duration) if should_create_cuts else [0.0]
 
             if workflow_type == "epic_montage":
                 audio_file_name = f"EpicMusic{next_epic}{suffix_ext}" if next_epic > 1 else f"EpicMusic{suffix_ext}"
@@ -1019,25 +1033,20 @@ class SongEditorDialog(QWidget):
 
             self.current = SongManifest(
                 schema_version=1, song_id=song_id, title=title, artist="User", audio_file=audio_file_name,
-                moods=["epic"], bpm=None, energy=EnergyLevel.HIGH, total_duration_seconds=1,
-                minimum_source_duration_seconds=1, opening_fade_seconds=0, cuts_end_seconds=1,
-                fade_out_seconds=0, escalation_seconds=0, cut_timestamps=[0], effects=["none"],
+                moods=["epic"], bpm=None, energy=EnergyLevel.HIGH, total_duration_seconds=audio_duration,
+                minimum_source_duration_seconds=audio_duration, opening_fade_seconds=0, cuts_end_seconds=audio_duration,
+                fade_out_seconds=0, escalation_seconds=0, cut_timestamps=cut_timestamps,
+                effects=["none"] * len(cut_timestamps),
                 readonly=is_builtin, workflow=WorkflowMode(workflow_type)
             )
+            if should_create_cuts:
+                self.pending_automatic_cuts[song_id] = cut_timestamps
             self.audio_source = path
             self.songs.append(self.current)
             suffix = "  [built-in]" if is_builtin else "  [unsaved]"
             self.song_list.addItem(title + suffix)
             self.song_list.setCurrentRow(self.song_list.count() - 1)
             self.player.setSource(QUrl.fromLocalFile(str(path)))
-            self.load_waveform(path)
-            try:
-                audio_duration = probe_audio_duration(path)
-                self.total_spin.setValue(audio_duration)
-                self.minimum_source_spin.setValue(audio_duration)
-                self.cuts_end_spin.setValue(audio_duration)
-            except ValueError:
-                pass
             self._set_editable(True)
             self.status_label.setText("New built-in preset" if is_builtin else "New custom preset")
             self.save_current()
@@ -1064,9 +1073,12 @@ class SongEditorDialog(QWidget):
         values = self.cut_markers.values()
         if any(abs(value - timestamp) < 0.0005 for value in values):
             return
-        values.append(round(timestamp, 6))
-        values = sorted(values)
-        self.cut_markers.set_values(values)
+        cuts = list(zip(values, self.cut_markers.effects()))
+        cuts.append((round(timestamp, 6), "none"))
+        cuts.sort(key=lambda cut: cut[0])
+        values = [value for value, _effect in cuts]
+        effects = [effect for _value, effect in cuts]
+        self.cut_markers.set_values_and_effects(values, effects)
         selected = min(range(len(values)), key=lambda index: abs(values[index] - timestamp))
         self.cut_markers.select_row(selected)
 
@@ -1074,14 +1086,17 @@ class SongEditorDialog(QWidget):
         values = self.cut_markers.values()
         if not 0 < index < len(values):
             return
+        effects = self.cut_markers.effects()
         timestamp = max(0.0, min(float(timestamp), self.total_spin.value()))
         if any(other != index and abs(value - timestamp) < 0.0005 for other, value in enumerate(values)):
             self.waveform.set_markers(values)
             self.waveform.select_marker(index)
             return
         values[index] = round(timestamp, 6)
-        values.sort()
-        self.cut_markers.set_values(values)
+        cuts = sorted(zip(values, effects), key=lambda cut: cut[0])
+        values = [value for value, _effect in cuts]
+        effects = [effect for _value, effect in cuts]
+        self.cut_markers.set_values_and_effects(values, effects)
         selected = min(range(len(values)), key=lambda row: abs(values[row] - timestamp))
         self.cut_markers.select_row(selected)
 
@@ -1089,8 +1104,10 @@ class SongEditorDialog(QWidget):
         values = self.cut_markers.values()
         if not 0 < index < len(values):
             return
+        effects = self.cut_markers.effects()
         values.pop(index)
-        self.cut_markers.set_values(values)
+        effects.pop(index)
+        self.cut_markers.set_values_and_effects(values, effects)
         if values:
             self.cut_markers.select_row(min(index, len(values) - 1))
 
@@ -1121,7 +1138,51 @@ class SongEditorDialog(QWidget):
         self.waveform_tasks.pop(source, None)
         if source == self.waveform_source:
             self.waveform.set_waveform(data)
+            self._apply_automatic_beat_cuts(data)
             self.waveform.set_markers(self.cut_markers.values())
+
+    def _apply_automatic_beat_cuts(self, data: WaveformData) -> None:
+        if not self.current or self.current.workflow == WorkflowMode.FULL_LENGTH:
+            return
+        expected = self.pending_automatic_cuts.get(self.current.song_id)
+        if expected is None:
+            return
+        current_values = self.cut_markers.values()
+        if len(current_values) != len(expected) or any(
+            abs(current - original) >= 0.0005 for current, original in zip(current_values, expected)
+        ):
+            # The user edited the generated cuts while analysis was running.
+            self.pending_automatic_cuts.pop(self.current.song_id, None)
+            return
+
+        self.pending_automatic_cuts.pop(self.current.song_id, None)
+        timestamps = beat_synced_cut_timestamps(data)
+        effects = self.cut_markers.effects()
+        self.cut_markers.set_values_and_effects(timestamps, effects)
+        self.current.cut_timestamps = timestamps
+        self.current.effects = effects
+        self._persist_automatic_beat_cuts()
+
+    def _persist_automatic_beat_cuts(self) -> None:
+        if not self.current or not self.audio_source:
+            return
+        try:
+            song = self._collect_song()
+            library_root = BUILTIN_SONG_ROOT if self.current.readonly else None
+            saved_song = save_custom_song(song, self.audio_source, library_root=library_root)
+            for index, existing in enumerate(self.songs):
+                if existing.song_id == saved_song.song_id:
+                    self.songs[index] = saved_song
+                    break
+            self.current = saved_song
+            self.snapshot = self._capture_snapshot()
+            self.catalog_changed.emit()
+            self.status_label.setText(
+                f"Preset saved with {len(saved_song.cut_timestamps)} beat-synchronized cuts"
+            )
+        except (OSError, ValueError) as exc:
+            LOGGER.exception("Could not save automatic beat cuts for %s", self.current.song_id)
+            self.status_label.setText(f"Automatic cuts created, but could not be saved: {exc}")
 
     def _waveform_failed(self, source: str, message: str) -> None:
         self.waveform_tasks.pop(source, None)
