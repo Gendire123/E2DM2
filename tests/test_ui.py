@@ -50,6 +50,7 @@ def test_main_window_smoke(qtbot):
     assert not window.home.delete_button.isEnabled()
     assert window.log_dock.windowTitle() == "Backend Log"
     assert not window.log_dock.isVisible()
+    assert not window.backend_log_action.isVisible()
     assert window.options_action.text() == "Options..."
     window.center_on_active_screen()
     screen_center = window.screen().availableGeometry().center()
