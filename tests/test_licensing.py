@@ -199,22 +199,37 @@ def test_successful_activation_shows_branded_pro_summary(qtbot, tmp_path):
     assert dialog.result() == QDialog.DialogCode.Accepted
 
 
-def test_admin_tools_are_visible_by_default_and_can_be_disabled(monkeypatch):
-    monkeypatch.delenv(ADMIN_TOOLS_ENV, raising=False)
-    assert admin_tools_enabled()
-
+def test_admin_tools_require_an_explicit_development_opt_in(monkeypatch):
     monkeypatch.setenv(ADMIN_TOOLS_ENV, "0")
     assert not admin_tools_enabled()
 
+    monkeypatch.setenv(ADMIN_TOOLS_ENV, "1")
+    assert admin_tools_enabled()
 
-def test_view_menu_hides_temporary_admin_tools(qtbot, monkeypatch):
-    monkeypatch.delenv(ADMIN_TOOLS_ENV, raising=False)
+
+def test_admin_tools_cannot_be_enabled_outside_a_source_checkout(monkeypatch, tmp_path):
+    monkeypatch.setenv(ADMIN_TOOLS_ENV, "1")
+    monkeypatch.setattr("e2dm2.licensing_ui.DEVELOPMENT_ROOT", tmp_path)
+
+    assert not admin_tools_enabled()
+
+
+def test_view_menu_shows_enabled_admin_tools(qtbot, monkeypatch):
+    monkeypatch.setenv(ADMIN_TOOLS_ENV, "1")
     window = MainWindow()
     qtbot.addWidget(window)
 
     assert window.admin_tools_action is not None
     assert window.admin_tools_action.text() == "Admin Tools"
-    assert not window.admin_tools_action.isVisible()
+    assert window.admin_tools_action.isVisible()
+
+
+def test_view_menu_omits_disabled_admin_tools(qtbot, monkeypatch):
+    monkeypatch.setenv(ADMIN_TOOLS_ENV, "0")
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    assert window.admin_tools_action is None
 
 
 def test_purchase_menu_actions_follow_live_license_state(qtbot, tmp_path):

@@ -4,6 +4,7 @@ import json
 import os
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 from PySide6.QtCore import QEasingCurve, QPointF, QPropertyAnimation, QRectF, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import (
@@ -47,6 +48,8 @@ ADMIN_TOOLS_ENV = "E2DM2_ENABLE_ADMIN_TOOLS"
 ADMIN_API_ENV = "E2DM2_LICENSE_ADMIN_URL"
 ADMIN_TOKEN_ENV = "E2DM2_ADMIN_ACCESS_TOKEN"
 DEFAULT_ADMIN_API_URL = f"{SUPABASE_PROJECT_URL}/functions/v1/license-admin"
+DEVELOPMENT_ROOT = Path(__file__).resolve().parent.parent
+ADMIN_TOOLS_MARKER = DEVELOPMENT_ROOT / ".e2dm2-admin-tools"
 
 
 def _pro_shield_pixmap(size: int = 68) -> QPixmap:
@@ -93,8 +96,13 @@ def open_purchase_page() -> bool:
 
 
 def admin_tools_enabled() -> bool:
-    """Show temporary development tooling unless a build explicitly disables it."""
-    return os.environ.get(ADMIN_TOOLS_ENV, "1").strip().lower() not in {
+    """Enable admin tooling only for an explicitly opted-in source checkout."""
+    if not (DEVELOPMENT_ROOT / "pyproject.toml").is_file():
+        return False
+    configured = os.environ.get(ADMIN_TOOLS_ENV)
+    if configured is None:
+        return ADMIN_TOOLS_MARKER.is_file()
+    return configured.strip().lower() not in {
         "0",
         "false",
         "no",

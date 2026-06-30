@@ -3380,7 +3380,7 @@ class AppSplashScreen(QWidget):
                 Qt.TransformationMode.SmoothTransformation,
             ))
 
-        version_label = QLabel("Version 1.0")
+        version_label = QLabel("Version 1.0.1")
         version_label.setObjectName("splashVersion")
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -3825,8 +3825,6 @@ class MainWindow(QMainWindow):
             self.admin_tools_separator = view_menu.addSeparator()
             self.admin_tools_action = view_menu.addAction("Admin Tools")
             self.admin_tools_action.triggered.connect(self.open_admin_tools)
-            self.admin_tools_separator.setVisible(False)
-            self.admin_tools_action.setVisible(False)
         self.refresh_license_menu()
         self.home.new_requested.connect(self.new_project)
         self.home.open_requested.connect(self.open_project)
