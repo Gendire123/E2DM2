@@ -2010,22 +2010,25 @@ class WorkspacePage(QWidget):
         else:
             song_title = None
             song_artist = None
+            is_builtin = False
             
             song = next((s for s in self.songs if s.song_id == song_id), None)
             if song:
                 song_title = song.title
                 song_artist = song.artist
                 target_duration_seconds = song.total_duration_seconds
+                is_builtin = song.readonly
             elif workflow == WorkflowMode.FULL_LENGTH:
                 for track in FULL_LENGTH_TRACKS:
                     if track.track_id == song_id:
                         song_title = track.title
                         song_artist = "E2DM2"
                         target_duration_seconds = track.duration_seconds
+                        is_builtin = True
                         break
             
             if song_title:
-                artist_info = f" by {song_artist}" if song_artist else ""
+                artist_info = f" by {song_artist}" if (song_artist and not is_builtin) else ""
                 music_str = f"{song_title}{artist_info}"
             else:
                 music_str = f"Unknown Soundtrack ({song_id})"
@@ -2372,7 +2375,10 @@ class WorkspacePage(QWidget):
                     item = QTableWidgetItem(value)
                     if column == 0:
                         item.setData(Qt.ItemDataRole.UserRole, song.song_id)
-                        item.setToolTip(f"{song.artist}\nMinimum footage: {_duration(song.minimum_source_duration_seconds)}")
+                        tooltip = f"Minimum footage: {_duration(song.minimum_source_duration_seconds)}"
+                        if not song.readonly:
+                            tooltip = f"{song.artist}\n{tooltip}"
+                        item.setToolTip(tooltip)
                     self.song_table.setItem(row, column, item)
                 self._install_song_preview(
                     self.song_table, row, song.song_id, song.title, song.audio_path, song.total_duration_seconds,
@@ -2449,7 +2455,10 @@ class WorkspacePage(QWidget):
                     item = QTableWidgetItem(value)
                     if column == 0:
                         item.setData(Qt.ItemDataRole.UserRole, song.song_id)
-                        item.setToolTip(f"{song.artist}\nMinimum footage: {_duration(song.minimum_source_duration_seconds)}")
+                        tooltip = f"Minimum footage: {_duration(song.minimum_source_duration_seconds)}"
+                        if not song.readonly:
+                            tooltip = f"{song.artist}\n{tooltip}"
+                        item.setToolTip(tooltip)
                     self.re_song_table.setItem(row, column, item)
                 self._install_song_preview(
                     self.re_song_table, row, song.song_id, song.title, song.audio_path, song.total_duration_seconds,
@@ -2476,7 +2485,10 @@ class WorkspacePage(QWidget):
                     item = QTableWidgetItem(value)
                     if column == 0:
                         item.setData(Qt.ItemDataRole.UserRole, song.song_id)
-                        item.setToolTip(f"{song.artist}\nMinimum footage: {_duration(song.minimum_source_duration_seconds)}")
+                        tooltip = f"Minimum footage: {_duration(song.minimum_source_duration_seconds)}"
+                        if not song.readonly:
+                            tooltip = f"{song.artist}\n{tooltip}"
+                        item.setToolTip(tooltip)
                     self.custom_song_table.setItem(row, column, item)
                 self._install_song_preview(
                     self.custom_song_table, row, song.song_id, song.title, song.audio_path, song.total_duration_seconds,
@@ -2837,7 +2849,8 @@ class WorkspacePage(QWidget):
         if plan.song_manifest:
             title = str(plan.song_manifest.get("title", "Selected soundtrack"))
             artist = str(plan.song_manifest.get("artist", "")).strip()
-            soundtrack = f"{title} by {artist}" if artist else title
+            is_builtin = plan.song_manifest.get("readonly", False)
+            soundtrack = f"{title} by {artist}" if (artist and not is_builtin) else title
         else:
             track = next(
                 (track for track in FULL_LENGTH_TRACKS if track.path.name == Path(plan.music_path).name),

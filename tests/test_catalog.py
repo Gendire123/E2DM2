@@ -49,7 +49,12 @@ def test_epic_two_heartbeat_manifest():
     )
     assert song.heartbeat.opacity == pytest.approx(0.3)
     assert song.heartbeat.fade_seconds == pytest.approx(0.5)
-    assert song.heartbeat.timestamps == []
+    assert song.heartbeat.timestamps == [
+        9.307242, 9.940175, 11.485, 12.040696, 13.671169, 14.262657, 15.876514,
+        76.93866, 77.500484, 79.144339, 79.716567, 81.308401, 81.870225,
+        83.482868, 84.0655, 213.352281, 213.979047, 215.532289, 216.094113,
+        217.696352, 218.258176, 219.902031, 220.463855
+    ]
 
 
 def test_duplicate_builtin_creates_editable_manifest(tmp_path):
@@ -135,8 +140,8 @@ def test_song_manifest_effects_flow():
     assert epic_1.effects[19] == "flash"
     assert epic_1.effects.count("none") == 27
 
-    assert len(epic_2.effects) == 86
-    assert epic_2.effects.count("heartbeat") == 0
+    assert len(epic_2.effects) == 88
+    assert epic_2.effects.count("heartbeat") == 23
 
 
 def test_delete_current_song(monkeypatch, tmp_path, qtbot):

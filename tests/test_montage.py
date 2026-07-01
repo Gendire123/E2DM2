@@ -31,7 +31,7 @@ def test_builtin_plan_durations_and_cut_counts():
     second = next(s for s in songs if s.song_id == "epic-montage-2")
     third = next(s for s in songs if s.song_id == "epic-montage-3")
     assert (first.total_duration_seconds, len(first.cut_timestamps)) == (150, 29)
-    assert (second.total_duration_seconds, len(second.cut_timestamps)) == (227, 86)
+    assert (second.total_duration_seconds, len(second.cut_timestamps)) == (227, 88)
     assert (third.total_duration_seconds, len(third.cut_timestamps)) == (239.978, 32)
 
 
@@ -43,7 +43,7 @@ def test_epic_two_filter_contains_all_heartbeat_effects():
         song.effects[i] = "heartbeat"
     song.heartbeat.opacity = 0.2
     song.heartbeat.fade_seconds = 0.45
-    segments = build_montage_segment_plan(315, song)
+    segments = build_montage_segment_plan(318, song)
     output = RenderOutputPlan(
         "test", "2720x1530_59.94fps", [], 1920, 1080, 59.94, 227,
         ExportSize.HD_1080, "test.mp4", 12000, segments,

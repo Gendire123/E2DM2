@@ -681,6 +681,7 @@ class SongEditorDialog(QWidget):
     def _general_tab(self) -> QWidget:
         content = QWidget()
         form = QFormLayout(content)
+        self.general_form = form
         self.title_edit = QLineEdit()
         self.artist_edit = QLineEdit()
         self.id_edit = QLineEdit()
@@ -883,6 +884,7 @@ class SongEditorDialog(QWidget):
             self.audio_source = song.audio_path
         self.title_edit.setText(song.title)
         self.artist_edit.setText(song.artist)
+        self.general_form.setRowVisible(self.artist_edit, not song.readonly)
         self.id_edit.setText(song.song_id)
         self.moods_edit.setText(", ".join(song.moods))
         self.energy_combo.setCurrentText(song.energy.value.title())
