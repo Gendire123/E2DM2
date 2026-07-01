@@ -118,12 +118,14 @@ from .project import (
 )
 from .render import create_render_plan, render
 from .logging_setup import log_file_path
+from .updater import UpdateChecker
 
 
 LOGGER = logging.getLogger(__name__)
 PLAYBACK_LATENCY_MS = 300
 SHOW_SPLASH_SETTING = "startup/show_splash_screen"
 APP_ICON_PATH = Path(__file__).parent / "assets" / "icons" / "app-icon.ico"
+APP_VERSION = "1.0.1"
 
 
 def splash_screen_enabled(settings: QSettings | None = None) -> bool:
@@ -3380,7 +3382,7 @@ class AppSplashScreen(QWidget):
                 Qt.TransformationMode.SmoothTransformation,
             ))
 
-        version_label = QLabel("Version 1.0.1")
+        version_label = QLabel(f"Version {APP_VERSION}")
         version_label.setObjectName("splashVersion")
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -3804,6 +3806,20 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.log_dock)
         self.resizeDocks([self.log_dock], [120], Qt.Orientation.Vertical)
         self.log_dock.hide()
+
+        # File Menu
+        file_menu = self.menuBar().addMenu("File")
+        self.new_project_action = file_menu.addAction("New Project...")
+        self.new_project_action.triggered.connect(self.new_project)
+        self.open_project_action = file_menu.addAction("Open Project...")
+        self.open_project_action.triggered.connect(self.open_project)
+        file_menu.addSeparator()
+        self.check_update_action = file_menu.addAction("Check for Update...")
+        self.check_update_action.triggered.connect(self.trigger_update_check)
+        file_menu.addSeparator()
+        self.exit_action = file_menu.addAction("Exit")
+        self.exit_action.triggered.connect(self.close)
+
         view_menu = self.menuBar().addMenu("View")
         self.home_action = view_menu.addAction("Home Screen")
         self.home_action.triggered.connect(self.show_home)
@@ -3854,6 +3870,11 @@ class MainWindow(QMainWindow):
             self.stack.removeWidget(self.options_page)
             self.options_page.deleteLater()
             self.options_page = None
+
+    def trigger_update_check(self) -> None:
+        checker = UpdateChecker(APP_VERSION, self)
+        self._update_checker = checker
+        checker.check(silent_on_latest=False)
 
     def show_home(self) -> None:
         self.home.refresh()

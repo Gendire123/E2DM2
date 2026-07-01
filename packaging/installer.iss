@@ -49,3 +49,41 @@ Name: "{autodesktop}\Easy Epic Drone Movie Maker"; Filename: "{app}\E2DM2.exe"; 
 
 [Run]
 Filename: "{app}\E2DM2.exe"; Description: "Launch Easy Epic Drone Movie Maker"; Flags: nowait postinstall skipifsilent
+
+[Code]
+function GetUninstallString(): String;
+var
+  UninstallKey: String;
+  UninstallString: String;
+begin
+  UninstallKey := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{48E2C137-8DC0-46E6-9209-5EBEF77E5F62}_is1';
+  UninstallString := '';
+  if not RegQueryStringValue(HKCU, UninstallKey, 'UninstallString', UninstallString) then
+  begin
+    RegQueryStringValue(HKLM, UninstallKey, 'UninstallString', UninstallString);
+  end;
+  Result := UninstallString;
+end;
+
+function InitializeSetup(): Boolean;
+var
+  UninstallString: String;
+  ResultCode: Integer;
+begin
+  Result := True;
+  UninstallString := GetUninstallString();
+  if UninstallString <> '' then
+  begin
+    if MsgBox('A previous version of Easy Epic Drone Movie Maker is installed. Do you want to uninstall it first?', mbConfirmation, MB_YESNO) = idYes then
+    begin
+      if Exec(RemoveQuotes(UninstallString), '/SILENT /NORESTART', '', SW_SHOW, ewWaitUntilTerminated, ResultCode) then
+      begin
+        Sleep(500);
+      end
+      else
+      begin
+        MsgBox('Uninstallation of the previous version failed. Proceeding with installation anyway.', mbInformation, MB_OK);
+      end;
+    end;
+  end;
+end;
