@@ -77,11 +77,14 @@ def test_constrained_plan_excludes_red_and_preserves_green_once():
         for segment in plan
     )
     protected = [segment for segment in plan if segment.protected]
-    assert len(protected) == 1
-    assert (protected[0].source_start, protected[0].source_duration, protected[0].speed) == (45, 20, 1)
-    assert protected[0].style == "natural"
-    assert protected[0].zoom == 1
-    assert not protected[0].motion_blur
+    assert len(protected) == 3
+    assert (protected[0].source_start, protected[0].source_duration, protected[0].speed) == (16, 4, 1)
+    assert (protected[1].source_start, protected[1].source_duration, protected[1].speed) == (30, 4, 1)
+    assert (protected[2].source_start, protected[2].source_duration, protected[2].speed) == (45, 20, 1)
+    for seg in protected:
+        assert seg.style == "natural"
+        assert seg.zoom == 1
+        assert not seg.motion_blur
     assert not any(
         not segment.protected and segment.source_start < 65 and segment.source_start + segment.source_duration > 45
         for segment in plan

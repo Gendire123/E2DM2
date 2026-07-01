@@ -120,8 +120,10 @@ def test_render_plan_maps_clip_local_marks_to_group_timeline(tmp_path, monkeypat
     )
     segments = montage.outputs[0].segments
     protected = [segment for segment in segments if segment.protected]
-    assert len(protected) == 1
-    assert (protected[0].source_start, protected[0].source_duration) == (125, 20)
+    assert len(protected) == 3
+    assert (protected[0].source_start, protected[0].source_duration) == (106, 4)
+    assert (protected[1].source_start, protected[1].source_duration) == (120, 4)
+    assert (protected[2].source_start, protected[2].source_duration) == (125, 20)
     assert not any(segment.source_start < 120 and segment.source_start + segment.source_duration > 110 for segment in segments)
     assert json.loads(json.dumps(montage.to_dict()))["outputs"][0]["segments"][0]["protected"] in {True, False}
 

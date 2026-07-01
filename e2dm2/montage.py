@@ -125,11 +125,32 @@ def _intersections(intervals: list[_Interval], start: float, end: float) -> list
     ]
 
 
+def _calculate_exclusion_buffers(
+    excluded_ranges: list[tuple[float, float]],
+    usable: list[_Interval],
+    size: float,
+) -> list[tuple[float, float, _Interval]]:
+    buffers = []
+    for ex_start, ex_end in excluded_ranges:
+        preceding = next((u for u in usable if abs(u.end - ex_start) < 0.000001), None)
+        if preceding:
+            buf_start = max(preceding.start, ex_start - size)
+            if buf_start < ex_start - 0.000001:
+                buffers.append((buf_start, ex_start, preceding))
+        succeeding = next((u for u in usable if abs(u.start - ex_end) < 0.000001), None)
+        if succeeding:
+            buf_end = min(succeeding.end, ex_end + size)
+            if buf_end > ex_end + 0.000001:
+                buffers.append((ex_end, buf_end, succeeding))
+    return buffers
+
+
 def _required_cut_free_ranges(
     video_duration: float,
     required_ranges: list[tuple[float, float]],
     excluded_ranges: list[tuple[float, float]],
     source_boundaries: list[float],
+    song_total_duration: float | None = None,
 ) -> list[tuple[float, float]]:
     """Expand required footage into cut-free source ranges.
 
@@ -142,28 +163,59 @@ def _required_cut_free_ranges(
         [_Interval(start, end) for start, end in zip(boundaries, boundaries[1:])],
         excluded_ranges,
     )
-    expanded: list[tuple[float, float]] = []
-    for required_start, required_end in sorted(required_ranges):
-        containing = next(
-            (
-                interval for interval in usable
-                if interval.start <= required_start + 0.000001 and interval.end >= required_end - 0.000001
-            ),
-            None,
-        )
-        if containing is None:
-            raise ValueError("Required footage conflicts with excluded footage or a source clip boundary.")
-        start = max(containing.start, required_start - REQUIRED_CUT_BUFFER_SECONDS)
-        end = min(containing.end, required_end + REQUIRED_CUT_BUFFER_SECONDS)
-        shares_usable_interval = bool(expanded) and (
-            containing.start <= expanded[-1][0] + 0.000001
-            and containing.end >= expanded[-1][1] - 0.000001
-        )
-        if shares_usable_interval and start <= expanded[-1][1] + 0.000001:
-            expanded[-1] = (expanded[-1][0], max(expanded[-1][1], end))
-        else:
-            expanded.append((start, end))
-    return expanded
+    
+    song_duration_limit = song_total_duration if song_total_duration is not None else float('inf')
+    best_candidates = []
+    
+    # Try buffer sizes from 4.0 down to 0.0 to find the largest size that fits the song limit
+    for size_steps in range(40, -1, -1):
+        size = size_steps * 0.1
+        candidates = []
+        
+        # Add expanded user required ranges
+        for required_start, required_end in required_ranges:
+            containing = next(
+                (
+                    interval for interval in usable
+                    if interval.start <= required_start + 0.000001 and interval.end >= required_end - 0.000001
+                ),
+                None,
+            )
+            if containing is None:
+                raise ValueError("Required footage conflicts with excluded footage or a source clip boundary.")
+            start = max(containing.start, required_start - REQUIRED_CUT_BUFFER_SECONDS)
+            end = min(containing.end, required_end + REQUIRED_CUT_BUFFER_SECONDS)
+            candidates.append((start, end, containing))
+            
+        # Add exclusion buffers
+        buffers = _calculate_exclusion_buffers(excluded_ranges, usable, size)
+        candidates.extend(buffers)
+        
+        # Sort and merge overlapping candidates
+        candidates.sort(key=lambda x: x[0])
+        merged = []
+        for start, end, containing in candidates:
+            if not merged:
+                merged.append((start, end, containing))
+            else:
+                prev_start, prev_end, prev_containing = merged[-1]
+                shares_usable = (
+                    containing.start <= prev_containing.start + 0.000001
+                    and containing.end >= prev_containing.end - 0.000001
+                )
+                if shares_usable and start <= prev_end + 0.000001:
+                    merged[-1] = (prev_start, max(prev_end, end), prev_containing)
+                else:
+                    merged.append((start, end, containing))
+                    
+        total_dur = sum(end - start for start, end, _ in merged)
+        if total_dur <= song_duration_limit + 0.000001:
+            best_candidates = merged
+            break
+    else:
+        best_candidates = merged
+        
+    return [(start, end) for start, end, _ in best_candidates]
 
 
 class _IntervalCursor:
@@ -244,7 +296,7 @@ def _build_constrained_montage_segment_plan(
         raise ValueError(f"Excluded footage leaves the group {shortage:.3f} seconds short of this song's requirement.")
 
     required = _required_cut_free_ranges(
-        video_duration, required_ranges, excluded_ranges, source_boundaries,
+        video_duration, required_ranges, excluded_ranges, source_boundaries, song.total_duration_seconds,
     )
     required_duration = sum(end - start for start, end in required)
     if required_duration > song.total_duration_seconds + 0.000001:
