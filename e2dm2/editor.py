@@ -422,6 +422,8 @@ class WorkflowSelectionDialog(QDialog):
 
         self.builtin_cb = QCheckBox("Add to the built-in library")
         self.builtin_cb.setToolTip("Built-in songs are stored with the application. Leave unchecked for your personal library.")
+        from .licensing_ui import builtin_library_admin_enabled
+        self.builtin_cb.setVisible(builtin_library_admin_enabled())
         self.combo.currentIndexChanged.connect(self._apply_suggestion)
         self._apply_suggestion()
         if audio_path is not None:
@@ -721,6 +723,7 @@ class SongEditorDialog(QWidget):
             self.cuts_end_spin,
             self.fade_out_spin,
             self.escalation_spin,
+            self.transition_spin,
             self.hard_cut_spin,
             self.short_threshold_spin,
             self.short_advance_spin,
@@ -730,7 +733,7 @@ class SongEditorDialog(QWidget):
         for label, control in [
             ("Title", self.title_edit), ("Artist", self.artist_edit), ("Song ID", self.id_edit),
             ("Moods (comma separated)", self.moods_edit), ("Energy", self.energy_combo),
-            ("Audio", audio_row), ("Transition duration", self.transition_spin),
+            ("Audio", audio_row),
         ]:
             form.addRow(label, control)
         scroll = QScrollArea()

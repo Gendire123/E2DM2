@@ -50,6 +50,7 @@ ADMIN_TOKEN_ENV = "E2DM2_ADMIN_ACCESS_TOKEN"
 DEFAULT_ADMIN_API_URL = f"{SUPABASE_PROJECT_URL}/functions/v1/license-admin"
 DEVELOPMENT_ROOT = Path(__file__).resolve().parent.parent
 ADMIN_TOOLS_MARKER = DEVELOPMENT_ROOT / ".e2dm2-admin-tools"
+BUILTIN_ADMIN_MARKER = DEVELOPMENT_ROOT / ".e2dm2-builtin-admin"
 
 
 def _pro_shield_pixmap(size: int = 68) -> QPixmap:
@@ -108,6 +109,13 @@ def admin_tools_enabled() -> bool:
         "no",
         "off",
     }
+
+
+def builtin_library_admin_enabled() -> bool:
+    """Enable showing the option to add to built-in song library."""
+    if not (DEVELOPMENT_ROOT / "pyproject.toml").is_file():
+        return False
+    return BUILTIN_ADMIN_MARKER.is_file()
 
 
 class ProLicenseDialog(QDialog):
