@@ -43,7 +43,7 @@ from .entitlements import (
 )
 
 
-PRO_PURCHASE_URL = "https://buy.stripe.com/aFa14mcg3bLA0BU0rFaEE00"
+PRO_PURCHASE_URL = "https://buy.stripe.com/fZu6oGeob02Sbgy6Q3aEE01"
 ADMIN_TOOLS_ENV = "E2DM2_ENABLE_ADMIN_TOOLS"
 ADMIN_API_ENV = "E2DM2_LICENSE_ADMIN_URL"
 ADMIN_TOKEN_ENV = "E2DM2_ADMIN_ACCESS_TOKEN"
