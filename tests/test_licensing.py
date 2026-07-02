@@ -45,6 +45,10 @@ class MutableEntitlement:
     def has_feature(self, feature: str) -> bool:
         return self.active and feature in {CUSTOM_SONG_IMPORT_FEATURE, SOURCE_RESOLUTION_FEATURE}
 
+    @property
+    def is_pro(self) -> bool:
+        return self.active
+
 
 def test_license_code_normalization_is_paste_friendly():
     assert normalize_license_code(" e43 sd2-dfd_qw2 fdq ") == "E43-SD2-DFD-QW2-FDQ"
@@ -150,8 +154,21 @@ def test_new_song_click_prompts_free_user(qtbot):
 
     dialog.new_button.click()
 
-    assert prompts == ["Importing your own songs"]
+    assert prompts == ["Adding new songs to your soundtrack library"]
     assert len(dialog.songs) == original_count
+
+
+def test_workspace_song_library_passes_pro_prompt_to_new_song(qtbot):
+    entitlement = MutableEntitlement()
+    prompts = []
+    window = MainWindow(entitlement)
+    qtbot.addWidget(window)
+    window.workspace.request_pro = lambda feature: prompts.append(feature) or False
+
+    window.workspace.open_library()
+    window.workspace.library_page.new_button.click()
+
+    assert prompts == ["Adding new songs to your soundtrack library"]
 
 
 def test_license_dialog_formats_pasted_code(qtbot, tmp_path):

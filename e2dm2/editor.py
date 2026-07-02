@@ -984,7 +984,7 @@ class SongEditorDialog(QWidget):
     def new_song(self) -> None:
         if not self.entitlement.has_feature(CUSTOM_SONG_IMPORT_FEATURE):
             if self.request_pro:
-                self.request_pro("Importing your own songs")
+                self.request_pro("Adding new songs to your soundtrack library")
             if not self.entitlement.has_feature(CUSTOM_SONG_IMPORT_FEATURE):
                 return
             self.refresh_entitlements()

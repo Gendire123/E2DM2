@@ -2766,7 +2766,12 @@ class WorkspacePage(QWidget):
 
     def open_library(self) -> None:
         main_window = self.window()
-        self.library_page = SongEditorDialog(self.entitlement, main_window, workflow_filter=self.workflow_combo.currentData())
+        self.library_page = SongEditorDialog(
+            self.entitlement,
+            main_window,
+            workflow_filter=self.workflow_combo.currentData(),
+            request_pro=self.request_pro,
+        )
         selected_id = self.project.settings.song_id if self.project else None
         self.library_page.catalog_changed.connect(lambda: self.refresh_catalog(selected_id))
         self.library_page.accepted.connect(lambda: self.on_library_closed(selected_id))
