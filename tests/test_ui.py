@@ -2026,11 +2026,13 @@ def test_help_menu_updates(qtbot):
 
     # Initial state (Home Page active)
     actions = window.help_menu.actions()
-    assert len(actions) == 4
+    assert len(actions) == 6
     assert actions[0].text() == "Show Welcome Screen Tour"
     assert actions[1].text() == "Show Workspace Tour"
     assert actions[2].text() == "Show Soundtrack Tour"
     assert actions[3].text() == "Show Produce Tour"
+    assert actions[4].isSeparator()
+    assert actions[5].text() == "About E2DM2"
 
     # Push a SongEditorDialog to the stack
     library_page = SongEditorDialog(AlphaEntitlementProvider(), window)
@@ -2039,13 +2041,32 @@ def test_help_menu_updates(qtbot):
     QApplication.processEvents()
 
     actions = window.help_menu.actions()
-    assert len(actions) == 1
+    assert len(actions) == 3
     assert actions[0].text() == "Show Library Tour"
+    assert actions[1].isSeparator()
+    assert actions[2].text() == "About E2DM2"
 
     # Cleanup
     window.stack.removeWidget(library_page)
     library_page.deleteLater()
     window.close()
+
+
+def test_about_dialog_has_friendly_creator_message(qtbot):
+    from e2dm2.ui import APP_VERSION, AboutDialog
+
+    dialog = AboutDialog()
+    qtbot.addWidget(dialog)
+
+    assert dialog.windowTitle() == "About E2DM2"
+    assert dialog.findChild(QLabel, "aboutTitle") is None
+    assert dialog.logo_label.size() == QSize(456, 270)
+    assert dialog.findChild(QLabel, "aboutVersion").text() == f"Version {APP_VERSION}"
+    message = dialog.findChild(QLabel, "aboutThankYou").text()
+    assert "Thank you for using E2DM2!" in message
+    assert "Happy flying and happy creating!" in message
+    assert "Félix" in message
+    assert "—" not in message
 
 
 

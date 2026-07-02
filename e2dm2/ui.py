@@ -3458,6 +3458,85 @@ class AppSplashScreen(QWidget):
         QTimer.singleShot(0, self.center_on_screen)
 
 
+class AboutDialog(QDialog):
+    def __init__(
+        self,
+        entitlement: LocalLicenseProvider | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("About E2DM2")
+        self.setWindowIcon(QIcon(str(APP_ICON_PATH)))
+        self.setModal(True)
+        self.setFixedWidth(520)
+
+        is_pro = bool(entitlement and entitlement.is_pro)
+        card = QFrame()
+        card.setObjectName("aboutCardPro" if is_pro else "aboutCard")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(20, 28, 20, 26)
+        card_layout.setSpacing(12)
+        card_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.logo_label = QLabel()
+        self.logo_label.setObjectName("aboutLogo")
+        self.logo_label.setFixedSize(456, 270)
+        self.logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        logo_pixmap = QPixmap(str(Path(__file__).parent / "assets" / "logo.jpg"))
+        if logo_pixmap.isNull():
+            self.logo_label.setText("E2DM2")
+            self.logo_label.setStyleSheet("font-size: 32pt; font-weight: bold; color: #0E56AA;")
+        else:
+            self.logo_label.setPixmap(logo_pixmap.scaled(
+                self.logo_label.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            ))
+
+        version = QLabel(f"Version {APP_VERSION}")
+        version.setObjectName("aboutVersion")
+        version.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        if is_pro:
+            pro_badge = QLabel("PRO LICENSE OWNER")
+            pro_badge.setObjectName("splashProBadge")
+            pro_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            card_layout.addWidget(self.logo_label, 0, Qt.AlignmentFlag.AlignHCenter)
+            card_layout.addWidget(pro_badge, 0, Qt.AlignmentFlag.AlignCenter)
+        else:
+            card_layout.addWidget(self.logo_label, 0, Qt.AlignmentFlag.AlignHCenter)
+
+        card_layout.addWidget(version)
+
+        thank_you = QLabel(
+            "Thank you for using E2DM2! I built it to make turning drone footage "
+            "into a movie feel simple, creative, and fun. I hope it helps you bring "
+            "your ideas to life and makes every project a joy to create.\n\n"
+            "Happy flying and happy creating!\nFélix"
+        )
+        thank_you.setObjectName("aboutThankYou")
+        thank_you.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        thank_you.setWordWrap(True)
+        card_layout.addSpacing(4)
+        card_layout.addWidget(thank_you)
+
+        copyright_label = QLabel("© 2026 E2DM2. All rights reserved.")
+        copyright_label.setObjectName("aboutCopyright")
+        copyright_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        card_layout.addSpacing(4)
+        card_layout.addWidget(copyright_label)
+
+        close_button = QPushButton("Close")
+        close_button.setObjectName("primaryButton")
+        close_button.clicked.connect(self.accept)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(12)
+        layout.addWidget(card)
+        layout.addWidget(close_button, 0, Qt.AlignmentFlag.AlignCenter)
+
+
 class VisibleCheckBox(QCheckBox):
     """Checkbox with a consistently visible indicator across Qt styles."""
 
@@ -4000,6 +4079,12 @@ class MainWindow(QMainWindow):
             soundtrack_tour_action.triggered.connect(self.start_soundtrack_tour)
             produce_tour_action = self.help_menu.addAction("Show Produce Tour")
             produce_tour_action.triggered.connect(self.start_produce_tour)
+        self.help_menu.addSeparator()
+        about_action = self.help_menu.addAction("About E2DM2")
+        about_action.triggered.connect(self.show_about)
+
+    def show_about(self) -> None:
+        AboutDialog(self.entitlement, self).exec()
 
     def new_project(self) -> None:
         dialog = NewProjectDialog(self)
@@ -4693,6 +4778,34 @@ QLabel#splashStatus {
 QLabel#splashCopyright {
     font-size: 8pt;
     color: #8A98A8;
+}
+
+/* About Dialog */
+QFrame#aboutCard {
+    background-color: #FFFFFF;
+    border: 2px solid #0E56AA;
+    border-radius: 12px;
+}
+QFrame#aboutCardPro {
+    background-color: #FFFFFF;
+    border: 3px solid #D2A93B;
+    border-radius: 12px;
+}
+QFrame#aboutCard QLabel, QFrame#aboutCardPro QLabel {
+    background: transparent;
+}
+QLabel#aboutVersion {
+    color: #0E56AA;
+    font-size: 10.5pt;
+    font-weight: 600;
+}
+QLabel#aboutThankYou {
+    color: #526173;
+    font-size: 10.5pt;
+}
+QLabel#aboutCopyright {
+    color: #8A98A8;
+    font-size: 8pt;
 }
 
 /* Home Screen Specifics */
