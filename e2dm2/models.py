@@ -16,6 +16,7 @@ class WorkflowMode(str, Enum):
 
 class ExportSize(str, Enum):
     SOURCE = "source"
+    QHD_1440 = "1440p"
     HD_1080 = "1080p"
 
 
@@ -249,7 +250,7 @@ class ProjectSettings:
     workflow: WorkflowMode = WorkflowMode.EPIC_MONTAGE
     song_id: str | None = "epic-montage-1"
     full_length_track_id: str = "drone-music-1"
-    exports: list[ExportSize] = field(default_factory=lambda: [ExportSize.SOURCE])
+    exports: list[ExportSize] = field(default_factory=lambda: [ExportSize.QHD_1440])
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -269,7 +270,7 @@ class ProjectSettings:
             workflow=WorkflowMode(data.get("workflow", WorkflowMode.EPIC_MONTAGE.value)),
             song_id=data.get("song_id"),
             full_length_track_id=str(data.get("full_length_track_id", "drone-music-1")),
-            exports=[ExportSize(value) for value in data.get("exports", [ExportSize.SOURCE.value])],
+            exports=[ExportSize(value) for value in data.get("exports", [ExportSize.QHD_1440.value])],
         )
 
 
@@ -302,6 +303,12 @@ class SegmentPlan:
     visible_duration: float
     transition_after: float
     protected: bool = False
+    source_start_frame: int | None = None
+    source_frame_count: int | None = None
+    output_start_frame: int | None = None
+    output_frame_count: int | None = None
+    selection_score: float = 0.0
+    selection_reason: str = ""
 
 
 @dataclass(slots=True)
@@ -317,6 +324,7 @@ class RenderOutputPlan:
     output_path: str
     bitrate_kbps: int
     segments: list[SegmentPlan] = field(default_factory=list)
+    qc: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -330,6 +338,10 @@ class RenderPlan:
     encoder: str
     outputs: list[RenderOutputPlan]
     soundtrack_id: str | None = None
+    created_at: str | None = None
+    planner_version: str = "legacy"
+    reproducibility: dict[str, Any] = field(default_factory=dict)
+    qc: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -356,6 +368,10 @@ class RenderPlan:
             encoder=str(data["encoder"]),
             outputs=outputs,
             soundtrack_id=data.get("soundtrack_id"),
+            created_at=data.get("created_at"),
+            planner_version=str(data.get("planner_version", "legacy")),
+            reproducibility=dict(data.get("reproducibility", {})),
+            qc=dict(data.get("qc", {})),
         )
 
 

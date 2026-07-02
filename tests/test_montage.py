@@ -1,28 +1,31 @@
+import json
 from pathlib import Path
 
 import pytest
 
-from e2dm2.catalog import load_song_catalog
-from e2dm2.models import ExportSize, RenderOutputPlan
-from e2dm2.montage import build_full_length_segment_plan, build_montage_segment_plan, validate_forward_progression
+from e2dm2.catalog import load_song_catalog, load_song_manifest
+from e2dm2.models import EnergyLevel, ExportSize, RenderOutputPlan, SongManifest, WorkflowMode
+from e2dm2.montage import (
+    MINIMUM_SHOT_FRAMES,
+    build_full_length_segment_plan,
+    build_montage_segment_plan,
+    validate_montage_plan,
+)
 from e2dm2.render import _montage_filter
 
 
 @pytest.mark.parametrize("song_id", ["epic-montage-1", "epic-montage-2", "epic-montage-3"])
-def test_builtin_plans_always_move_forward(song_id):
+def test_builtin_plans_are_frame_aligned_and_move_forward(song_id):
     songs = load_song_catalog(custom_root=Path("missing-library"))
     song = next(s for s in songs if s.song_id == song_id)
     plan = build_montage_segment_plan(song.minimum_source_duration_seconds, song)
-    assert validate_forward_progression(
-        plan,
-        song.source_progression.short_cut_advance_seconds,
-        song.source_progression.short_cut_threshold_seconds,
-    ) == []
+    qc = validate_montage_plan(plan, song, 60)
+    assert qc["status"] == "pass"
+    assert qc["frame_aligned"]
+    assert qc["minimum_shot_frames"] >= MINIMUM_SHOT_FRAMES
     for previous, current in zip(plan, plan[1:]):
         previous_end = previous.source_start + previous.source_duration
         assert current.source_start >= previous_end
-        if previous.visible_duration < 5:
-            assert current.source_start - previous_end == pytest.approx(1, abs=0.001)
 
 
 def test_builtin_plan_durations_and_cut_counts():
@@ -77,10 +80,8 @@ def test_constrained_plan_excludes_red_and_preserves_green_once():
         for segment in plan
     )
     protected = [segment for segment in plan if segment.protected]
-    assert len(protected) == 3
-    assert (protected[0].source_start, protected[0].source_duration, protected[0].speed) == (16, 4, 1)
-    assert (protected[1].source_start, protected[1].source_duration, protected[1].speed) == (30, 4, 1)
-    assert (protected[2].source_start, protected[2].source_duration, protected[2].speed) == (45, 20, 1)
+    assert len(protected) == 1
+    assert (protected[0].source_start, protected[0].source_duration, protected[0].speed) == (45, 20, 1)
     for seg in protected:
         assert seg.style == "natural"
         assert seg.zoom == 1
@@ -94,6 +95,92 @@ def test_constrained_plan_excludes_red_and_preserves_green_once():
         protected[0].visible_start < segment.visible_start < protected_end
         for segment in plan if segment is not protected[0]
     )
+
+
+def test_epic_two_exclusions_keep_all_cues_and_do_not_inject_boundary_shots():
+    song = next(s for s in load_song_catalog(custom_root=Path("missing-library")) if s.song_id == "epic-montage-2")
+    excluded = [
+        (0, 4.887), (149.556, 193.543), (269.462, 285.102),
+        (351.897, 393.929), (428.141, 471.803),
+        (524.262, 541.531), (587.798, 606.045),
+    ]
+    fps = 60000 / 1001
+    plan = build_montage_segment_plan(606.045083, song, excluded_ranges=excluded, output_fps=fps)
+    qc = validate_montage_plan(plan, song, fps, excluded)
+    assert qc["status"] == "pass"
+    assert qc["music_cues_aligned"] == qc["music_cues_total"] == 88
+    assert qc["escalation_aligned"]
+    assert qc["late_cut_count"] == 0
+    assert qc["minimum_shot_frames"] >= MINIMUM_SHOT_FRAMES
+    assert not any(segment.protected for segment in plan)
+    assert all(segment.visible_start <= song.cuts_end_seconds for segment in plan)
+    assert plan[-1].visible_start < song.cuts_end_seconds
+    assert plan[-1].visible_start + plan[-1].visible_duration == pytest.approx(sum(s.visible_duration for s in plan))
+
+
+def test_scored_treatments_replace_periodic_effect_patterns():
+    song = next(s for s in load_song_catalog(custom_root=Path("missing-library")) if s.song_id == "epic-montage-2")
+    plan = build_montage_segment_plan(500, song, output_fps=60)
+    transformed = [segment for segment in plan if segment.speed > 1.001]
+    assert transformed
+    assert all(segment.visible_duration >= 3 or segment.cue for segment in transformed)
+    assert [segment.index for segment in plan if segment.zoom > 1] == [
+        segment.index for segment in plan if segment.cue
+    ]
+    assert all(segment.motion_blur == segment.cue for segment in plan)
+    assert all(segment.selection_score > 0 and segment.selection_reason for segment in plan)
+
+
+@pytest.mark.parametrize(
+    "song_id",
+    [
+        "epic-montage-1", "epic-montage-2", "epic-montage-3", "epic-montage-4", "epic-montage-5",
+        "real-estate-1", "real-estate-2", "real-estate-3", "real-estate-4", "real-estate-5",
+    ],
+)
+def test_all_builtin_montages_avoid_ambiguous_long_source_jumps(song_id):
+    song = next(s for s in load_song_catalog(custom_root=Path("missing-library")) if s.song_id == song_id)
+    for source_duration in (
+        song.minimum_source_duration_seconds,
+        max(song.minimum_source_duration_seconds, song.total_duration_seconds + len(song.cut_timestamps) * 5 + 30),
+    ):
+        plan = build_montage_segment_plan(source_duration, song, output_fps=60)
+        qc = validate_montage_plan(plan, song, 60)
+        assert qc["status"] == "pass"
+        assert qc["ambiguous_long_jump_count"] == 0
+        assert qc["short_transition_jump_count"] == 0
+        assert qc["maximum_crossfade_seconds"] <= 0.101
+
+
+def test_imported_custom_song_uses_shared_intentional_jump_policy(tmp_path):
+    song = SongManifest(
+        schema_version=1, song_id="custom-intentional-cuts", title="Custom Intentional Cuts",
+        artist="User", audio_file="audio.m4a", moods=["cinematic"], bpm=None,
+        energy=EnergyLevel.HIGH, total_duration_seconds=24,
+        minimum_source_duration_seconds=24, opening_fade_seconds=0,
+        cuts_end_seconds=24, fade_out_seconds=0, escalation_seconds=12,
+        cut_timestamps=[0, 6, 12, 18], effects=["none"] * 4,
+        workflow=WorkflowMode.EPIC_MONTAGE,
+    )
+    folder = tmp_path / song.song_id
+    folder.mkdir()
+    (folder / song.audio_file).write_bytes(b"placeholder")
+    (folder / "preset.json").write_text(json.dumps(song.to_dict()), encoding="utf-8")
+    imported = load_song_manifest(folder / "preset.json")
+    assert not imported.readonly
+
+    tight = build_montage_segment_plan(24, imported, output_fps=60)
+    tight_qc = validate_montage_plan(tight, imported, 60)
+    assert tight_qc["status"] == "pass"
+    assert tight_qc["ambiguous_long_jump_count"] == 0
+    assert not any(segment.transition_after for segment in tight)
+
+    ample = build_montage_segment_plan(60, imported, output_fps=60)
+    ample_qc = validate_montage_plan(ample, imported, 60)
+    assert ample_qc["status"] == "pass"
+    assert ample_qc["minimum_transition_source_jump_seconds"] >= 4.5
+    assert ample_qc["short_transition_jump_count"] == 0
+    assert ample_qc["maximum_crossfade_seconds"] <= 0.101
 
 
 def test_multiple_required_ranges_stay_in_source_order():

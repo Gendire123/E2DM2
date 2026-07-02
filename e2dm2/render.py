@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import math
 import os
@@ -14,7 +15,7 @@ from typing import Callable
 
 from .catalog import find_song, full_length_track, load_song_catalog
 from .encoder import EncoderInfo, encoder_arguments, select_encoder
-from .media import fit_within_1080, group_media
+from .media import fit_within_1080, fit_within_1440, group_media
 from .models import (
     CancellationToken,
     ExportSize,
@@ -30,7 +31,13 @@ from .models import (
     SongManifest,
     WorkflowMode,
 )
-from .montage import build_full_length_segment_plan, build_montage_segment_plan, validate_forward_progression
+from .montage import (
+    PLANNER_VERSION,
+    build_full_length_segment_plan,
+    build_montage_segment_plan,
+    canonical_fps,
+    validate_montage_plan,
+)
 
 
 ProgressCallback = Callable[[ProgressEvent], None]
@@ -48,6 +55,10 @@ def _safe_name(value: str) -> str:
 
 
 def _fps_value(fps: float) -> str:
+    if abs(fps - 30.0) < 0.005:
+        return "30"
+    if abs(fps - 60.0) < 0.005:
+        return "60"
     if abs(fps - 29.97) < 0.05:
         return "30000/1001"
     if abs(fps - 59.94) < 0.05:
@@ -55,14 +66,22 @@ def _fps_value(fps: float) -> str:
     return f"{fps:.3f}" if fps > 0 else "30"
 
 
+def _montage_delivery_fps(source_fps: float) -> float:
+    """Use a cadence-preserving high-frame-rate delivery for montage work."""
+    rate = canonical_fps(source_fps)
+    if 25 <= rate < 50:
+        return rate * 2
+    return rate
+
+
 def _bitrate_limits(width: int, height: int, fps: float) -> tuple[int, int]:
     pixels = width * height
     if pixels >= 8_000_000:
         return (25000, 60000) if fps > 50 else (18000, 45000)
     if pixels >= 3_500_000:
-        return (16000, 40000) if fps > 50 else (12000, 30000)
+        return (24000, 42000) if fps > 50 else (16000, 32000)
     if pixels >= 1_900_000:
-        return (8000, 22000) if fps > 50 else (6000, 16000)
+        return (12000, 24000) if fps > 50 else (8000, 18000)
     return 3000, 10000
 
 
@@ -73,6 +92,47 @@ def _target_bitrate(media, width: int, height: int, fps: float) -> int:
     original_kbps = sum(item.size_bytes for item in media) * 8 / duration / 1000
     minimum, maximum = _bitrate_limits(width, height, fps)
     return max(minimum, min(maximum, int(original_kbps * 0.35)))
+
+
+def _stable_hash(value: object) -> str:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _reproducibility_metadata(
+    project: Project, request: RenderRequest, song_data: dict | None, encoder: EncoderInfo,
+) -> dict:
+    source_files = []
+    for item in project.settings.media:
+        path = item.resolve(project.path)
+        stat = path.stat()
+        source_files.append({
+            "relative_path": item.relative_path,
+            "size_bytes": stat.st_size,
+            "modified_ns": stat.st_mtime_ns,
+            "metadata": {
+                "width": item.width, "height": item.height, "fps": item.fps,
+                "duration": item.duration, "codec": item.codec,
+            },
+            "selections": [selection.to_dict() for selection in item.selections],
+        })
+    inputs = {
+        "planner_version": PLANNER_VERSION,
+        "workflow": request.workflow.value,
+        "exports": [value.value for value in request.exports],
+        "soundtrack_id": request.song_id or request.full_length_track_id,
+        "song_manifest": song_data,
+        "encoder": encoder.codec,
+        "source_files": source_files,
+    }
+    digest = _stable_hash(inputs)
+    return {
+        "input_sha256": digest,
+        "deterministic_seed": int(digest[:16], 16),
+        "planner_version": PLANNER_VERSION,
+        "source_files": source_files,
+        "song_manifest_sha256": _stable_hash(song_data) if song_data else None,
+    }
 
 
 def _copy_snapshot(source: Path, destination: Path) -> Path:
@@ -154,9 +214,9 @@ def create_render_plan(
     stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S_%f")
     for group_key, media in group_media(project.settings.media).items():
         source_width, source_height, fps = media[0].width, media[0].height, media[0].fps
+        output_fps = _montage_delivery_fps(fps) if song else canonical_fps(fps)
         source_duration = sum(item.duration for item in media)
         excluded_ranges, required_ranges, source_boundaries = _group_selection_ranges(media)
-        constrained = bool(excluded_ranges or required_ranges)
         segments: list[SegmentPlan] = []
         if song:
             if source_duration < song.minimum_source_duration_seconds:
@@ -166,30 +226,30 @@ def create_render_plan(
                 )
             try:
                 segments = build_montage_segment_plan(
-                    source_duration, song, excluded_ranges, required_ranges, source_boundaries,
+                    source_duration, song, excluded_ranges, required_ranges, source_boundaries, output_fps,
                 )
             except ValueError as exc:
                 raise ValueError(f"{group_key}: {exc}") from exc
-            if not constrained:
-                progression_errors = validate_forward_progression(
-                    segments,
-                    song.source_progression.short_cut_advance_seconds,
-                    song.source_progression.short_cut_threshold_seconds,
-                )
-                if progression_errors:
-                    raise ValueError(" ".join(progression_errors))
+            montage_qc = validate_montage_plan(
+                segments, song, output_fps, excluded_ranges,
+                allow_protected_cue_gaps=bool(required_ranges),
+            )
+            if montage_qc["status"] != "pass":
+                raise ValueError("Montage QC failed: " + "; ".join(montage_qc["errors"]))
         elif excluded_ranges:
             try:
                 segments = build_full_length_segment_plan(source_duration, excluded_ranges, source_boundaries)
             except ValueError as exc:
                 raise ValueError(f"{group_key}: {exc}") from exc
         output_duration = (
-            song.total_duration_seconds if song else
+            sum(segment.visible_duration for segment in segments) if song else
             sum(segment.visible_duration for segment in segments) if segments else source_duration
         )
         for export_size in dict.fromkeys(request.exports):
             if export_size == ExportSize.HD_1080:
                 width, height = fit_within_1080(source_width, source_height)
+            elif export_size == ExportSize.QHD_1440:
+                width, height = fit_within_1440(source_width, source_height)
             else:
                 width, height = source_width, source_height
             mode_label = song.song_id if song else "full-length"
@@ -204,15 +264,22 @@ def create_render_plan(
                 media_paths=[str(item.resolve(project.path)) for item in media],
                 width=width,
                 height=height,
-                fps=fps,
+                fps=output_fps,
                 duration_seconds=output_duration,
                 export_size=export_size,
                 output_path=str(output_dir / output_name),
-                bitrate_kbps=_target_bitrate(media, width, height, fps),
+                bitrate_kbps=_target_bitrate(media, width, height, output_fps),
                 segments=segments,
+                qc=montage_qc if song else {
+                    "status": "pass", "planner_version": PLANNER_VERSION,
+                    "frame_aligned": True, "errors": [], "warnings": [],
+                },
             ))
+    reproducibility = _reproducibility_metadata(project, request, song_data, encoder)
+    output_qc = {output.output_id: output.qc for output in outputs}
+    plan_status = "pass" if all(value.get("status") == "pass" for value in output_qc.values()) else "fail"
     plan = RenderPlan(
-        schema_version=1,
+        schema_version=2,
         project_path=str(project.path),
         project_name=project.settings.name,
         workflow=request.workflow,
@@ -221,6 +288,10 @@ def create_render_plan(
         encoder=encoder.codec,
         outputs=outputs,
         soundtrack_id=request.song_id or request.full_length_track_id,
+        created_at=datetime.now().astimezone().isoformat(),
+        planner_version=PLANNER_VERSION,
+        reproducibility=reproducibility,
+        qc={"status": plan_status, "outputs": output_qc},
     )
     plan_path = project.path / "plans" / f"render-plan_{stamp}.json"
     temporary = plan_path.with_suffix(".json.partial")
@@ -399,6 +470,14 @@ def _full_length_filter(output: RenderOutputPlan) -> str:
     return ";\n".join(filters)
 
 
+def _delivery_arguments(output: RenderOutputPlan) -> list[str]:
+    gop = max(1, round(canonical_fps(output.fps) / 2))
+    return [
+        "-profile:v", "high", "-bf", "2", "-g", str(gop),
+        "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709",
+    ]
+
+
 def _full_length_command(
     plan: RenderPlan, output: RenderOutputPlan, concat: Path, temporary: Path, filter_path: Path | None = None,
 ) -> list[str]:
@@ -408,8 +487,8 @@ def _full_length_command(
             "ffmpeg", "-hide_banner", "-y", "-fflags", "+genpts", "-f", "concat", "-safe", "0", "-i", str(concat),
             "-stream_loop", "-1", "-i", plan.music_path, "-filter_complex_script", str(filter_path),
             "-map", "[videoout]", "-map", "[musicout]", "-sn", "-dn", "-r", _fps_value(output.fps),
-            *encoder_arguments(plan.encoder, output.bitrate_kbps), "-profile:v", "high",
-            "-g", str(max(1, round(output.fps * 2))), "-c:a", "aac", "-b:a", "192k",
+            *encoder_arguments(plan.encoder, output.bitrate_kbps), *_delivery_arguments(output),
+            "-c:a", "aac", "-b:a", "384k", "-ar", "48000",
             "-t", f"{output.duration_seconds:.6f}", "-shortest", "-avoid_negative_ts", "make_zero",
             "-movflags", "+faststart", "-progress", "pipe:1", "-nostats", str(temporary),
         ]
@@ -431,8 +510,9 @@ def _full_length_command(
         "ffmpeg", "-hide_banner", "-y", "-fflags", "+genpts", "-f", "concat", "-safe", "0", "-i", str(concat),
         "-stream_loop", "-1", "-i", plan.music_path, "-map", "0:v:0", "-vf", video_filter,
         "-filter_complex", audio_filter, "-map", "[musicout]", "-sn", "-dn", "-r", _fps_value(output.fps),
-        *encoder_arguments(plan.encoder, output.bitrate_kbps), "-profile:v", "high", "-g", str(max(1, round(output.fps * 2))),
-        "-c:a", "aac", "-b:a", "192k", "-t", f"{output.duration_seconds:.6f}", "-shortest",
+        *encoder_arguments(plan.encoder, output.bitrate_kbps), *_delivery_arguments(output),
+        "-c:a", "aac", "-b:a", "384k", "-ar", "48000",
+        "-t", f"{output.duration_seconds:.6f}", "-shortest",
         "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", "-progress", "pipe:1", "-nostats", str(temporary),
     ]
 
@@ -443,8 +523,9 @@ def _montage_command(plan: RenderPlan, output: RenderOutputPlan, concat: Path, f
         "-f", "concat", "-safe", "0", "-i", str(concat), "-stream_loop", "-1", "-i", plan.music_path,
         "-filter_complex_script", str(filter_path), "-map", "[videoout]", "-map", "[musicout]", "-sn", "-dn",
         "-t", f"{output.duration_seconds:.6f}", "-r", _fps_value(output.fps),
-        *encoder_arguments(plan.encoder, output.bitrate_kbps), "-profile:v", "high", "-g", str(max(1, round(output.fps * 2))),
-        "-c:a", "aac", "-b:a", "192k", "-shortest", "-avoid_negative_ts", "make_zero", "-movflags", "+faststart",
+        *encoder_arguments(plan.encoder, output.bitrate_kbps), *_delivery_arguments(output),
+        "-c:a", "aac", "-b:a", "384k", "-ar", "48000",
+        "-shortest", "-avoid_negative_ts", "make_zero", "-movflags", "+faststart",
         "-progress", "pipe:1", "-nostats", str(temporary),
     ]
 

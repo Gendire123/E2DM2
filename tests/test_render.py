@@ -29,7 +29,7 @@ def test_create_plan_snapshots_song_and_serializes(tmp_path):
     source = project.path / "source" / "clip.mp4"
     source.write_bytes(b"placeholder")
     project.settings.media = [MediaItem("source/clip.mp4", "clip.mp4", 2720, 1530, 59.94, 350, "h264", 1_000_000_000)]
-    request = RenderRequest(WorkflowMode.EPIC_MONTAGE, [ExportSize.SOURCE, ExportSize.HD_1080], "epic-montage-2")
+    request = RenderRequest(WorkflowMode.EPIC_MONTAGE, [ExportSize.SOURCE, ExportSize.QHD_1440], "epic-montage-2")
     plan = create_render_plan(
         project,
         request,
@@ -37,10 +37,46 @@ def test_create_plan_snapshots_song_and_serializes(tmp_path):
         encoder=EncoderInfo("libx264", "CPU x264", False),
     )
     assert len(plan.outputs) == 2
-    assert (plan.outputs[1].width, plan.outputs[1].height) == (1920, 1080)
+    assert (plan.outputs[1].width, plan.outputs[1].height) == (2560, 1440)
+    assert plan.outputs[1].bitrate_kbps >= 24000
+    assert plan.schema_version == 2
+    assert plan.planner_version != "legacy"
+    assert plan.reproducibility["input_sha256"]
+    assert plan.reproducibility["deterministic_seed"]
+    assert plan.qc["status"] == "pass"
+    assert plan.outputs[1].qc["music_cues_aligned"] == 88
     assert Path(plan.music_path).is_file()
     assert list((project.path / "plans").glob("render-plan_*.json"))
     json.dumps(plan.to_dict())
+    restored = RenderPlan.from_dict(plan.to_dict())
+    assert restored.planner_version == plan.planner_version
+    assert restored.reproducibility == plan.reproducibility
+    assert restored.outputs[1].qc == plan.outputs[1].qc
+
+
+def test_epic_two_30fps_source_delivers_5994_with_all_cues(tmp_path):
+    project = create_project("Maison", tmp_path / "projects")
+    source = project.path / "source" / "house.mp4"
+    source.write_bytes(b"placeholder")
+    project.settings.media = [MediaItem(
+        "source/house.mp4", "house.mp4", 3840, 2160, 29.93836296092496,
+        536.8593, "h264", 2_352_985_781,
+        [ClipSelection(SelectionType.EXCLUDE, 0, 23_668)],
+    )]
+    plan = create_render_plan(
+        project,
+        RenderRequest(WorkflowMode.EPIC_MONTAGE, [ExportSize.QHD_1440], "epic-montage-2"),
+        songs=load_song_catalog(custom_root=tmp_path / "library"),
+        encoder=EncoderInfo("libx264", "CPU x264", False),
+    )
+    output = plan.outputs[0]
+    assert output.fps == pytest.approx(60000 / 1001)
+    assert (output.width, output.height) == (2560, 1440)
+    assert output.qc["music_cues_aligned"] == output.qc["music_cues_total"] == 88
+    assert output.qc["minimum_shot_frames"] >= 8
+    assert output.qc["minimum_transition_source_jump_seconds"] >= 4.5
+    assert output.qc["short_transition_jump_count"] == 0
+    assert output.qc["maximum_crossfade_seconds"] <= 0.101
 
 
 def test_encoder_arguments_cover_all_backends():
@@ -48,6 +84,9 @@ def test_encoder_arguments_cover_all_backends():
         arguments = encoder_arguments(codec, 8000)
         assert "-c:v" in arguments
         assert "8000k" in arguments
+        assert "10000k" in arguments
+    assert "vbr_peak" in encoder_arguments("h264_amf", 8000)
+    assert "vbr" in encoder_arguments("h264_nvenc", 8000)
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg is required")
@@ -120,10 +159,8 @@ def test_render_plan_maps_clip_local_marks_to_group_timeline(tmp_path, monkeypat
     )
     segments = montage.outputs[0].segments
     protected = [segment for segment in segments if segment.protected]
-    assert len(protected) == 3
-    assert (protected[0].source_start, protected[0].source_duration) == (106, 4)
-    assert (protected[1].source_start, protected[1].source_duration) == (120, 4)
-    assert (protected[2].source_start, protected[2].source_duration) == (125, 20)
+    assert len(protected) == 1
+    assert (protected[0].source_start, protected[0].source_duration) == (125, 20)
     assert not any(segment.source_start < 120 and segment.source_start + segment.source_duration > 110 for segment in segments)
     assert json.loads(json.dumps(montage.to_dict()))["outputs"][0]["segments"][0]["protected"] in {True, False}
 

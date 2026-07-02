@@ -71,11 +71,12 @@ def select_encoder(test_hardware: bool = True) -> EncoderInfo:
 
 def encoder_arguments(codec: str, bitrate_kbps: int) -> list[str]:
     rate = f"{bitrate_kbps}k"
-    common = ["-b:v", rate, "-maxrate", rate, "-bufsize", f"{bitrate_kbps * 2}k"]
+    peak = f"{round(bitrate_kbps * 1.25)}k"
+    common = ["-b:v", rate, "-maxrate", peak, "-bufsize", f"{bitrate_kbps * 2}k"]
     if codec == "h264_amf":
-        return ["-c:v", codec, "-quality", "quality", "-rc", "cbr", *common]
+        return ["-c:v", codec, "-quality", "quality", "-rc", "vbr_peak", *common]
     if codec == "h264_nvenc":
-        return ["-c:v", codec, "-preset", "p5", "-rc", "cbr", *common]
+        return ["-c:v", codec, "-preset", "p6", "-rc", "vbr", *common]
     if codec == "h264_qsv":
-        return ["-c:v", codec, "-preset", "medium", *common]
-    return ["-c:v", "libx264", "-preset", "medium", *common]
+        return ["-c:v", codec, "-preset", "slow", *common]
+    return ["-c:v", "libx264", "-preset", "slow", *common]

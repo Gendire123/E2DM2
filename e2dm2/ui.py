@@ -1639,7 +1639,7 @@ class WorkspacePage(QWidget):
         config_layout.addWidget(export_label)
 
         self.source_export = VisibleCheckBox("Source resolution")
-        self.hd_export = VisibleCheckBox("1080p maximum")
+        self.hd_export = VisibleCheckBox("1440p maximum")
         self.source_export.setChecked(True)
         self.source_export.toggled.connect(lambda checked: self.hd_export.setChecked(False) if checked else None)
         self.hd_export.toggled.connect(lambda checked: self.source_export.setChecked(False) if checked else None)
@@ -2097,7 +2097,9 @@ class WorkspacePage(QWidget):
         self.workflow_combo.setCurrentIndex(max(0, workflow_index))
         self.workflow_combo.blockSignals(False)
         self.source_export.setChecked(ExportSize.SOURCE in project.settings.exports)
-        self.hd_export.setChecked(ExportSize.HD_1080 in project.settings.exports)
+        self.hd_export.setChecked(
+            ExportSize.QHD_1440 in project.settings.exports or ExportSize.HD_1080 in project.settings.exports
+        )
         self.refresh_entitlements()
         self.refresh_media()
         self.refresh_catalog(project.settings.song_id)
@@ -2804,7 +2806,7 @@ class WorkspacePage(QWidget):
         if self.source_export.isChecked():
             exports.append(ExportSize.SOURCE)
         if self.hd_export.isChecked():
-            exports.append(ExportSize.HD_1080)
+            exports.append(ExportSize.QHD_1440)
         return exports
 
     def _current_render_request(self) -> RenderRequest | None:
@@ -2859,6 +2861,7 @@ class WorkspacePage(QWidget):
             soundtrack = track.title if track else Path(plan.music_path).stem
         labels = {
             ExportSize.SOURCE: "Source resolution",
+            ExportSize.QHD_1440: "1440p maximum",
             ExportSize.HD_1080: "1080p maximum",
         }
         export_sizes = list(dict.fromkeys(output.export_size for output in plan.outputs))
@@ -3331,7 +3334,7 @@ class WorkspacePage(QWidget):
             {
                 "target": lambda ws: ws._get_export_resolutions_rect(),
                 "title": "Export Resolution",
-                "description": "Choose your final video resolution. By default, standard 1080p is selected. Pro users can export at Source resolution to output stunning high-definition 4K footage."
+                "description": "Choose your final video resolution. By default, high-quality 1440p is selected. Pro users can export at Source resolution for full-resolution footage."
             },
             {
                 "target": lambda ws: ws.add_to_queue_button,

@@ -65,6 +65,14 @@ def fit_within_1080(width: int, height: int) -> tuple[int, int]:
     return target_width, target_height
 
 
+def fit_within_1440(width: int, height: int) -> tuple[int, int]:
+    """Fit a source within the standard 2560x1440 delivery raster."""
+    scale = min(1.0, 2560 / max(width, 1), 1440 / max(height, 1))
+    target_width = max(2, int(width * scale) // 2 * 2)
+    target_height = max(2, int(height * scale) // 2 * 2)
+    return target_width, target_height
+
+
 def preview_proxy_path(project_path: Path, media: MediaItem) -> Path:
     source_name = Path(media.relative_path).name
     source = Path(source_name)
