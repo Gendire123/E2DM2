@@ -22,6 +22,7 @@ from e2dm2.licensing_ui import (
     ProLicenseDialog,
     admin_tools_enabled,
 )
+from e2dm2.models import ExportSize
 from e2dm2.ui import MainWindow, WorkspacePage
 
 
@@ -107,7 +108,8 @@ def test_source_resolution_click_prompts_free_user(qtbot):
     assert prompts == ["Source resolution exports"]
     assert page.hd_export.isChecked()
     assert not page.source_export.isChecked()
-    assert page.selected_exports() != []
+    assert page.hd_export.text() == "1080p maximum"
+    assert page.selected_exports() == [ExportSize.HD_1080]
 
 
 def test_source_resolution_click_continues_after_activation(qtbot):
@@ -123,6 +125,17 @@ def test_source_resolution_click_continues_after_activation(qtbot):
 
     assert page.source_export.isChecked()
     assert not page.hd_export.isChecked()
+    assert page.hd_export.text() == "1440p maximum"
+
+
+def test_pro_hd_export_uses_1440p(qtbot):
+    page = WorkspacePage(MutableEntitlement(active=True))
+    qtbot.addWidget(page)
+    page.source_export.setChecked(False)
+    page.hd_export.setChecked(True)
+
+    assert page.hd_export.text() == "1440p maximum"
+    assert page.selected_exports() == [ExportSize.QHD_1440]
 
 
 def test_new_song_click_prompts_free_user(qtbot):

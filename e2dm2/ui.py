@@ -2787,6 +2787,7 @@ class WorkspacePage(QWidget):
 
     def refresh_entitlements(self) -> None:
         has_source = self.entitlement.has_feature(SOURCE_RESOLUTION_FEATURE)
+        self.hd_export.setText("1440p maximum" if has_source else "1080p maximum")
         if not has_source:
             self.source_export.setChecked(False)
             self.hd_export.setChecked(True)
@@ -2806,7 +2807,11 @@ class WorkspacePage(QWidget):
         if self.source_export.isChecked():
             exports.append(ExportSize.SOURCE)
         if self.hd_export.isChecked():
-            exports.append(ExportSize.QHD_1440)
+            exports.append(
+                ExportSize.QHD_1440
+                if self.entitlement.has_feature(SOURCE_RESOLUTION_FEATURE)
+                else ExportSize.HD_1080
+            )
         return exports
 
     def _current_render_request(self) -> RenderRequest | None:
@@ -3334,7 +3339,7 @@ class WorkspacePage(QWidget):
             {
                 "target": lambda ws: ws._get_export_resolutions_rect(),
                 "title": "Export Resolution",
-                "description": "Choose your final video resolution. By default, high-quality 1440p is selected. Pro users can export at Source resolution for full-resolution footage."
+                "description": "Choose your final video resolution. The standard license exports up to 1080p. Pro users can export up to 1440p or at Source resolution for full-resolution footage."
             },
             {
                 "target": lambda ws: ws.add_to_queue_button,
