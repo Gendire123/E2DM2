@@ -125,7 +125,7 @@ LOGGER = logging.getLogger(__name__)
 PLAYBACK_LATENCY_MS = 300
 SHOW_SPLASH_SETTING = "startup/show_splash_screen"
 APP_ICON_PATH = Path(__file__).parent / "assets" / "icons" / "app-icon.ico"
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 
 
 def splash_screen_enabled(settings: QSettings | None = None) -> bool:
