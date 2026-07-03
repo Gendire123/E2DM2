@@ -180,8 +180,8 @@ if (-not $SkipInstaller) {
     Write-Host "Installer: $InstallerPath"
     
     if (Test-Path -LiteralPath $InstallerPath) {
-        Write-Host "Updating E2DM2 website index.html..."
-        & $BuildPython (Join-Path $PSScriptRoot "update_website.py") $Version $InstallerPath
+        $GitHubReleasePublished = $false
+        $VirusTotalUploaded = $false
 
         # GitHub Release Automation
         if (Get-Command gh -ErrorAction SilentlyContinue) {
@@ -193,6 +193,7 @@ if (-not $SkipInstaller) {
             gh release create "v$Version" $InstallerPath --repo "Gendire123/E2DM2-Releases" --title "Easy Epic Drone Movie Maker (E2DM2) - v$Version" --notes-file $NotesFile
             if ($LASTEXITCODE -eq 0) {
                 Write-Host "GitHub Release created successfully!"
+                $GitHubReleasePublished = $true
             } else {
                 Write-Error "GitHub CLI failed to create the release. Make sure you are authenticated with 'gh auth login'."
             }
@@ -206,11 +207,29 @@ if (-not $SkipInstaller) {
             & $BuildPython (Join-Path $PSScriptRoot "upload_virustotal.py") $InstallerPath
             if ($LASTEXITCODE -eq 0) {
                 Write-Host "VirusTotal upload completed successfully!"
+                $VirusTotalUploaded = $true
             } else {
                 Write-Error "VirusTotal upload failed."
             }
         } else {
             Write-Warning "VIRUSTOTAL_API_KEY environment variable is not set. Skipping automatic VirusTotal upload."
+        }
+
+        # Publish one atomic release manifest only after the installer exists at
+        # GitHub and has been accepted by VirusTotal. The website reads this
+        # manifest at runtime, so a Netlify deployment is no longer required.
+        if ($GitHubReleasePublished -and $VirusTotalUploaded) {
+            if ($env:SUPABASE_RELEASE_PUBLISH_TOKEN) {
+                Write-Host "Publishing release metadata to Supabase..."
+                & $BuildPython (Join-Path $PSScriptRoot "publish_release.py") $Version $InstallerPath
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Error "Supabase release metadata publish failed."
+                }
+            } else {
+                Write-Warning "SUPABASE_RELEASE_PUBLISH_TOKEN is not set. The website will continue showing the previous release."
+            }
+        } else {
+            Write-Warning "Release metadata was not published because GitHub and VirusTotal did not both complete successfully."
         }
     }
 }

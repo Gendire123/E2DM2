@@ -12,7 +12,26 @@ supabase link --project-ref kzozxeyktwxcsukkheah
 supabase db push
 supabase functions deploy license-activate --no-verify-jwt
 supabase functions deploy license-admin
+supabase functions deploy release-metadata --no-verify-jwt
 ```
+
+## Public release metadata
+
+The `release-metadata` function gives the website one atomic, public release
+manifest while keeping database writes private. Generate a long random publish
+token, configure the same value in the function and on the Windows build
+machine, then redeploy the function:
+
+```powershell
+supabase secrets set RELEASE_PUBLISH_TOKEN="A_LONG_RANDOM_RELEASE_ONLY_SECRET"
+$env:SUPABASE_RELEASE_PUBLISH_TOKEN = "A_LONG_RANDOM_RELEASE_ONLY_SECRET"
+```
+
+After GitHub and VirusTotal uploads both succeed, `build_windows.ps1` publishes
+the version, installer URL, byte size, SHA-256 digest, and VirusTotal URL. The
+website then updates without another Netlify deployment. Keep this token
+separate from the Supabase service-role key; the service-role key should never
+be stored on the build machine or website.
 
 The desktop app already defaults to this project's deployed function URLs. `E2DM2_LICENSE_API_URL` and `E2DM2_LICENSE_ADMIN_URL` remain optional overrides for staging.
 
