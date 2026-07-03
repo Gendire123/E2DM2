@@ -11,6 +11,7 @@ from PySide6.QtCore import (
     QEasingCurve,
     QPointF,
     QPropertyAnimation,
+    QRect,
     QRectF,
     QObject,
     QSize,
@@ -81,7 +82,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .catalog import FULL_LENGTH_TRACKS, default_project_root, filter_songs, load_song_catalog
+from .catalog import (
+    FULL_LENGTH_TRACKS,
+    default_project_root,
+    filter_songs,
+    is_royalty_free_song,
+    load_song_catalog,
+)
 from .editor import SongEditorDialog
 from .entitlements import (
     AlphaEntitlementProvider,
@@ -125,7 +132,8 @@ LOGGER = logging.getLogger(__name__)
 PLAYBACK_LATENCY_MS = 300
 SHOW_SPLASH_SETTING = "startup/show_splash_screen"
 APP_ICON_PATH = Path(__file__).parent / "assets" / "icons" / "app-icon.ico"
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0.3"
+ROYALTY_FREE_ROLE = int(Qt.ItemDataRole.UserRole) + 20
 
 
 def splash_screen_enabled(settings: QSettings | None = None) -> bool:
@@ -153,6 +161,22 @@ def _song_transport_icon(stopping: bool) -> QIcon:
     return QIcon(pixmap)
 
 
+def _royalty_free_icon(royalty_free: bool) -> QIcon:
+    name = "royalty-free.svg" if royalty_free else "not-royalty-free.svg"
+    return QIcon(str(Path(__file__).parent / "assets" / "icons" / name))
+
+
+def _royalty_free_item(song_id: str) -> QTableWidgetItem:
+    royalty_free = is_royalty_free_song(song_id)
+    item = QTableWidgetItem()
+    item.setIcon(_royalty_free_icon(royalty_free))
+    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+    item.setData(Qt.ItemDataRole.UserRole, royalty_free)
+    item.setData(ROYALTY_FREE_ROLE, royalty_free)
+    item.setToolTip("Royalty-free" if royalty_free else "Not royalty-free")
+    return item
+
+
 class ClickSeekSlider(QSlider):
     position_requested = Signal(int)
 
@@ -169,7 +193,7 @@ class ClickSeekSlider(QSlider):
             QStyle.SubControl.SC_SliderHandle,
             self,
         )
-        if handle.contains(event.position().toPoint()):
+        if handle.contains(event.position().toPoint()) and self.width() > handle.width() * 2:
             super().mousePressEvent(event)
             return
 
@@ -887,6 +911,27 @@ class FullRowSelectionDelegate(QStyledItemDelegate):
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
         row_option = QStyleOptionViewItem(option)
         row_option.state &= ~QStyle.StateFlag.State_HasFocus
+        if index.data(ROYALTY_FREE_ROLE) is not None:
+            self.initStyleOption(row_option, index)
+            icon = QIcon(row_option.icon)
+            row_option.icon = QIcon()
+            row_option.text = ""
+            style = row_option.widget.style() if row_option.widget is not None else QApplication.style()
+            painter.save()
+            style.drawControl(QStyle.ControlElement.CE_ItemViewItem, row_option, painter, row_option.widget)
+            painter.restore()
+            icon_size = option.widget.iconSize() if option.widget is not None else QSize(26, 26)
+            icon_rect = QRect(
+                row_option.rect.center().x() - icon_size.width() // 2,
+                row_option.rect.center().y() - icon_size.height() // 2,
+                icon_size.width(),
+                icon_size.height(),
+            )
+            painter.save()
+            painter.setClipRect(row_option.rect)
+            icon.paint(painter, icon_rect, Qt.AlignmentFlag.AlignCenter)
+            painter.restore()
+            return
         super().paint(painter, row_option, index)
 
 
@@ -1838,15 +1883,18 @@ class WorkspacePage(QWidget):
         filters.addWidget(self.song_search, 1)
         filters.addWidget(self.mood_filter)
         filters.addWidget(self.manage_button)
-        self.song_table = SmoothTableWidget(0, 4)
-        self.song_table.setHorizontalHeaderLabels(["Song", "Mood", "Cuts", "Length"])
+        self.song_table = SmoothTableWidget(0, 5)
+        self.song_table.setHorizontalHeaderLabels(["Song", "Royalty-free", "Mood", "Cuts", "Length"])
         self.song_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.song_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.song_table.setItemDelegate(FullRowSelectionDelegate(self.song_table))
         self.song_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.song_table.setIconSize(QSize(26, 26))
         self.song_table.verticalHeader().setDefaultSectionSize(52)
         self.song_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for column in range(1, 4):
+        self.song_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        self.song_table.setColumnWidth(1, 132)
+        for column in range(2, 5):
             self.song_table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
         self.song_table.itemSelectionChanged.connect(self.song_selected)
         layout = QVBoxLayout(panel)
@@ -1871,15 +1919,18 @@ class WorkspacePage(QWidget):
         filters.addWidget(self.full_song_search, 1)
         filters.addWidget(self.full_mood_filter)
         filters.addWidget(manage)
-        self.full_song_table = SmoothTableWidget(0, 4)
-        self.full_song_table.setHorizontalHeaderLabels(["Song", "Mood", "Cuts", "Length"])
+        self.full_song_table = SmoothTableWidget(0, 5)
+        self.full_song_table.setHorizontalHeaderLabels(["Song", "Royalty-free", "Mood", "Cuts", "Length"])
         self.full_song_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.full_song_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.full_song_table.setItemDelegate(FullRowSelectionDelegate(self.full_song_table))
         self.full_song_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.full_song_table.setIconSize(QSize(26, 26))
         self.full_song_table.verticalHeader().setDefaultSectionSize(52)
         self.full_song_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for column in range(1, 4):
+        self.full_song_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        self.full_song_table.setColumnWidth(1, 132)
+        for column in range(2, 5):
             self.full_song_table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
         self.full_song_table.itemSelectionChanged.connect(self.song_selected)
         layout = QVBoxLayout(panel)
@@ -1904,15 +1955,18 @@ class WorkspacePage(QWidget):
         filters.addWidget(self.re_song_search, 1)
         filters.addWidget(self.re_mood_filter)
         filters.addWidget(manage)
-        self.re_song_table = SmoothTableWidget(0, 4)
-        self.re_song_table.setHorizontalHeaderLabels(["Song", "Mood", "Cuts", "Length"])
+        self.re_song_table = SmoothTableWidget(0, 5)
+        self.re_song_table.setHorizontalHeaderLabels(["Song", "Royalty-free", "Mood", "Cuts", "Length"])
         self.re_song_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.re_song_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.re_song_table.setItemDelegate(FullRowSelectionDelegate(self.re_song_table))
         self.re_song_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.re_song_table.setIconSize(QSize(26, 26))
         self.re_song_table.verticalHeader().setDefaultSectionSize(52)
         self.re_song_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for column in range(1, 4):
+        self.re_song_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        self.re_song_table.setColumnWidth(1, 132)
+        for column in range(2, 5):
             self.re_song_table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
         self.re_song_table.itemSelectionChanged.connect(self.song_selected)
         layout = QVBoxLayout(panel)
@@ -1937,15 +1991,18 @@ class WorkspacePage(QWidget):
         filters.addWidget(self.custom_song_search, 1)
         filters.addWidget(self.custom_mood_filter)
         filters.addWidget(manage)
-        self.custom_song_table = SmoothTableWidget(0, 4)
-        self.custom_song_table.setHorizontalHeaderLabels(["Song", "Mood", "Cuts", "Length"])
+        self.custom_song_table = SmoothTableWidget(0, 5)
+        self.custom_song_table.setHorizontalHeaderLabels(["Song", "Royalty-free", "Mood", "Cuts", "Length"])
         self.custom_song_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.custom_song_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.custom_song_table.setItemDelegate(FullRowSelectionDelegate(self.custom_song_table))
         self.custom_song_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.custom_song_table.setIconSize(QSize(26, 26))
         self.custom_song_table.verticalHeader().setDefaultSectionSize(52)
         self.custom_song_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for column in range(1, 4):
+        self.custom_song_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        self.custom_song_table.setColumnWidth(1, 132)
+        for column in range(2, 5):
             self.custom_song_table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
         self.custom_song_table.itemSelectionChanged.connect(self.song_selected)
         layout = QVBoxLayout(panel)
@@ -2373,7 +2430,7 @@ class WorkspacePage(QWidget):
             selected_row = -1
             for row, song in enumerate(filtered):
                 values = [song.title, ", ".join(song.moods), str(len(song.cut_timestamps)), _duration(song.total_duration_seconds)]
-                for column, value in enumerate(values):
+                for column, value in zip((0, 2, 3, 4), values):
                     item = QTableWidgetItem(value)
                     if column == 0:
                         item.setData(Qt.ItemDataRole.UserRole, song.song_id)
@@ -2382,6 +2439,7 @@ class WorkspacePage(QWidget):
                             tooltip = f"{song.artist}\n{tooltip}"
                         item.setToolTip(tooltip)
                     self.song_table.setItem(row, column, item)
+                self.song_table.setItem(row, 1, _royalty_free_item(song.song_id))
                 self._install_song_preview(
                     self.song_table, row, song.song_id, song.title, song.audio_path, song.total_duration_seconds,
                 )
@@ -2427,11 +2485,12 @@ class WorkspacePage(QWidget):
             self.full_song_table.setRowCount(len(rows))
             selected_full_row = -1
             for row, (track_id, title, mood, cuts, length, audio_path, duration_seconds) in enumerate(rows):
-                for column, value in enumerate((title, mood, cuts, length)):
+                for column, value in zip((0, 2, 3, 4), (title, mood, cuts, length)):
                     item = QTableWidgetItem(value)
                     if column == 0:
                         item.setData(Qt.ItemDataRole.UserRole, track_id)
                     self.full_song_table.setItem(row, column, item)
+                self.full_song_table.setItem(row, 1, _royalty_free_item(track_id))
                 self._install_song_preview(
                     self.full_song_table, row, track_id, title, audio_path, duration_seconds,
                 )
@@ -2453,7 +2512,7 @@ class WorkspacePage(QWidget):
             selected_re_row = -1
             for row, song in enumerate(re_filtered):
                 values = [song.title, ", ".join(song.moods), str(len(song.cut_timestamps)), _duration(song.total_duration_seconds)]
-                for column, value in enumerate(values):
+                for column, value in zip((0, 2, 3, 4), values):
                     item = QTableWidgetItem(value)
                     if column == 0:
                         item.setData(Qt.ItemDataRole.UserRole, song.song_id)
@@ -2462,6 +2521,7 @@ class WorkspacePage(QWidget):
                             tooltip = f"{song.artist}\n{tooltip}"
                         item.setToolTip(tooltip)
                     self.re_song_table.setItem(row, column, item)
+                self.re_song_table.setItem(row, 1, _royalty_free_item(song.song_id))
                 self._install_song_preview(
                     self.re_song_table, row, song.song_id, song.title, song.audio_path, song.total_duration_seconds,
                 )
@@ -2483,7 +2543,7 @@ class WorkspacePage(QWidget):
             selected_custom_row = -1
             for row, song in enumerate(custom_filtered):
                 values = [song.title, ", ".join(song.moods), str(len(song.cut_timestamps)), _duration(song.total_duration_seconds)]
-                for column, value in enumerate(values):
+                for column, value in zip((0, 2, 3, 4), values):
                     item = QTableWidgetItem(value)
                     if column == 0:
                         item.setData(Qt.ItemDataRole.UserRole, song.song_id)
@@ -2492,6 +2552,7 @@ class WorkspacePage(QWidget):
                             tooltip = f"{song.artist}\n{tooltip}"
                         item.setToolTip(tooltip)
                     self.custom_song_table.setItem(row, column, item)
+                self.custom_song_table.setItem(row, 1, _royalty_free_item(song.song_id))
                 self._install_song_preview(
                     self.custom_song_table, row, song.song_id, song.title, song.audio_path, song.total_duration_seconds,
                 )

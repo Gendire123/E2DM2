@@ -118,16 +118,14 @@ def test_epic_two_exclusions_keep_all_cues_and_do_not_inject_boundary_shots():
     assert plan[-1].visible_start + plan[-1].visible_duration == pytest.approx(sum(s.visible_duration for s in plan))
 
 
-def test_scored_treatments_replace_periodic_effect_patterns():
+def test_scored_treatments_keep_native_cadence():
     song = next(s for s in load_song_catalog(custom_root=Path("missing-library")) if s.song_id == "epic-montage-2")
     plan = build_montage_segment_plan(500, song, output_fps=60)
-    transformed = [segment for segment in plan if segment.speed > 1.001]
-    assert transformed
-    assert all(segment.visible_duration >= 3 or segment.cue for segment in transformed)
+    assert all(segment.speed == pytest.approx(1.0) for segment in plan)
+    assert not any(segment.motion_blur for segment in plan)
     assert [segment.index for segment in plan if segment.zoom > 1] == [
         segment.index for segment in plan if segment.cue
     ]
-    assert all(segment.motion_blur == segment.cue for segment in plan)
     assert all(segment.selection_score > 0 and segment.selection_reason for segment in plan)
 
 

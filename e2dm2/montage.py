@@ -11,7 +11,7 @@ MINIMUM_SHOT_FRAMES = 8
 MINIMUM_INTENTIONAL_JUMP_SECONDS = 4.5
 MAX_MONTAGE_CROSSFADE_SECONDS = 0.1
 REQUIRED_CUT_BUFFER_SECONDS = 5.0
-PLANNER_VERSION = "2.1-intentional-jumps"
+PLANNER_VERSION = "2.2-native-cadence"
 
 
 def canonical_fps(fps: float) -> float:
@@ -243,22 +243,18 @@ def _slot_treatment(song: SongManifest, start: float, duration: float, is_escala
         score += 0.4
         reasons.append("escalation")
 
-    # Speed processing is reserved for shots long enough to benefit from it;
-    # rapid heartbeat/flash cells stay at native cadence and sharpness.
+    # Keep every automatically selected shot at its recorded cadence. Retiming
+    # 59.94 fps footage with the fps filter drops frames at uneven intervals,
+    # which is visible as micro-stutter during otherwise smooth drone motion.
     desired_speed = 1.0
-    if is_escalation and duration >= 1.5:
-        desired_speed = 1.12
-    elif score >= 0.62 and duration >= 3.0 and effect == "none":
-        desired_speed = 1.08
     zoom = 1.03 if is_escalation and duration >= 1.5 else 1.0
-    motion_blur = desired_speed > 1.0 and is_escalation
     return {
         "effect": effect,
         "score": min(score, 1.0),
         "reason": "+".join(reasons),
         "desired_speed": desired_speed,
         "zoom": zoom,
-        "motion_blur": motion_blur,
+        "motion_blur": False,
     }
 
 

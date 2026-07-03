@@ -176,5 +176,27 @@ if (-not $SkipInstaller) {
 
 Write-Host "Standalone application: $DistDir"
 if (-not $SkipInstaller) {
-    Write-Host "Installer: $(Join-Path $OutputRoot "E2DM2-Setup-$Version.exe")"
+    $InstallerPath = Join-Path $OutputRoot "E2DM2-Setup-$Version.exe"
+    Write-Host "Installer: $InstallerPath"
+    
+    if (Test-Path -LiteralPath $InstallerPath) {
+        Write-Host "Calculating SHA-256 hash of new installer..."
+        $Hash = (Get-FileHash -Algorithm SHA256 $InstallerPath).Hash.ToLower()
+        
+        $ParentDir = Split-Path $Root -Parent
+        $WebIndexHtml = Join-Path $ParentDir "E2DM2 Website\index.html"
+        
+        if (Test-Path -LiteralPath $WebIndexHtml) {
+            Write-Host "Updating installer SHA-256 hash and VirusTotal links in website index.html..."
+            $Content = Get-Content -Raw $WebIndexHtml
+            
+            # Replace any 64-character hex sequence in index.html with the new hash
+            $UpdatedContent = $Content -replace '\b[a-fA-F0-9]{64}\b', $Hash
+            
+            Set-Content -Path $WebIndexHtml -Value $UpdatedContent -NoNewline
+            Write-Host "Website hash updated successfully to: $Hash"
+        } else {
+            Write-Warning "Website index.html not found at: $WebIndexHtml"
+        }
+    }
 }

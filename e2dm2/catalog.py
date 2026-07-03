@@ -37,6 +37,21 @@ FULL_LENGTH_TRACKS = (
 )
 
 
+NON_ROYALTY_FREE_SONG_IDS = frozenset({
+    "epic-montage-2",
+    "epic-montage-3",
+    "drone-music-1",
+    "drone-music-2",
+    "drone-music-3",
+    "drone-music-4",
+    "drone-music-5",
+})
+
+
+def is_royalty_free_song(song_id: str) -> bool:
+    return song_id not in NON_ROYALTY_FREE_SONG_IDS
+
+
 def default_project_root() -> Path:
     override = os.environ.get("E2DM2_HOME")
     return Path(override) if override else Path.home() / "Documents" / "E2DM2"

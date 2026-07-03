@@ -160,7 +160,34 @@ def test_music_library_selection_is_painted_as_a_full_row(qtbot):
         assert isinstance(table.itemDelegate(), FullRowSelectionDelegate)
 
     page.song_table.setCurrentCell(0, 2)
-    assert {index.column() for index in page.song_table.selectionModel().selectedIndexes()} == {0, 1, 2, 3}
+    assert {index.column() for index in page.song_table.selectionModel().selectedIndexes()} == set(
+        range(page.song_table.columnCount())
+    )
+
+
+def test_music_library_shows_royalty_free_status_icons(qtbot):
+    page = WorkspacePage()
+    qtbot.addWidget(page)
+
+    for table in (page.song_table, page.full_song_table, page.re_song_table, page.custom_song_table):
+        assert table.horizontalHeaderItem(1).text() == "Royalty-free"
+
+    epic_rows = {
+        page.song_table.item(row, 0).data(Qt.ItemDataRole.UserRole): row
+        for row in range(page.song_table.rowCount())
+    }
+    assert page.song_table.item(epic_rows["epic-montage-1"], 1).data(Qt.ItemDataRole.UserRole) is True
+    assert page.song_table.item(epic_rows["epic-montage-2"], 1).data(Qt.ItemDataRole.UserRole) is False
+    assert page.song_table.item(epic_rows["epic-montage-3"], 1).data(Qt.ItemDataRole.UserRole) is False
+
+    full_rows = {
+        page.full_song_table.item(row, 0).data(Qt.ItemDataRole.UserRole): row
+        for row in range(page.full_song_table.rowCount())
+    }
+    for track_id in {"drone-music-1", "drone-music-2", "drone-music-3", "drone-music-4", "drone-music-5"}:
+        status = page.full_song_table.item(full_rows[track_id], 1)
+        assert status.data(Qt.ItemDataRole.UserRole) is False
+        assert not status.icon().isNull()
 
 
 def test_hero_shows_created_then_selected_soundtrack_target_duration(qtbot, tmp_path):
@@ -1026,7 +1053,7 @@ def test_splash_screen(qtbot):
     
     version = splash.findChild(QLabel, "splashVersion")
     assert version is not None
-    assert version.text() == "Version 1.0.2"
+    assert version.text() == "Version 1.0.3"
     
     status = splash.findChild(QLabel, "splashStatus")
     assert status is not None
