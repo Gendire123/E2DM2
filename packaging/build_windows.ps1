@@ -180,23 +180,37 @@ if (-not $SkipInstaller) {
     Write-Host "Installer: $InstallerPath"
     
     if (Test-Path -LiteralPath $InstallerPath) {
-        Write-Host "Calculating SHA-256 hash of new installer..."
-        $Hash = (Get-FileHash -Algorithm SHA256 $InstallerPath).Hash.ToLower()
-        
-        $ParentDir = Split-Path $Root -Parent
-        $WebIndexHtml = Join-Path $ParentDir "E2DM2 Website\index.html"
-        
-        if (Test-Path -LiteralPath $WebIndexHtml) {
-            Write-Host "Updating installer SHA-256 hash and VirusTotal links in website index.html..."
-            $Content = Get-Content -Raw $WebIndexHtml
-            
-            # Replace any 64-character hex sequence in index.html with the new hash
-            $UpdatedContent = $Content -replace '\b[a-fA-F0-9]{64}\b', $Hash
-            
-            Set-Content -Path $WebIndexHtml -Value $UpdatedContent -NoNewline
-            Write-Host "Website hash updated successfully to: $Hash"
+        Write-Host "Updating E2DM2 website index.html..."
+        & $BuildPython (Join-Path $PSScriptRoot "update_website.py") $Version $InstallerPath
+
+        # GitHub Release Automation
+        if (Get-Command gh -ErrorAction SilentlyContinue) {
+            $NotesFile = Join-Path $PSScriptRoot "latest_release_notes.md"
+            if (-not (Test-Path -LiteralPath $NotesFile)) {
+                New-Item -ItemType File -Path $NotesFile -Value "We are excited to release E2DM2 v$Version!`n`n## Download & Installation`n1. Download E2DM2-Setup-$Version.exe from the assets section below." -Force | Out-Null
+            }
+            Write-Host "Creating GitHub Release and uploading installer..."
+            gh release create "v$Version" $InstallerPath --repo "Gendire123/E2DM2-Releases" --title "Easy Epic Drone Movie Maker (E2DM2) - v$Version" --notes-file $NotesFile
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "GitHub Release created successfully!"
+            } else {
+                Write-Error "GitHub CLI failed to create the release. Make sure you are authenticated with 'gh auth login'."
+            }
         } else {
-            Write-Warning "Website index.html not found at: $WebIndexHtml"
+            Write-Warning "GitHub CLI (gh) is not installed. Skipping automatic GitHub Release creation."
+        }
+
+        # VirusTotal Upload Automation
+        if ($env:VIRUSTOTAL_API_KEY) {
+            Write-Host "Starting automated VirusTotal scan upload..."
+            & $BuildPython (Join-Path $PSScriptRoot "upload_virustotal.py") $InstallerPath
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "VirusTotal upload completed successfully!"
+            } else {
+                Write-Error "VirusTotal upload failed."
+            }
+        } else {
+            Write-Warning "VIRUSTOTAL_API_KEY environment variable is not set. Skipping automatic VirusTotal upload."
         }
     }
 }
