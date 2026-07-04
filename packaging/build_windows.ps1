@@ -189,8 +189,16 @@ if (-not $SkipInstaller) {
             if (-not (Test-Path -LiteralPath $NotesFile)) {
                 New-Item -ItemType File -Path $NotesFile -Value "We are excited to release E2DM2 v$Version!`n`n## Download & Installation`n1. Download E2DM2-Setup-$Version.exe from the assets section below." -Force | Out-Null
             }
+
+            # Prepend the release title to the release notes in a temporary file
+            $TempNotesFile = Join-Path $TempRoot "github_release_notes.md"
+            $Header = "## Easy Epic Drone Movie Maker (E2DM2) - v$Version`n`n"
+            $Content = [System.IO.File]::ReadAllText($NotesFile)
+            $FullNotes = $Header + $Content
+            [System.IO.File]::WriteAllText($TempNotesFile, $FullNotes, [System.Text.Encoding]::UTF8)
+
             Write-Host "Creating GitHub Release and uploading installer..."
-            gh release create "v$Version" $InstallerPath --repo "Gendire123/E2DM2-Releases" --title "Easy Epic Drone Movie Maker (E2DM2) - v$Version" --notes-file $NotesFile
+            gh release create "v$Version" $InstallerPath --repo "Gendire123/E2DM2-Releases" --title "v$Version" --notes-file $TempNotesFile
             if ($LASTEXITCODE -eq 0) {
                 Write-Host "GitHub Release created successfully!"
                 $GitHubReleasePublished = $true
