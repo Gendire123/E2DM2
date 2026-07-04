@@ -345,9 +345,10 @@ def test_options_dialog_persists_splash_screen_preference(qtbot, tmp_path):
     assert settings.value("custom_output_folder", "") == ""
 
     # Verify tabs exist and are correctly named
-    assert dialog.tab_widget.count() == 2
+    assert dialog.tab_widget.count() == 3
     assert dialog.tab_widget.tabText(0) == "General"
     assert dialog.tab_widget.tabText(1) == "Codec Settings"
+    assert dialog.tab_widget.tabText(2) == "Automatic Updates"
 
     # Verify initial Codec Settings tab values
     assert dialog.codec_combo.currentText() == "H.264 (AVC)"

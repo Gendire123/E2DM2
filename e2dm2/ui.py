@@ -3931,6 +3931,40 @@ class OptionsDialog(QWidget):
         codec_layout.addWidget(codec_card)
         self.tab_widget.addTab(codec_tab, "Codec Settings")
 
+        # Tab 3: Automatic Updates
+        updates_tab = QWidget()
+        updates_layout = QVBoxLayout(updates_tab)
+        updates_layout.setContentsMargins(0, 0, 0, 0)
+        updates_layout.setSpacing(0)
+
+        updates_card = QFrame()
+        updates_card.setObjectName("optionsCard")
+        updates_card_layout = QVBoxLayout(updates_card)
+        updates_card_layout.setContentsMargins(20, 18, 20, 18)
+        updates_card_layout.setSpacing(8)
+
+        updates_section = QLabel("UPDATES")
+        updates_section.setObjectName("optionsSection")
+        updates_title = QLabel("Automatic updates")
+        updates_title.setObjectName("optionTitle")
+        updates_desc = QLabel("Automatically check for new releases in the background (at most once a day).")
+        updates_desc.setObjectName("optionDescription")
+        updates_desc.setWordWrap(True)
+        self.updates_checkbox = VisibleCheckBox("Check for updates automatically")
+        self.updates_checkbox.setObjectName("autoCheckUpdatesOption")
+        self.updates_checkbox.setChecked(self.settings.value("startup/auto_check_updates", True, type=bool))
+        self.updates_checkbox.toggled.connect(self._save_updates_preference)
+
+        updates_card_layout.addWidget(updates_section)
+        updates_card_layout.addWidget(updates_title)
+        updates_card_layout.addWidget(updates_desc)
+        updates_card_layout.addSpacing(4)
+        updates_card_layout.addWidget(self.updates_checkbox)
+        updates_card_layout.addStretch()
+
+        updates_layout.addWidget(updates_card)
+        self.tab_widget.addTab(updates_tab, "Automatic Updates")
+
         # Dialog main elements
         hint = QLabel("Changes are saved automatically and take effect the next time you launch E2DM2.")
         hint.setObjectName("optionsHint")
@@ -3963,6 +3997,10 @@ class OptionsDialog(QWidget):
 
     def _save_welcome_preference(self, enabled: bool) -> None:
         self.settings.setValue("startup/show_welcome_modal", enabled)
+        self.settings.sync()
+
+    def _save_updates_preference(self, enabled: bool) -> None:
+        self.settings.setValue("startup/auto_check_updates", enabled)
         self.settings.sync()
 
     def _browse_output_folder(self) -> None:
@@ -4099,7 +4137,12 @@ class MainWindow(QMainWindow):
     def trigger_update_check(self) -> None:
         checker = UpdateChecker(APP_VERSION, self)
         self._update_checker = checker
-        checker.check(silent_on_latest=False)
+        checker.check(silent_on_latest=False, force=True)
+
+    def trigger_auto_update_check(self) -> None:
+        checker = UpdateChecker(APP_VERSION, self)
+        self._update_checker = checker
+        checker.check(silent_on_latest=True, force=False)
 
     def show_home(self) -> None:
         self.home.refresh()
@@ -4253,6 +4296,7 @@ class MainWindow(QMainWindow):
         if not getattr(self, "_onboarding_triggered", False):
             self._onboarding_triggered = True
             QTimer.singleShot(200, self.check_onboarding)
+            QTimer.singleShot(1500, self.trigger_auto_update_check)
 
     def center_on_active_screen(self) -> None:
         screen = QGuiApplication.screenAt(QCursor.pos()) or self.screen() or QApplication.primaryScreen()

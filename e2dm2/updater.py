@@ -8,7 +8,7 @@ import urllib.request
 import tempfile
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QThread, Signal, Slot, QUrl
+from PySide6.QtCore import QObject, QThread, Signal, Slot, QUrl, QSettings, QDateTime, Qt
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QDialog,
@@ -357,8 +357,28 @@ class UpdateChecker(QObject):
         self.repo_name = "E2DM2-Releases"
         self._silent_on_latest = False
 
-    def check(self, silent_on_latest: bool = False):
+    def check(self, silent_on_latest: bool = False, force: bool = False):
         """Start the update check process."""
+        settings = QSettings()
+
+        if not force:
+            # 1. Check if auto check is enabled
+            if not settings.value("startup/auto_check_updates", True, type=bool):
+                return
+
+            # 2. Check if a check was already run in the last 24 hours
+            last_check_str = settings.value("startup/last_update_check_time", "")
+            if last_check_str:
+                last_check = QDateTime.fromString(last_check_str, Qt.DateFormat.ISODate)
+                if last_check.isValid():
+                    now = QDateTime.currentDateTime()
+                    if last_check.secsTo(now) < 86400:
+                        return
+
+        # Record check time in settings
+        settings.setValue("startup/last_update_check_time", QDateTime.currentDateTime().toString(Qt.DateFormat.ISODate))
+        settings.sync()
+
         self._silent_on_latest = silent_on_latest
         self.check_thread = CheckUpdateThread(self.repo_owner, self.repo_name, self)
         self.check_thread.finished.connect(self.on_check_finished)
