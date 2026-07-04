@@ -132,7 +132,7 @@ LOGGER = logging.getLogger(__name__)
 PLAYBACK_LATENCY_MS = 300
 SHOW_SPLASH_SETTING = "startup/show_splash_screen"
 APP_ICON_PATH = Path(__file__).parent / "assets" / "icons" / "app-icon.ico"
-APP_VERSION = "1.0.4"
+APP_VERSION = "1.0.5"
 ROYALTY_FREE_ROLE = int(Qt.ItemDataRole.UserRole) + 20
 
 

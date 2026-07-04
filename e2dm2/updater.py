@@ -272,7 +272,7 @@ class UpdateDialog(QDialog):
         layout.addWidget(notes_label)
 
         self.browser = QTextBrowser()
-        self.browser.setHtml(self.format_release_notes(notes))
+        self.browser.setMarkdown(notes)
         self.browser.setOpenExternalLinks(True)
         self.browser.setStyleSheet("""
             QTextBrowser {
@@ -281,6 +281,8 @@ class UpdateDialog(QDialog):
                 border-radius: 6px;
                 padding: 10px;
                 color: #142033;
+                font-family: "Segoe UI", sans-serif;
+                font-size: 10pt;
             }
         """)
         layout.addWidget(self.browser)
@@ -340,11 +342,6 @@ class UpdateDialog(QDialog):
 
     def open_github_page(self):
         QDesktopServices.openUrl(QUrl("https://github.com/Gendire123/E2DM2-Releases/releases"))
-
-    def format_release_notes(self, notes: str) -> str:
-        # Simple plain text to html conversion
-        html = notes.replace("\n", "<br>")
-        return f"<span style='font-family: \"Segoe UI\", sans-serif; font-size: 10pt; color: #142033;'>{html}</span>"
 
 
 class UpdateChecker(QObject):
