@@ -123,7 +123,7 @@ from .project import (
     remove_media,
     save_project,
 )
-from .render import create_render_plan, render
+from .render import create_render_plan, footage_shortfalls, render
 from .logging_setup import log_file_path
 from .updater import UpdateChecker
 
@@ -132,7 +132,7 @@ LOGGER = logging.getLogger(__name__)
 PLAYBACK_LATENCY_MS = 300
 SHOW_SPLASH_SETTING = "startup/show_splash_screen"
 APP_ICON_PATH = Path(__file__).parent / "assets" / "icons" / "app-icon.ico"
-APP_VERSION = "1.0.3"
+APP_VERSION = "1.0.4"
 ROYALTY_FREE_ROLE = int(Qt.ItemDataRole.UserRole) + 20
 
 
@@ -2938,6 +2938,61 @@ class WorkspacePage(QWidget):
         export_sizes = list(dict.fromkeys(output.export_size for output in plan.outputs))
         return soundtrack, ", ".join(labels[size] for size in export_sizes)
 
+    def _approve_short_footage(self, request: RenderRequest) -> bool:
+        if not self.project:
+            return False
+        shortfalls = footage_shortfalls(self.project, request)
+        if not shortfalls:
+            return True
+
+        soundtrack = str(shortfalls[0]["soundtrack_title"])
+        if len(shortfalls) == 1:
+            item = shortfalls[0]
+            duration_details = (
+                f"Available footage: {_duration(float(item['available_seconds']))}\n"
+                f"Song length: {_duration(float(item['soundtrack_seconds']))}\n"
+                f"Footage needed for the full edit: {_duration(float(item['required_footage_seconds']))}\n"
+                f"Footage missing: {_duration(float(item['missing_seconds']))}\n"
+                f"Estimated shortened video: {_duration(float(item['estimated_output_seconds']))}\n\n"
+                "If you proceed, the montage will follow the song's cuts and effects for as long as the footage "
+                "allows, then the video and music will fade out together over the final 5 seconds."
+            )
+        else:
+            rows = []
+            for item in shortfalls:
+                rows.append(
+                    f"• {item['group_key']}: {_duration(float(item['available_seconds']))} available, "
+                    f"{_duration(float(item['missing_seconds']))} missing, "
+                    f"about {_duration(float(item['estimated_output_seconds']))} of video"
+                )
+            duration_details = (
+                f"Song length: {_duration(float(shortfalls[0]['soundtrack_seconds']))}\n\n"
+                + "\n".join(rows)
+                + "\n\nEach shortened output will keep the song's cuts and effects, then fade its video and music "
+                "together over the final 5 seconds."
+            )
+
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setWindowTitle("Not enough footage for the whole song")
+        dialog.setText(
+            f"There isn't enough usable footage to use the whole song “{soundtrack}” "
+            "with its intended pacing."
+        )
+        dialog.setInformativeText(
+            duration_details
+            + "\n\nWould you like to proceed anyway, or keep editing and adjust your footage?"
+        )
+        proceed_button = dialog.addButton("Proceed and Fade Out", QMessageBox.ButtonRole.AcceptRole)
+        keep_editing_button = dialog.addButton("Keep Editing", QMessageBox.ButtonRole.RejectRole)
+        dialog.setDefaultButton(keep_editing_button)
+        dialog.exec()
+        if dialog.clickedButton() is not proceed_button:
+            self.status_label.setText("Production paused so you can adjust your footage.")
+            return False
+        request.allow_short_footage = True
+        return True
+
     def add_to_render_queue(self) -> None:
         if not self.project or self.thread:
             return
@@ -2945,6 +3000,8 @@ class WorkspacePage(QWidget):
         try:
             request = self._current_render_request()
             if request is None:
+                return
+            if not self._approve_short_footage(request):
                 return
             plan = create_render_plan(self.project, request)
             soundtrack, export_summary = self._render_job_description(plan)
@@ -3091,6 +3148,8 @@ class WorkspacePage(QWidget):
         else:
             request = self._current_render_request()
             if request is None:
+                return
+            if not self._approve_short_footage(request):
                 return
             self.cancellation = CancellationToken()
             worker = RenderWorker(self.project, request, self.cancellation)

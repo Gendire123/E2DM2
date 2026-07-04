@@ -286,6 +286,7 @@ class RenderRequest:
     exports: list[ExportSize]
     song_id: str | None = None
     full_length_track_id: str = "drone-music-1"
+    allow_short_footage: bool = False
 
 
 @dataclass(slots=True)
@@ -325,6 +326,7 @@ class RenderOutputPlan:
     bitrate_kbps: int
     segments: list[SegmentPlan] = field(default_factory=list)
     qc: dict[str, Any] = field(default_factory=dict)
+    short_fade_out_seconds: float | None = None
 
 
 @dataclass(slots=True)

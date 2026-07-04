@@ -20,6 +20,7 @@ from e2dm2.models import (
     ProgressEvent,
     RenderOutputPlan,
     RenderPlan,
+    RenderRequest,
     RenderResult,
     SelectionType,
     WorkflowMode,
@@ -506,6 +507,53 @@ def test_produce_coerces_qt_combo_data_to_workflow_enum(qtbot, tmp_path, monkeyp
     qtbot.waitUntil(lambda: page.thread is None, timeout=5000)
 
     assert page.project.settings.workflow is WorkflowMode.EPIC_MONTAGE
+
+
+def test_short_footage_modal_shows_durations_and_records_approval(qtbot, tmp_path, monkeypatch):
+    page = WorkspacePage()
+    qtbot.addWidget(page)
+    project = create_project("Short Produce", tmp_path / "projects")
+    project.settings.media = [
+        MediaItem("source/clip.mp4", "clip.mp4", 1920, 1080, 30, 100, "h264", 1000)
+    ]
+    page.set_project(project)
+    request = RenderRequest(
+        WorkflowMode.EPIC_MONTAGE, [ExportSize.SOURCE], "epic-montage-1"
+    )
+    shown = {}
+
+    def approve(dialog):
+        shown["title"] = dialog.windowTitle()
+        shown["details"] = dialog.informativeText()
+        proceed = next(button for button in dialog.buttons() if button.text() == "Proceed and Fade Out")
+        proceed.click()
+        return 0
+
+    monkeypatch.setattr(QMessageBox, "exec", approve)
+
+    assert page._approve_short_footage(request) is True
+    assert request.allow_short_footage is True
+    assert shown["title"] == "Not enough footage for the whole song"
+    assert "Available footage: 1:40.00" in shown["details"]
+    assert "Song length: 2:30.00" in shown["details"]
+    assert "Footage needed for the full edit: 3:00.00" in shown["details"]
+    assert "Footage missing: 1:20.00" in shown["details"]
+    assert "Estimated shortened video: 1:23.33" in shown["details"]
+    assert "song's cuts and effects" in shown["details"]
+    assert "final 5 seconds" in shown["details"]
+
+    def keep_editing(dialog):
+        reject = next(button for button in dialog.buttons() if button.text() == "Keep Editing")
+        reject.click()
+        return 0
+
+    monkeypatch.setattr(QMessageBox, "exec", keep_editing)
+    declined = RenderRequest(
+        WorkflowMode.EPIC_MONTAGE, [ExportSize.SOURCE], "epic-montage-1"
+    )
+    assert page._approve_short_footage(declined) is False
+    assert declined.allow_short_footage is False
+    assert page.status_label.text() == "Production paused so you can adjust your footage."
 
 
 def test_render_queue_freezes_each_configuration_and_produces_every_job(qtbot, tmp_path, monkeypatch):
@@ -1053,7 +1101,7 @@ def test_splash_screen(qtbot):
     
     version = splash.findChild(QLabel, "splashVersion")
     assert version is not None
-    assert version.text() == "Version 1.0.3"
+    assert version.text() == "Version 1.0.4"
     
     status = splash.findChild(QLabel, "splashStatus")
     assert status is not None

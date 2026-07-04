@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from e2dm2.catalog import load_song_catalog
+from e2dm2.catalog import find_song, load_song_catalog
 from e2dm2.encoder import EncoderInfo, encoder_arguments
 from e2dm2.models import (
     CancellationToken,
@@ -21,7 +21,7 @@ from e2dm2.models import (
     WorkflowMode,
 )
 from e2dm2.project import create_project
-from e2dm2.render import create_render_plan, render
+from e2dm2.render import _montage_filter, create_render_plan, footage_shortfalls, render
 
 
 def test_create_plan_snapshots_song_and_serializes(tmp_path):
@@ -52,6 +52,85 @@ def test_create_plan_snapshots_song_and_serializes(tmp_path):
     assert restored.planner_version == plan.planner_version
     assert restored.reproducibility == plan.reproducibility
     assert restored.outputs[1].qc == plan.outputs[1].qc
+
+
+def test_approved_short_montage_ends_with_available_footage_and_five_second_fade(tmp_path):
+    project = create_project("Short Montage", tmp_path / "projects")
+    source = project.path / "source" / "clip.mp4"
+    source.write_bytes(b"placeholder")
+    project.settings.media = [
+        MediaItem("source/clip.mp4", "clip.mp4", 1920, 1080, 30, 60, "h264", 1000)
+    ]
+    request = RenderRequest(
+        WorkflowMode.EPIC_MONTAGE,
+        [ExportSize.SOURCE],
+        "epic-montage-2",
+        allow_short_footage=True,
+    )
+
+    shortfalls = footage_shortfalls(
+        project, request, songs=load_song_catalog(custom_root=tmp_path / "library")
+    )
+    assert shortfalls == [{
+        "group_key": "1920x1080_30fps",
+        "soundtrack_title": "Epic Montage 2",
+        "available_seconds": 60.0,
+        "soundtrack_seconds": 227.0,
+        "required_footage_seconds": 318.0,
+        "missing_seconds": 258.0,
+        "estimated_output_seconds": 60 * 227 / 318,
+    }]
+
+    plan = create_render_plan(
+        project,
+        request,
+        songs=load_song_catalog(custom_root=tmp_path / "library"),
+        encoder=EncoderInfo("libx264", "CPU x264", False),
+    )
+    output = plan.outputs[0]
+    expected_duration = 60 * 227 / 318
+    assert output.duration_seconds == pytest.approx(expected_duration, abs=1 / output.fps)
+    assert output.short_fade_out_seconds == 5
+    assert output.qc["short_footage_approved"] is True
+    assert output.qc["music_cues_aligned"] == output.qc["music_cues_total"]
+    assert len(output.segments) > 1
+    assert any(segment.cue for segment in output.segments)
+    assert RenderPlan.from_dict(plan.to_dict()).outputs[0].short_fade_out_seconds == 5
+
+    song = find_song("epic-montage-2", load_song_catalog())
+    filter_graph = _montage_filter(output, song)
+    fade_start = output.duration_seconds - 5
+    assert f"fade=t=out:st={fade_start:.6f}:d=5.000000" in filter_graph
+    assert f"afade=t=out:st={fade_start:.6f}:d=5.000000" in filter_graph
+    assert "[heartbeat0]" in filter_graph
+
+
+def test_short_montage_offer_uses_preset_footage_requirement_not_only_song_length(tmp_path):
+    project = create_project("Pacing Shortfall", tmp_path / "projects")
+    source = project.path / "source" / "clip.mp4"
+    source.write_bytes(b"placeholder")
+    project.settings.media = [
+        MediaItem("source/clip.mp4", "clip.mp4", 1920, 1080, 30, 250, "h264", 1000)
+    ]
+    request = RenderRequest(
+        WorkflowMode.EPIC_MONTAGE, [ExportSize.SOURCE], "epic-montage-2",
+        allow_short_footage=True,
+    )
+
+    shortfalls = footage_shortfalls(
+        project, request, songs=load_song_catalog(custom_root=tmp_path / "library")
+    )
+    assert shortfalls[0]["soundtrack_seconds"] == 227
+    assert shortfalls[0]["required_footage_seconds"] == 318
+    assert shortfalls[0]["missing_seconds"] == 68
+
+    plan = create_render_plan(
+        project, request,
+        songs=load_song_catalog(custom_root=tmp_path / "library"),
+        encoder=EncoderInfo("libx264", "CPU x264", False),
+    )
+    assert plan.outputs[0].duration_seconds == pytest.approx(250 * 227 / 318, abs=1 / 30)
+    assert plan.outputs[0].short_fade_out_seconds == 5
 
 
 def test_epic_two_30fps_source_delivers_5994_with_all_cues(tmp_path):
@@ -123,6 +202,42 @@ def test_generated_fixture_renders_with_cpu(tmp_path):
         "workflow": "full_length",
         "song_id": "drone-music-3",
     }
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg is required")
+def test_short_montage_filter_renders_with_cpu(tmp_path):
+    video = tmp_path / "short-input.mp4"
+    audio = tmp_path / "long-audio.wav"
+    subprocess.run([
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi",
+        "-i", "color=c=blue:s=320x180:r=30:d=6", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(video),
+    ], check=True)
+    subprocess.run([
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi",
+        "-i", "sine=frequency=440:duration=10", str(audio),
+    ], check=True)
+    project = tmp_path / "short-project"
+    (project / "temp").mkdir(parents=True)
+    (project / "renders").mkdir()
+    destination = project / "renders" / "short.mp4"
+    segment = SegmentPlan(0, 0, 6, 6, 1, "natural", 1, False, False, 0, 6, 0)
+    output = RenderOutputPlan(
+        "short", "320x180_30fps", [str(video)], 320, 180, 30, 6,
+        ExportSize.SOURCE, str(destination), 1000, [segment], {}, 5,
+    )
+    song_data = load_song_catalog()[0].to_dict()
+    plan = RenderPlan(
+        2, str(project), "Short", WorkflowMode.EPIC_MONTAGE, str(audio), song_data,
+        "libx264", [output], "epic-montage-1",
+    )
+
+    result = render(plan)
+
+    assert result.successful_outputs
+    probe = subprocess.run([
+        "ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", str(destination),
+    ], capture_output=True, text=True, check=True)
+    assert float(probe.stdout.strip()) == pytest.approx(6, abs=0.1)
 
 
 def test_pre_cancelled_render_does_not_start_outputs(tmp_path):

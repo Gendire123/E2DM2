@@ -121,6 +121,7 @@ def _reproducibility_metadata(
         "workflow": request.workflow.value,
         "exports": [value.value for value in request.exports],
         "soundtrack_id": request.song_id or request.full_length_track_id,
+        "allow_short_footage": request.allow_short_footage,
         "song_manifest": song_data,
         "encoder": encoder.codec,
         "source_files": source_files,
@@ -179,6 +180,91 @@ def _group_selection_ranges(media) -> tuple[list[tuple[float, float]], list[tupl
     return excluded, required, boundaries[:-1]
 
 
+def footage_shortfalls(
+    project: Project,
+    request: RenderRequest,
+    songs: list[SongManifest] | None = None,
+) -> list[dict[str, str | float]]:
+    """Describe output groups whose usable footage is shorter than the soundtrack."""
+    if request.workflow in {WorkflowMode.EPIC_MONTAGE, WorkflowMode.REAL_ESTATE}:
+        if not request.song_id:
+            return []
+        song = find_song(request.song_id, songs or load_song_catalog())
+        soundtrack_title = song.title
+        soundtrack_duration = song.total_duration_seconds
+        required_footage = song.minimum_source_duration_seconds
+    else:
+        track = full_length_track(request.full_length_track_id)
+        soundtrack_title = track.title
+        soundtrack_duration = track.duration_seconds
+        required_footage = soundtrack_duration
+
+    shortfalls: list[dict[str, str | float]] = []
+    for group_key, media in group_media(project.settings.media).items():
+        source_duration = sum(item.duration for item in media)
+        excluded_ranges, _required_ranges, _source_boundaries = _group_selection_ranges(media)
+        usable_duration = max(0.0, source_duration - sum(end - start for start, end in excluded_ranges))
+        if usable_duration + 0.001 < required_footage:
+            if request.workflow in {WorkflowMode.EPIC_MONTAGE, WorkflowMode.REAL_ESTATE}:
+                source_ratio = soundtrack_duration / max(song.minimum_source_duration_seconds, 0.001)
+                estimated_output = min(soundtrack_duration, usable_duration * source_ratio)
+            else:
+                estimated_output = usable_duration
+            shortfalls.append({
+                "group_key": group_key,
+                "soundtrack_title": soundtrack_title,
+                "available_seconds": usable_duration,
+                "soundtrack_seconds": soundtrack_duration,
+                "required_footage_seconds": required_footage,
+                "missing_seconds": required_footage - usable_duration,
+                "estimated_output_seconds": estimated_output,
+            })
+    return shortfalls
+
+
+def _shortened_montage_song(song: SongManifest, usable_duration: float) -> SongManifest:
+    """Create the longest song prefix that preserves the preset's source pacing."""
+    source_ratio = song.total_duration_seconds / max(song.minimum_source_duration_seconds, 0.001)
+    target_duration = min(song.total_duration_seconds, usable_duration * source_ratio)
+    data = song.to_dict()
+    retained = [
+        (timestamp, effect)
+        for timestamp, effect in zip(song.cut_timestamps, song.effects)
+        if timestamp < target_duration - 0.000001
+    ]
+    data.update({
+        "total_duration_seconds": target_duration,
+        "minimum_source_duration_seconds": target_duration,
+        "opening_fade_seconds": min(song.opening_fade_seconds, target_duration),
+        # The output-level override applies the five-second fade. Keeping the
+        # planning timeline open to its endpoint preserves any late authored cue.
+        "cuts_end_seconds": target_duration,
+        "fade_out_seconds": 0.0,
+        "escalation_seconds": song.escalation_seconds if song.escalation_seconds < target_duration else 0.0,
+        "cut_timestamps": [timestamp for timestamp, _effect in retained],
+        "effects": [effect for _timestamp, effect in retained],
+    })
+    data["heartbeat"]["timestamps"] = [
+        timestamp for timestamp in song.heartbeat.timestamps if timestamp < target_duration
+    ]
+    if song.dark_cue:
+        if song.dark_cue.start_seconds >= target_duration:
+            data["dark_cue"] = None
+        else:
+            data["dark_cue"]["end_seconds"] = min(song.dark_cue.end_seconds, target_duration)
+    if song.flash_cue:
+        if song.flash_cue.start_seconds >= target_duration:
+            data["flash_cue"] = None
+        else:
+            data["flash_cue"]["duration_seconds"] = min(
+                song.flash_cue.duration_seconds,
+                target_duration - song.flash_cue.start_seconds,
+            )
+    return SongManifest.from_dict(
+        data, manifest_path=song.manifest_path, readonly=song.readonly,
+    )
+
+
 def create_render_plan(
     project: Project,
     request: RenderRequest,
@@ -217,25 +303,53 @@ def create_render_plan(
         output_fps = _montage_delivery_fps(fps) if song else canonical_fps(fps)
         source_duration = sum(item.duration for item in media)
         excluded_ranges, required_ranges, source_boundaries = _group_selection_ranges(media)
+        usable_duration = max(0.0, source_duration - sum(end - start for start, end in excluded_ranges))
         segments: list[SegmentPlan] = []
+        short_footage = bool(
+            song
+            and request.allow_short_footage
+            and usable_duration + 0.001 < song.minimum_source_duration_seconds
+        )
         if song:
-            if source_duration < song.minimum_source_duration_seconds:
+            if short_footage:
+                planning_song = _shortened_montage_song(song, usable_duration)
+                try:
+                    segments = build_montage_segment_plan(
+                        source_duration, planning_song, excluded_ranges, required_ranges,
+                        source_boundaries, output_fps,
+                    )
+                except ValueError as exc:
+                    raise ValueError(f"{group_key}: {exc}") from exc
+                montage_qc = validate_montage_plan(
+                    segments, planning_song, output_fps, excluded_ranges,
+                    allow_protected_cue_gaps=bool(required_ranges),
+                )
+                if montage_qc["status"] != "pass":
+                    raise ValueError("Shortened montage QC failed: " + "; ".join(montage_qc["errors"]))
+                montage_qc["short_footage_approved"] = True
+                montage_qc["original_soundtrack_duration_seconds"] = song.total_duration_seconds
+                montage_qc["shortened_duration_seconds"] = planning_song.total_duration_seconds
+                montage_qc["warnings"].append(
+                    "The user approved a shortened music-driven montage because the usable footage is shorter than the soundtrack."
+                )
+            elif source_duration < song.minimum_source_duration_seconds:
                 raise ValueError(
                     f"{song.title} needs at least {song.minimum_source_duration_seconds:.1f} seconds "
                     f"of {group_key} footage; this project has {source_duration:.1f} seconds."
                 )
-            try:
-                segments = build_montage_segment_plan(
-                    source_duration, song, excluded_ranges, required_ranges, source_boundaries, output_fps,
+            else:
+                try:
+                    segments = build_montage_segment_plan(
+                        source_duration, song, excluded_ranges, required_ranges, source_boundaries, output_fps,
+                    )
+                except ValueError as exc:
+                    raise ValueError(f"{group_key}: {exc}") from exc
+                montage_qc = validate_montage_plan(
+                    segments, song, output_fps, excluded_ranges,
+                    allow_protected_cue_gaps=bool(required_ranges),
                 )
-            except ValueError as exc:
-                raise ValueError(f"{group_key}: {exc}") from exc
-            montage_qc = validate_montage_plan(
-                segments, song, output_fps, excluded_ranges,
-                allow_protected_cue_gaps=bool(required_ranges),
-            )
-            if montage_qc["status"] != "pass":
-                raise ValueError("Montage QC failed: " + "; ".join(montage_qc["errors"]))
+                if montage_qc["status"] != "pass":
+                    raise ValueError("Montage QC failed: " + "; ".join(montage_qc["errors"]))
         elif excluded_ranges:
             try:
                 segments = build_full_length_segment_plan(source_duration, excluded_ranges, source_boundaries)
@@ -274,6 +388,14 @@ def create_render_plan(
                     "status": "pass", "planner_version": PLANNER_VERSION,
                     "frame_aligned": True, "errors": [], "warnings": [],
                 },
+                short_fade_out_seconds=(
+                    5.0
+                    if request.allow_short_footage and usable_duration + 0.001 < (
+                        song.minimum_source_duration_seconds
+                        if song else full_length_track(request.full_length_track_id).duration_seconds
+                    )
+                    else None
+                ),
             ))
     reproducibility = _reproducibility_metadata(project, request, song_data, encoder)
     output_qc = {output.output_id: output.qc for output in outputs}
@@ -321,6 +443,16 @@ def _montage_filter(output: RenderOutputPlan, song: SongManifest) -> str:
     source_width = int(output.group_key.split("x", 1)[0])
     source_height = int(output.group_key.split("x", 1)[1].split("_", 1)[0])
     fps = _fps_value(output.fps)
+    effective_duration = output.duration_seconds if output.short_fade_out_seconds is not None else song.total_duration_seconds
+    ending_fade = min(
+        output.short_fade_out_seconds if output.short_fade_out_seconds is not None else song.fade_out_seconds,
+        effective_duration,
+    )
+    ending_fade_start = (
+        max(effective_duration - ending_fade, 0.0)
+        if output.short_fade_out_seconds is not None
+        else song.cuts_end_seconds
+    )
     split_labels = [f"[v{segment.index}]" for segment in output.segments]
     filters = [f"[0:v]split={len(split_labels)}{''.join(split_labels)}"]
     for segment in output.segments:
@@ -355,8 +487,8 @@ def _montage_filter(output: RenderOutputPlan, song: SongManifest) -> str:
         current_label = label
 
     filters.append(
-        f"[{current_label}]fade=t=in:st=0:d={song.opening_fade_seconds:.6f},"
-        f"fade=t=out:st={song.cuts_end_seconds:.6f}:d={song.fade_out_seconds:.6f},"
+        f"[{current_label}]fade=t=in:st=0:d={min(song.opening_fade_seconds, effective_duration):.6f},"
+        f"fade=t=out:st={ending_fade_start:.6f}:d={ending_fade:.6f},"
         f"format=yuv420p[basevideo]"
     )
     video_label = "basevideo"
@@ -374,10 +506,10 @@ def _montage_filter(output: RenderOutputPlan, song: SongManifest) -> str:
     hb_opacity = song.heartbeat.opacity if song.heartbeat else 0.3
     hb_fade = song.heartbeat.fade_seconds if song.heartbeat else 0.5
     for idx, (timestamp, effect) in enumerate(zip(song.cut_timestamps, effects)):
-        if effect == "heartbeat" and not is_protected_time(timestamp):
+        if timestamp < effective_duration and effect == "heartbeat" and not is_protected_time(timestamp):
             end = timestamp + hb_fade
             filters.append(
-                f"color=c=black@{hb_opacity:.3f}:s={source_width}x{source_height}:d={song.total_duration_seconds:.6f},"
+                f"color=c=black@{hb_opacity:.3f}:s={source_width}x{source_height}:d={effective_duration:.6f},"
                 f"format=yuva420p,fade=t=out:st={timestamp:.6f}:d={hb_fade:.6f}:alpha=1[heartbeat{heartbeat_idx}]"
             )
             filters.append(
@@ -393,11 +525,11 @@ def _montage_filter(output: RenderOutputPlan, song: SongManifest) -> str:
     flash_fade = song.flash_cue.fade_in_seconds if song.flash_cue else 0.05
     flash_op = song.flash_cue.opacity if song.flash_cue else 0.8
     for idx, (timestamp, effect) in enumerate(zip(song.cut_timestamps, effects)):
-        if effect == "flash" and not is_protected_time(timestamp):
+        if timestamp < effective_duration and effect == "flash" and not is_protected_time(timestamp):
             fade_out_start = timestamp + flash_fade
             end = timestamp + flash_dur
             filters.append(
-                f"color=c=white@{flash_op:.3f}:s={source_width}x{source_height}:d={song.total_duration_seconds:.6f},"
+                f"color=c=white@{flash_op:.3f}:s={source_width}x{source_height}:d={effective_duration:.6f},"
                 f"format=yuva420p,fade=t=in:st={timestamp:.6f}:d={flash_fade:.6f}:alpha=1,"
                 f"fade=t=out:st={fade_out_start:.6f}:d={end - fade_out_start:.6f}:alpha=1[whiteflash{flash_idx}]"
             )
@@ -414,10 +546,10 @@ def _montage_filter(output: RenderOutputPlan, song: SongManifest) -> str:
     fade_out = song.dark_cue.fade_out_seconds if song.dark_cue else 1.0
     slow_op = song.dark_cue.opacity if song.dark_cue else 0.9
     for idx, (timestamp, effect) in enumerate(zip(song.cut_timestamps, effects)):
-        if effect == "slow_fade_out" and not is_protected_time(timestamp):
+        if timestamp < effective_duration and effect == "slow_fade_out" and not is_protected_time(timestamp):
             end = timestamp + fade_in + fade_out
             filters.append(
-                f"color=c=black@{slow_op:.3f}:s={source_width}x{source_height}:d={song.total_duration_seconds:.6f},"
+                f"color=c=black@{slow_op:.3f}:s={source_width}x{source_height}:d={effective_duration:.6f},"
                 f"format=yuva420p,fade=t=in:st={timestamp:.6f}:d={fade_in:.6f}:alpha=1,"
                 f"fade=t=out:st={timestamp + fade_in:.6f}:d={fade_out:.6f}:alpha=1[slowfade{slowfade_idx}]"
             )
@@ -429,10 +561,9 @@ def _montage_filter(output: RenderOutputPlan, song: SongManifest) -> str:
             slowfade_idx += 1
 
     filters.append(f"[{video_label}]scale={output.width}:{output.height}:flags=lanczos,setsar=1,format=yuv420p[videoout]")
-    music_fade_start = song.total_duration_seconds - song.fade_out_seconds
     filters.append(
-        f"[1:a]atrim=start=0:duration={song.total_duration_seconds:.6f},asetpts=N/SR/TB,"
-        f"afade=t=out:st={music_fade_start:.6f}:d={song.fade_out_seconds:.6f},"
+        f"[1:a]atrim=start=0:duration={effective_duration:.6f},asetpts=N/SR/TB,"
+        f"afade=t=out:st={ending_fade_start:.6f}:d={ending_fade:.6f},"
         "aformat=sample_rates=48000:channel_layouts=stereo[musicout]"
     )
     return ";\n".join(filters)
@@ -440,10 +571,16 @@ def _montage_filter(output: RenderOutputPlan, song: SongManifest) -> str:
 
 def _full_length_filter(output: RenderOutputPlan) -> str:
     fade_in = min(3.0, output.duration_seconds / 3)
-    fade_out = min(8.0, output.duration_seconds / 3)
+    fade_out = min(
+        output.short_fade_out_seconds if output.short_fade_out_seconds is not None else 8.0,
+        output.duration_seconds,
+    )
     fade_out_start = max(output.duration_seconds - fade_out, 0)
     audio_fade_in = min(5.0, output.duration_seconds / 3)
-    audio_fade_out = min(10.0, output.duration_seconds / 3)
+    audio_fade_out = min(
+        output.short_fade_out_seconds if output.short_fade_out_seconds is not None else 10.0,
+        output.duration_seconds,
+    )
     audio_fade_start = max(output.duration_seconds - audio_fade_out, 0)
     fps = _fps_value(output.fps)
     split_labels = [f"[fv{segment.index}]" for segment in output.segments]
@@ -493,10 +630,16 @@ def _full_length_command(
             "-movflags", "+faststart", "-progress", "pipe:1", "-nostats", str(temporary),
         ]
     fade_in = min(3.0, output.duration_seconds / 3)
-    fade_out = min(8.0, output.duration_seconds / 3)
+    fade_out = min(
+        output.short_fade_out_seconds if output.short_fade_out_seconds is not None else 8.0,
+        output.duration_seconds,
+    )
     fade_out_start = max(output.duration_seconds - fade_out, 0)
     audio_fade_in = min(5.0, output.duration_seconds / 3)
-    audio_fade_out = min(10.0, output.duration_seconds / 3)
+    audio_fade_out = min(
+        output.short_fade_out_seconds if output.short_fade_out_seconds is not None else 10.0,
+        output.duration_seconds,
+    )
     audio_fade_start = max(output.duration_seconds - audio_fade_out, 0)
     video_filter = (
         f"fade=t=in:st=0:d={fade_in:.3f},fade=t=out:st={fade_out_start:.3f}:d={fade_out:.3f},"
