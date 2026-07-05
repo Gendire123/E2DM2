@@ -11,7 +11,7 @@ MINIMUM_SHOT_FRAMES = 8
 MINIMUM_INTENTIONAL_JUMP_SECONDS = 4.5
 MAX_MONTAGE_CROSSFADE_SECONDS = 0.1
 REQUIRED_CUT_BUFFER_SECONDS = 5.0
-PLANNER_VERSION = "2.2-native-cadence"
+PLANNER_VERSION = "2.3-fragment-safe"
 
 
 def canonical_fps(fps: float) -> float:
@@ -304,29 +304,34 @@ def _allocate_scored_source(intervals: list[_Interval], slots: list[dict], fps: 
                 if index < len(base_skips):
                     future_minimum = sum(minimum_skips[index + 1:])
                     maximum_skip = max(cursor.remaining - future - future_minimum, 0.0)
+                    if maximum_skip < minimum_skips[index] - 0.5 / canonical_fps(fps):
+                        raise ValueError("Fragmented footage cannot preserve an intentional source jump.")
                     requested = max(minimum_skips[index], base_skips[index] * scale)
                     cursor.skip(_snap(min(requested, maximum_skip), fps))
             return pieces
         except ValueError:
             continue
-    # Extremely fragmented/tight footage may not support every preferred jump;
-    # scale the complete distribution only as a last-resort feasibility fallback.
-    combined = [minimum + extra for minimum, extra in zip(minimum_skips, extra_skips)]
-    for scale_step in range(98, -1, -2):
-        scale = scale_step / 100
-        cursor = _IntervalCursor(intervals)
-        pieces = []
-        try:
-            for index, need in enumerate(needs):
-                future = sum(needs[index + 1:])
-                pieces.append(cursor.take_contiguous(need, future))
-                if index < len(combined):
-                    maximum_skip = max(cursor.remaining - future, 0.0)
-                    cursor.skip(_snap(min(combined[index] * scale, maximum_skip), fps))
-            return pieces
-        except ValueError:
-            continue
     raise ValueError("No forward-only contiguous source allocation satisfies the montage timeline.")
+
+
+def _demote_weakest_intentional_jump(slots: list[dict], minimum_shot_frames: int) -> bool:
+    """Trade the weakest dissolve for continuity when fragmentation consumes its jump budget."""
+    candidates = [index for index, slot in enumerate(slots[:-1]) if slot.get("intentional_jump")]
+    if not candidates:
+        return False
+    index = min(
+        candidates,
+        key=lambda value: (
+            slots[value + 1]["treatment"]["score"],
+            slots[value]["visible_frames"],
+            -value,
+        ),
+    )
+    slot = slots[index]
+    slot["intentional_jump"] = False
+    slot["continuous_boundary"] = True
+    _configure_slot_frames(slot, 0, minimum_shot_frames)
+    return True
 
 
 def _configure_slot_frames(slot: dict, transition_frames: int, minimum_shot_frames: int) -> None:
@@ -619,7 +624,13 @@ def _build_constrained_montage_segment_plan(
             needed = sum(_seconds(slot["source_frames"], output_fps) for slot in window_slots)
         if needed > available + 0.000001:
             raise ValueError(f"Automatic footage is short by {needed - available:.3f} seconds.")
-        allocated_pieces = _allocate_scored_source(intervals, window_slots, output_fps)
+        while True:
+            try:
+                allocated_pieces = _allocate_scored_source(intervals, window_slots, output_fps)
+                break
+            except ValueError:
+                if not _demote_weakest_intentional_jump(window_slots, minimum_shot_frames):
+                    raise
 
         for slot_index, slot in enumerate(window_slots):
             piece = allocated_pieces[slot_index]

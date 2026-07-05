@@ -30,6 +30,7 @@ from .models import (
     SegmentPlan,
     SongManifest,
     WorkflowMode,
+    nominal_fps,
 )
 from .montage import (
     PLANNER_VERSION,
@@ -299,7 +300,8 @@ def create_render_plan(
     # render queue in quick succession with the same soundtrack and settings.
     stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S_%f")
     for group_key, media in group_media(project.settings.media).items():
-        source_width, source_height, fps = media[0].width, media[0].height, media[0].fps
+        source_width, source_height = media[0].width, media[0].height
+        fps = nominal_fps(media[0].fps)
         output_fps = _montage_delivery_fps(fps) if song else canonical_fps(fps)
         source_duration = sum(item.duration for item in media)
         excluded_ranges, required_ranges, source_boundaries = _group_selection_ranges(media)

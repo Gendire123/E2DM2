@@ -105,6 +105,59 @@ def test_approved_short_montage_ends_with_available_footage_and_five_second_fade
     assert "[heartbeat0]" in filter_graph
 
 
+def test_variable_rate_clips_from_one_camera_share_a_nominal_output_group(tmp_path):
+    project = create_project("Variable Rate", tmp_path / "projects")
+    rates_and_durations = [
+        (29.430280851295105, 184.0),
+        (29.422287762524586, 43.9087),
+        (29.43323343927242, 183.829333),
+        (29.41182142605751, 138.266433),
+    ]
+    project.settings.media = []
+    for index, (fps, duration) in enumerate(rates_and_durations):
+        source = project.path / "source" / f"clip-{index}.mp4"
+        source.write_bytes(b"placeholder")
+        project.settings.media.append(MediaItem(
+            f"source/clip-{index}.mp4", source.name, 1920, 1080, fps, duration, "h264", 1000,
+        ))
+
+    request = RenderRequest(WorkflowMode.EPIC_MONTAGE, [ExportSize.SOURCE], "epic-montage-2")
+    assert footage_shortfalls(project, request, songs=load_song_catalog(custom_root=tmp_path / "library")) == []
+    plan = create_render_plan(
+        project, request,
+        songs=load_song_catalog(custom_root=tmp_path / "library"),
+        encoder=EncoderInfo("libx264", "CPU x264", False),
+    )
+    assert len(plan.outputs) == 1
+    assert plan.outputs[0].group_key == "1920x1080_29.97fps"
+    assert plan.outputs[0].fps == pytest.approx(60000 / 1001)
+
+
+def test_short_fragmented_montage_demotes_an_unaffordable_source_jump(tmp_path):
+    project = create_project("Fragmented Short", tmp_path / "projects")
+    durations = [138.266433, 31.011922]
+    rates = [29.41182142605751, 29.40801325366991]
+    project.settings.media = []
+    for index, (fps, duration) in enumerate(zip(rates, durations)):
+        source = project.path / "source" / f"clip-{index}.mp4"
+        source.write_bytes(b"placeholder")
+        project.settings.media.append(MediaItem(
+            f"source/clip-{index}.mp4", source.name, 1920, 1080, fps, duration, "h264", 1000,
+        ))
+
+    plan = create_render_plan(
+        project,
+        RenderRequest(
+            WorkflowMode.EPIC_MONTAGE, [ExportSize.SOURCE], "epic-montage-2",
+            allow_short_footage=True,
+        ),
+        songs=load_song_catalog(custom_root=tmp_path / "library"),
+        encoder=EncoderInfo("libx264", "CPU x264", False),
+    )
+    assert plan.outputs[0].qc["status"] == "pass"
+    assert plan.outputs[0].qc["ambiguous_long_jump_count"] == 0
+
+
 def test_short_montage_offer_uses_preset_footage_requirement_not_only_song_length(tmp_path):
     project = create_project("Pacing Shortfall", tmp_path / "projects")
     source = project.path / "source" / "clip.mp4"

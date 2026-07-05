@@ -7,6 +7,31 @@ from pathlib import Path
 from typing import Any
 
 
+COMMON_VIDEO_FRAME_RATES = (
+    24000 / 1001,
+    24.0,
+    25.0,
+    30000 / 1001,
+    30.0,
+    50.0,
+    60000 / 1001,
+    60.0,
+    120.0,
+)
+
+
+def nominal_fps(fps: float) -> float:
+    """Map a variable-rate average back to its likely recording cadence."""
+    if fps <= 0:
+        return 30.0
+    closest = min(COMMON_VIDEO_FRAME_RATES, key=lambda candidate: abs(candidate - fps))
+    # Phones frequently report an average rate a little below the nominal
+    # cadence when frames were held or dropped. Keep those clips together.
+    if abs(closest - fps) <= closest * 0.025:
+        return closest
+    return round(fps, 2)
+
+
 class WorkflowMode(str, Enum):
     FULL_LENGTH = "full_length"
     EPIC_MONTAGE = "epic_montage"
@@ -83,7 +108,7 @@ class MediaItem:
 
     @property
     def group_key(self) -> str:
-        fps_bucket = round(self.fps, 2)
+        fps_bucket = nominal_fps(self.fps)
         return f"{self.width}x{self.height}_{fps_bucket:g}fps"
 
     def resolve(self, project_path: Path) -> Path:
