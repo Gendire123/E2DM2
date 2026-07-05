@@ -1087,7 +1087,7 @@ def test_preview_builds_and_reuses_fast_proxy(qtbot, tmp_path):
 
 
 def test_splash_screen(qtbot):
-    from e2dm2.ui import AppSplashScreen
+    from e2dm2.ui import AppSplashScreen, APP_VERSION
     from PySide6.QtWidgets import QLabel
     splash = AppSplashScreen()
     qtbot.addWidget(splash)
@@ -1102,7 +1102,7 @@ def test_splash_screen(qtbot):
     
     version = splash.findChild(QLabel, "splashVersion")
     assert version is not None
-    assert version.text() == "Version 1.0.5"
+    assert version.text() == f"Version {APP_VERSION}"
     
     status = splash.findChild(QLabel, "splashStatus")
     assert status is not None
@@ -2102,13 +2102,14 @@ def test_help_menu_updates(qtbot):
 
     # Initial state (Home Page active)
     actions = window.help_menu.actions()
-    assert len(actions) == 6
+    assert len(actions) == 7
     assert actions[0].text() == "Show Welcome Screen Tour"
     assert actions[1].text() == "Show Workspace Tour"
     assert actions[2].text() == "Show Soundtrack Tour"
     assert actions[3].text() == "Show Produce Tour"
     assert actions[4].isSeparator()
-    assert actions[5].text() == "About E2DM2"
+    assert actions[5].text() == "Contact && Info"
+    assert actions[6].text() == "About E2DM2"
 
     # Push a SongEditorDialog to the stack
     library_page = SongEditorDialog(AlphaEntitlementProvider(), window)
@@ -2117,10 +2118,11 @@ def test_help_menu_updates(qtbot):
     QApplication.processEvents()
 
     actions = window.help_menu.actions()
-    assert len(actions) == 3
+    assert len(actions) == 4
     assert actions[0].text() == "Show Library Tour"
     assert actions[1].isSeparator()
-    assert actions[2].text() == "About E2DM2"
+    assert actions[2].text() == "Contact && Info"
+    assert actions[3].text() == "About E2DM2"
 
     # Cleanup
     window.stack.removeWidget(library_page)

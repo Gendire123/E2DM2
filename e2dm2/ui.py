@@ -132,7 +132,7 @@ LOGGER = logging.getLogger(__name__)
 PLAYBACK_LATENCY_MS = 300
 SHOW_SPLASH_SETTING = "startup/show_splash_screen"
 APP_ICON_PATH = Path(__file__).parent / "assets" / "icons" / "app-icon.ico"
-APP_VERSION = "1.0.5"
+APP_VERSION = "1.0.6"
 ROYALTY_FREE_ROLE = int(Qt.ItemDataRole.UserRole) + 20
 
 
@@ -4243,11 +4243,16 @@ class MainWindow(QMainWindow):
             produce_tour_action = self.help_menu.addAction("Show Produce Tour")
             produce_tour_action.triggered.connect(self.start_produce_tour)
         self.help_menu.addSeparator()
+        contact_info_action = self.help_menu.addAction("Contact && Info")
+        contact_info_action.triggered.connect(self.open_contact_info)
         about_action = self.help_menu.addAction("About E2DM2")
         about_action.triggered.connect(self.show_about)
 
     def show_about(self) -> None:
         AboutDialog(self.entitlement, self).exec()
+
+    def open_contact_info(self) -> None:
+        QDesktopServices.openUrl(QUrl("file:///C:/Users/F%C3%A9lix/Desktop/E2DM2%20Website/index.html#contact"))
 
     def new_project(self) -> None:
         dialog = NewProjectDialog(self)
