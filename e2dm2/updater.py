@@ -150,7 +150,7 @@ class UpdateProgressDialog(QDialog):
                 border-radius: 4px;
                 text-align: center;
                 background: #FFFFFF;
-                color: #142033;
+                color: #FFFFFF;
                 font-weight: bold;
             }
             QProgressBar::chunk {
@@ -321,7 +321,7 @@ class UpdateDialog(QDialog):
         self.cancel_button.clicked.connect(self.reject)
         buttons_layout.addWidget(self.cancel_button)
 
-        self.download_button = QPushButton("Download & Install")
+        self.download_button = QPushButton("Download && Install")
         self.download_button.setStyleSheet("""
             QPushButton {
                 background: #0E56AA;
