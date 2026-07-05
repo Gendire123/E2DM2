@@ -4252,7 +4252,7 @@ class MainWindow(QMainWindow):
         AboutDialog(self.entitlement, self).exec()
 
     def open_contact_info(self) -> None:
-        QDesktopServices.openUrl(QUrl("file:///C:/Users/F%C3%A9lix/Desktop/E2DM2%20Website/index.html#contact"))
+        QDesktopServices.openUrl(QUrl("https://e2dm2.com/#contact"))
 
     def new_project(self) -> None:
         dialog = NewProjectDialog(self)
