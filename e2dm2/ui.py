@@ -33,6 +33,7 @@ from PySide6.QtGui import (
     QKeyEvent,
     QMouseEvent,
     QPainter,
+    QPalette,
     QPen,
     QPixmap,
     QPolygonF,
@@ -77,6 +78,7 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
+    QTextBrowser,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -123,6 +125,7 @@ from .project import (
     remove_media,
     save_project,
 )
+from .privacy import PRIVACY_POLICY_HTML
 from .render import create_render_plan, footage_shortfalls, render
 from .logging_setup import log_file_path
 from .updater import UpdateChecker
@@ -132,7 +135,7 @@ LOGGER = logging.getLogger(__name__)
 PLAYBACK_LATENCY_MS = 300
 SHOW_SPLASH_SETTING = "startup/show_splash_screen"
 APP_ICON_PATH = Path(__file__).parent / "assets" / "icons" / "app-icon.ico"
-APP_VERSION = "1.0.7"
+APP_VERSION = "1.0.8"
 ROYALTY_FREE_ROLE = int(Qt.ItemDataRole.UserRole) + 20
 
 
@@ -3578,6 +3581,67 @@ class AppSplashScreen(QWidget):
         QTimer.singleShot(0, self.center_on_screen)
 
 
+class PrivacyPolicyDialog(QDialog):
+    """Scrollable in-app presentation of the complete privacy policy."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("E2DM2 Privacy Policy")
+        self.setWindowIcon(QIcon(str(APP_ICON_PATH)))
+        self.setModal(True)
+        self.setMinimumSize(600, 460)
+        self.resize(760, 640)
+
+        self.policy_browser = QTextBrowser()
+        self.policy_browser.setObjectName("privacyPolicyContent")
+        self.policy_browser.setOpenExternalLinks(True)
+        policy_palette = self.policy_browser.palette()
+        policy_palette.setColor(QPalette.ColorRole.Base, QColor("#FFFFFF"))
+        policy_palette.setColor(QPalette.ColorRole.AlternateBase, QColor("#F5F7F8"))
+        policy_palette.setColor(QPalette.ColorRole.Text, QColor("#263649"))
+        policy_palette.setColor(QPalette.ColorRole.Link, QColor("#0E56AA"))
+        policy_palette.setColor(QPalette.ColorRole.Highlight, QColor("#0E56AA"))
+        policy_palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#FFFFFF"))
+        self.policy_browser.setPalette(policy_palette)
+        self.policy_browser.setStyleSheet("""
+            QTextBrowser#privacyPolicyContent {
+                background-color: #FFFFFF;
+                color: #263649;
+                border: 1px solid #CDD8DC;
+                border-radius: 8px;
+                padding: 6px;
+                selection-background-color: #0E56AA;
+                selection-color: #FFFFFF;
+            }
+            QTextBrowser#privacyPolicyContent QScrollBar:vertical {
+                background: #F5F7F8;
+            }
+            QTextBrowser#privacyPolicyContent QScrollBar::handle:vertical {
+                background: #AEBEC4;
+            }
+        """)
+        self.policy_browser.document().setDefaultStyleSheet("""
+            body { background-color: #FFFFFF; color: #263649; font-family: 'Segoe UI'; font-size: 10pt; }
+            h1 { color: #142033; font-size: 20pt; margin-bottom: 8px; }
+            h2 { color: #0E56AA; font-size: 13pt; margin-top: 20px; }
+            h3 { color: #142033; font-size: 11pt; margin-top: 14px; }
+            p, li { line-height: 1.35; }
+            a { color: #0E56AA; }
+        """)
+        self.policy_browser.setHtml(PRIVACY_POLICY_HTML)
+
+        close_button = QPushButton("Close")
+        close_button.setObjectName("primaryButton")
+        close_button.setFixedWidth(120)
+        close_button.clicked.connect(self.accept)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 16)
+        layout.setSpacing(14)
+        layout.addWidget(self.policy_browser, 1)
+        layout.addWidget(close_button, 0, Qt.AlignmentFlag.AlignRight)
+
+
 class AboutDialog(QDialog):
     def __init__(
         self,
@@ -4245,8 +4309,13 @@ class MainWindow(QMainWindow):
         self.help_menu.addSeparator()
         contact_info_action = self.help_menu.addAction("Contact && Info")
         contact_info_action.triggered.connect(self.open_contact_info)
+        privacy_policy_action = self.help_menu.addAction("Privacy Policy")
+        privacy_policy_action.triggered.connect(self.show_privacy_policy)
         about_action = self.help_menu.addAction("About E2DM2")
         about_action.triggered.connect(self.show_about)
+
+    def show_privacy_policy(self) -> None:
+        PrivacyPolicyDialog(self).exec()
 
     def show_about(self) -> None:
         AboutDialog(self.entitlement, self).exec()

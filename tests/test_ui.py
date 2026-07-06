@@ -1102,6 +1102,7 @@ def test_splash_screen(qtbot):
     
     version = splash.findChild(QLabel, "splashVersion")
     assert version is not None
+    assert APP_VERSION == "1.0.8"
     assert version.text() == f"Version {APP_VERSION}"
     
     status = splash.findChild(QLabel, "splashStatus")
@@ -1600,6 +1601,52 @@ def test_onboarding_overlay(qtbot):
     # Reset setting
     settings.setValue("startup/show_onboarding", True)
     settings.sync()
+
+
+def test_onboarding_spotlight_tracks_nested_target_when_window_resizes(qtbot):
+    from PySide6.QtCore import QRectF
+    from PySide6.QtWidgets import QApplication
+    from e2dm2.onboarding import OnboardingOverlay, SPOTLIGHT_PADDING
+
+    parent = QWidget()
+    parent.resize(900, 650)
+    branch = QWidget(parent)
+    branch.setGeometry(210, 130, 500, 350)
+    target = QWidget(branch)
+    target.setGeometry(45, 60, 120, 48)
+    qtbot.addWidget(parent)
+    parent.show()
+    QApplication.processEvents()
+
+    steps = [{
+        "target": lambda _: target,
+        "title": "Nested target",
+        "description": "The spotlight should follow this widget.",
+    }]
+    overlay = OnboardingOverlay(parent, steps, "test/show_responsive_onboarding")
+    overlay.show_onboarding()
+    QApplication.processEvents()
+
+    def expected_spotlight() -> QRectF:
+        top_left = overlay.mapFromGlobal(target.mapToGlobal(QPoint(0, 0)))
+        return QRectF(
+            top_left.x() - SPOTLIGHT_PADDING,
+            top_left.y() - SPOTLIGHT_PADDING,
+            target.width() + 2 * SPOTLIGHT_PADDING,
+            target.height() + 2 * SPOTLIGHT_PADDING,
+        )
+
+    assert overlay.spotlightRect == expected_spotlight()
+
+    # Simulate a responsive layout moving nested content as the window shrinks.
+    parent.resize(620, 430)
+    branch.move(125, 75)
+    QApplication.processEvents()
+    qtbot.wait(1)
+
+    assert overlay.geometry() == parent.rect()
+    assert overlay.spotlightRect == expected_spotlight()
+    QSettings().remove("test/show_responsive_onboarding")
 
 
 def test_welcome_dialog(qtbot):
@@ -2102,14 +2149,15 @@ def test_help_menu_updates(qtbot):
 
     # Initial state (Home Page active)
     actions = window.help_menu.actions()
-    assert len(actions) == 7
+    assert len(actions) == 8
     assert actions[0].text() == "Show Welcome Screen Tour"
     assert actions[1].text() == "Show Workspace Tour"
     assert actions[2].text() == "Show Soundtrack Tour"
     assert actions[3].text() == "Show Produce Tour"
     assert actions[4].isSeparator()
     assert actions[5].text() == "Contact && Info"
-    assert actions[6].text() == "About E2DM2"
+    assert actions[6].text() == "Privacy Policy"
+    assert actions[7].text() == "About E2DM2"
 
     # Push a SongEditorDialog to the stack
     library_page = SongEditorDialog(AlphaEntitlementProvider(), window)
@@ -2118,16 +2166,42 @@ def test_help_menu_updates(qtbot):
     QApplication.processEvents()
 
     actions = window.help_menu.actions()
-    assert len(actions) == 4
+    assert len(actions) == 5
     assert actions[0].text() == "Show Library Tour"
     assert actions[1].isSeparator()
     assert actions[2].text() == "Contact && Info"
-    assert actions[3].text() == "About E2DM2"
+    assert actions[3].text() == "Privacy Policy"
+    assert actions[4].text() == "About E2DM2"
 
     # Cleanup
     window.stack.removeWidget(library_page)
     library_page.deleteLater()
     window.close()
+
+
+def test_privacy_policy_dialog_is_complete_and_scrollable(qtbot):
+    from PySide6.QtGui import QColor, QPalette
+    from PySide6.QtWidgets import QApplication
+    from e2dm2.privacy import PRIVACY_POLICY_EFFECTIVE_DATE
+    from e2dm2.ui import PrivacyPolicyDialog
+
+    dialog = PrivacyPolicyDialog()
+    qtbot.addWidget(dialog)
+    dialog.show()
+    QApplication.processEvents()
+
+    policy = dialog.policy_browser.toPlainText()
+    assert dialog.windowTitle() == "E2DM2 Privacy Policy"
+    assert dialog.isModal()
+    assert PRIVACY_POLICY_EFFECTIVE_DATE in policy
+    assert "Your videos stay on your computer" in policy
+    assert "Software update checks" in policy
+    assert "Optional Pro licensing" in policy
+    assert "Your choices and privacy rights" in policy
+    assert "Contact and complaints" in policy
+    assert dialog.policy_browser.verticalScrollBar().maximum() > 0
+    assert dialog.policy_browser.palette().color(QPalette.ColorRole.Base) == QColor("#FFFFFF")
+    assert dialog.policy_browser.palette().color(QPalette.ColorRole.Text) == QColor("#263649")
 
 
 def test_about_dialog_has_friendly_creator_message(qtbot):

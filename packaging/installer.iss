@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "0.1.0"
+  #define AppVersion "1.0.8"
 #endif
 #ifndef DistDir
   #define DistDir "..\build\windows\e2dm2_launcher.dist"

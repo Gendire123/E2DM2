@@ -34,7 +34,7 @@ Build requirements are Python 3.12, FFmpeg/FFprobe on `PATH`, and Inno Setup 6.
 From PowerShell:
 
 ```powershell
-.\packaging\build_windows.ps1 -Version 0.1.0
+.\packaging\build_windows.ps1 -Version 1.0.8
 ```
 
 If the project drive has limited free space, place the compiler workspace and
@@ -45,7 +45,7 @@ installer output on another drive:
 ```
 
 The standalone application folder is written below `build\windows`; the final
-installer is `dist\E2DM2-Setup-0.1.0.exe`. The distribution contains compiled
+installer is `dist\E2DM2-Setup-1.0.8.exe`. The distribution contains compiled
 application code rather than the original `.py` files. As with any desktop
 software delivered to a customer-controlled computer, compilation raises the
 reverse-engineering barrier but cannot provide absolute source-code secrecy.

@@ -6,8 +6,10 @@ from pathlib import Path
 
 from PySide6.QtCore import (
     QEasingCurve,
+    QEvent,
     QParallelAnimationGroup,
     QPoint,
+    QPointF,
     QPropertyAnimation,
     QRect,
     QRectF,
@@ -39,6 +41,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QGraphicsDropShadowEffect,
     QDialog,
+    QStyle,
+    QStyleOptionButton,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -53,8 +57,6 @@ LOGGER = logging.getLogger(__name__)
 SPOTLIGHT_PADDING = 8            # Extra padding around the target widget (pixels)
 SPOTLIGHT_ROUNDNESS = 10         # Corner roundness of the spotlight highlight (pixels)
 SPOTLIGHT_BORDER_WIDTH = 2.5     # Outline border thickness of the spotlight (pixels)
-SPOTLIGHT_OFFSET_X = 0           # Manual horizontal offset to shift the spotlight (pixels)
-SPOTLIGHT_OFFSET_Y = -58           # Manual vertical offset to shift the spotlight (pixels)
 POPUP_MARGIN = 12                # Vertical gap between the spotlight and the popup card (pixels)
 BACKGROUND_MASK_OPACITY = 180    # Dimming intensity of the background overlay (0 to 255)
 GLOW_COLOR = QColor(14, 86, 170)  # Primary theme blue color for the glowing highlights
@@ -118,6 +120,38 @@ def produce_onboarding_enabled(settings: QSettings | None = None) -> bool:
     return settings.value("startup/show_produce_onboarding", True, type=bool)
 
 
+class OnboardingCheckBox(QCheckBox):
+    """Checkbox whose checkmark is reliable across Qt platform styles."""
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        if not self.isChecked():
+            return
+
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        indicator = self.style().subElementRect(QStyle.SubElement.SE_CheckBoxIndicator, option, self)
+        box = QRectF(indicator).adjusted(2.5, 2.5, -2.5, -2.5)
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(
+            QColor("#FFFFFF"),
+            2.0,
+            Qt.PenStyle.SolidLine,
+            Qt.PenCapStyle.RoundCap,
+            Qt.PenJoinStyle.RoundJoin,
+        ))
+        painter.drawLine(
+            QPointF(box.left(), box.center().y()),
+            QPointF(box.left() + box.width() * 0.38, box.bottom()),
+        )
+        painter.drawLine(
+            QPointF(box.left() + box.width() * 0.38, box.bottom()),
+            QPointF(box.right(), box.top()),
+        )
+
+
 class WelcomeDialog(QDialog):
     """A beautiful welcome dialog shown on first startup before onboarding."""
 
@@ -171,7 +205,7 @@ class WelcomeDialog(QDialog):
         desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # Checkbox
-        self.opt_out_cb = QCheckBox("Don't show this welcome screen again")
+        self.opt_out_cb = OnboardingCheckBox("Don't show this welcome screen again")
         self.opt_out_cb.setObjectName("welcomeOptOut")
         settings = QSettings()
         self.opt_out_cb.setChecked(not settings.value("startup/show_welcome_modal", True, type=bool))
@@ -226,7 +260,6 @@ class WelcomeDialog(QDialog):
             QCheckBox#welcomeOptOut::indicator:checked {{
                 background-color: {GLOW_COLOR.name()};
                 border-color: {GLOW_COLOR.name()};
-                image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIzIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxwb2x5bGluZSBwb2ludHM9IjIwIDYgOSAxNyA0IDEyIj48L3BvbHlsaW5lPjwvc3ZnPg==");
             }}
             QPushButton {{
                 font-size: 10pt;
@@ -376,7 +409,7 @@ class OnboardingPopup(QFrame):
         self.step_label.setObjectName("stepText")
         self.step_label.setStyleSheet("color: #64748B; font-size: 9pt;")
         
-        self.opt_out_cb = QCheckBox("Never show this again")
+        self.opt_out_cb = OnboardingCheckBox("Never show this again")
         self.opt_out_cb.setObjectName("optOut")
         settings = QSettings()
         self.opt_out_cb.setChecked(not settings.value(self.settings_key, True, type=bool))
@@ -427,7 +460,6 @@ class OnboardingPopup(QFrame):
             QCheckBox::indicator:checked {{
                 background-color: {GLOW_COLOR.name()};
                 border-color: {GLOW_COLOR.name()};
-                image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIzIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxwb2x5bGluZSBwb2ludHM9IjIwIDYgOSAxNyA0IDEyIj48L3BvbHlsaW5lPjwvc3ZnPg==");
             }}
             QPushButton {{
                 font-size: 9pt;
@@ -544,6 +576,9 @@ class OnboardingOverlay(QWidget):
         self._spotlight_rect = QRectF()
         self._mask_alpha = 0
         self.current_step = -1
+        self._observed_target: QWidget | None = None
+        self._layout_update_pending = False
+        parent.installEventFilter(self)
         
         if steps is not None:
             self.steps = steps
@@ -590,6 +625,62 @@ class OnboardingOverlay(QWidget):
 
     maskAlpha = Property(int, get_mask_alpha, set_mask_alpha)
 
+    def _set_observed_target(self, target: QWidget | None) -> None:
+        if target is self._observed_target:
+            return
+        if self._observed_target is not None:
+            self._observed_target.removeEventFilter(self)
+        self._observed_target = target
+        if target is not None:
+            target.installEventFilter(self)
+
+    def _resolve_target_rect(self, target_obj: QWidget | QRectF | QRect) -> QRectF:
+        """Return a target rectangle in overlay-local coordinates."""
+        if isinstance(target_obj, (QRectF, QRect)):
+            parent = self.parentWidget()
+            if parent is None:
+                return QRectF(target_obj)
+            origin = self.mapFromGlobal(parent.mapToGlobal(QPoint(0, 0)))
+            return QRectF(target_obj).translated(origin.x(), origin.y())
+
+        # The target and overlay are usually in different nested branches of
+        # the parent. Mapping through global coordinates is reliable for
+        # arbitrary widgets; QWidget.mapTo() is only safe for ancestors.
+        top_left = self.mapFromGlobal(target_obj.mapToGlobal(QPoint(0, 0)))
+        bottom_right = self.mapFromGlobal(
+            target_obj.mapToGlobal(QPoint(target_obj.width(), target_obj.height()))
+        )
+        return QRectF(
+            top_left.x() - SPOTLIGHT_PADDING,
+            top_left.y() - SPOTLIGHT_PADDING,
+            bottom_right.x() - top_left.x() + 2 * SPOTLIGHT_PADDING,
+            bottom_right.y() - top_left.y() + 2 * SPOTLIGHT_PADDING,
+        )
+
+    def _schedule_layout_update(self) -> None:
+        if not self.isVisible() or self._layout_update_pending:
+            return
+        self._layout_update_pending = True
+        QTimer.singleShot(0, self._run_scheduled_layout_update)
+
+    def _run_scheduled_layout_update(self) -> None:
+        self._layout_update_pending = False
+        if self.isVisible():
+            self.update_layout()
+
+    def eventFilter(self, watched, event) -> bool:
+        parent = self.parentWidget()
+        if watched is parent and event.type() == QEvent.Type.Resize:
+            self.setGeometry(parent.rect())
+            self._schedule_layout_update()
+        elif watched is self._observed_target and event.type() in (
+            QEvent.Type.Move,
+            QEvent.Type.Resize,
+            QEvent.Type.Show,
+        ):
+            self._schedule_layout_update()
+        return super().eventFilter(watched, event)
+
     def show_onboarding(self) -> None:
         self.setGeometry(self.parent().rect())
         self.show()
@@ -622,17 +713,9 @@ class OnboardingOverlay(QWidget):
             LOGGER.warning("Onboarding target widget not found for step %d", index)
             self.close_tour()
             return
-            
-        if isinstance(target_obj, (QRectF, QRect)):
-            target_rect = QRectF(target_obj)
-        else:
-            pos = target_obj.mapTo(self, QPoint(0, 0))
-            target_rect = QRectF(
-                pos.x() - SPOTLIGHT_PADDING + SPOTLIGHT_OFFSET_X,
-                pos.y() - SPOTLIGHT_PADDING + SPOTLIGHT_OFFSET_Y,
-                target_obj.width() + 2 * SPOTLIGHT_PADDING,
-                target_obj.height() + 2 * SPOTLIGHT_PADDING
-            )
+
+        self._set_observed_target(target_obj if isinstance(target_obj, QWidget) else None)
+        target_rect = self._resolve_target_rect(target_obj)
         
         disable_next = step_data.get("disable_next", False)
         self.popup.set_step(
@@ -706,17 +789,9 @@ class OnboardingOverlay(QWidget):
         target_obj = step_data["target"](self.parent())
         if not target_obj:
             return
-            
-        if isinstance(target_obj, (QRectF, QRect)):
-            target_rect = QRectF(target_obj)
-        else:
-            pos = target_obj.mapTo(self, QPoint(0, 0))
-            target_rect = QRectF(
-                pos.x() - SPOTLIGHT_PADDING + SPOTLIGHT_OFFSET_X,
-                pos.y() - SPOTLIGHT_PADDING + SPOTLIGHT_OFFSET_Y,
-                target_obj.width() + 2 * SPOTLIGHT_PADDING,
-                target_obj.height() + 2 * SPOTLIGHT_PADDING
-            )
+
+        self._set_observed_target(target_obj if isinstance(target_obj, QWidget) else None)
+        target_rect = self._resolve_target_rect(target_obj)
         
         if hasattr(self, "anim_group") and self.anim_group.state() == QPropertyAnimation.State.Running:
             self.anim_group.stop()
@@ -769,7 +844,7 @@ class OnboardingOverlay(QWidget):
         super().resizeEvent(event)
         # Use zero-duration singleShot timer to defer layout calculations
         # until the layout engine has completed repositioning child widgets.
-        QTimer.singleShot(0, self.update_layout)
+        self._schedule_layout_update()
 
     def paintEvent(self, event) -> None:
         if self.maskAlpha == 0:
