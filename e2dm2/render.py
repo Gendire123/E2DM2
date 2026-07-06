@@ -57,6 +57,18 @@ def _safe_name(value: str) -> str:
     return cleaned or "Drone_Project"
 
 
+def _resolution_label(width: int, height: int) -> str:
+    long_edge = max(width, height)
+    if long_edge >= 1000:
+        label = f"{long_edge / 1000:.1f}".rstrip("0").rstrip(".")
+        return f"{label.replace('.', 'p')}k"
+    return f"{width}x{height}"
+
+
+def _render_output_name(stamp: str, project_name: str, width: int, height: int) -> str:
+    return f"{stamp}-{_safe_name(project_name)}_{_resolution_label(width, height)}.mp4"
+
+
 def _fps_value(fps: float) -> str:
     if abs(fps - 30.0) < 0.005:
         return "30"
@@ -316,7 +328,9 @@ def create_render_plan(
     outputs: list[RenderOutputPlan] = []
     # Sub-second uniqueness matters when several prepared jobs are added to a
     # render queue in quick succession with the same soundtrack and settings.
-    stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S_%f")
+    created = datetime.now()
+    stamp = created.strftime("%Y-%m-%d_%H-%M-%S_%f")
+    output_stamp = created.strftime("%Y-%m-%d_%H")
     for group_key, media in group_media(project.settings.media).items():
         source_width, source_height = media[0].width, media[0].height
         fps = nominal_fps(media[0].fps)
@@ -388,7 +402,7 @@ def create_render_plan(
                 width, height = source_width, source_height
             mode_label = song.song_id if song else "full-length"
             output_id = f"{group_key}-{mode_label}-{export_size.value}"
-            output_name = f"{stamp}_{_safe_name(project.settings.name)}_{mode_label}_{group_key}_{export_size.value}.mp4"
+            output_name = _render_output_name(output_stamp, project.settings.name, width, height)
             from PySide6.QtCore import QSettings
             custom_dir = QSettings().value("custom_output_folder", "")
             output_dir = Path(custom_dir) if custom_dir else project.path / "renders"

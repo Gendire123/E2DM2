@@ -1,5 +1,6 @@
 import json
 import importlib
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -34,7 +35,7 @@ from e2dm2.montage import build_full_length_segment_plan
 
 
 def test_create_plan_snapshots_song_and_serializes(tmp_path):
-    project = create_project("Plan", tmp_path / "projects")
+    project = create_project("Construction chez Randy", tmp_path / "projects")
     source = project.path / "source" / "clip.mp4"
     source.write_bytes(b"placeholder")
     project.settings.media = [MediaItem("source/clip.mp4", "clip.mp4", 2720, 1530, 59.94, 350, "h264", 1_000_000_000)]
@@ -46,6 +47,14 @@ def test_create_plan_snapshots_song_and_serializes(tmp_path):
         encoder=EncoderInfo("libx264", "CPU x264", False),
     )
     assert len(plan.outputs) == 2
+    assert re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}_\d{2}-Construction_chez_Randy_2p7k\.mp4",
+        Path(plan.outputs[0].output_path).name,
+    )
+    assert re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}_\d{2}-Construction_chez_Randy_2p6k\.mp4",
+        Path(plan.outputs[1].output_path).name,
+    )
     assert (plan.outputs[1].width, plan.outputs[1].height) == (2560, 1440)
     assert plan.outputs[1].bitrate_kbps >= 24000
     assert plan.schema_version == 2
