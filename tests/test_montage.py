@@ -11,7 +11,7 @@ from e2dm2.montage import (
     build_montage_segment_plan,
     validate_montage_plan,
 )
-from e2dm2.render import _montage_filter
+from e2dm2.render import MONTAGE_END_FADE_SECONDS, _montage_filter
 
 
 @pytest.mark.parametrize("song_id", ["epic-montage-1", "epic-montage-2", "epic-montage-3"])
@@ -57,6 +57,48 @@ def test_epic_two_filter_contains_all_heartbeat_effects():
     for timestamp in song.cut_timestamps[:15]:
         assert f"st={timestamp:.6f}:d=0.450" in script
     assert "scale=1920:1080" in script
+
+
+@pytest.mark.parametrize("song_id", [
+    "epic-montage-1",
+    "epic-montage-2",
+    "epic-montage-3",
+    "epic-montage-4",
+    "epic-montage-5",
+    "real-estate-1",
+    "real-estate-2",
+    "real-estate-3",
+    "real-estate-4",
+    "real-estate-5",
+])
+def test_montage_filter_ends_with_four_second_fade_to_black(song_id):
+    song = next(s for s in load_song_catalog(custom_root=Path("missing-library")) if s.song_id == song_id)
+    segments = build_montage_segment_plan(song.minimum_source_duration_seconds, song)
+    output = RenderOutputPlan(
+        "test", "1920x1080_30fps", [], 1920, 1080, 30, song.total_duration_seconds,
+        ExportSize.HD_1080, "test.mp4", 12000, segments,
+    )
+
+    script = _montage_filter(output, song)
+
+    fade_start = song.total_duration_seconds - MONTAGE_END_FADE_SECONDS
+    assert f"fade=t=out:st={fade_start:.6f}:d={MONTAGE_END_FADE_SECONDS:.6f}" in script
+    assert f"afade=t=out:st={fade_start:.6f}:d={MONTAGE_END_FADE_SECONDS:.6f}" in script
+
+
+def test_montage_fade_to_black_happens_after_visual_effects():
+    song = next(s for s in load_song_catalog(custom_root=Path("missing-library")) if s.song_id == "epic-montage-2")
+    song.effects = ["none"] * len(song.cut_timestamps)
+    song.effects[-1] = "heartbeat"
+    segments = build_montage_segment_plan(song.minimum_source_duration_seconds, song)
+    output = RenderOutputPlan(
+        "test", "1920x1080_30fps", [], 1920, 1080, 30, song.total_duration_seconds,
+        ExportSize.HD_1080, "test.mp4", 12000, segments,
+    )
+
+    script = _montage_filter(output, song)
+
+    assert script.rfind("overlay=shortest=1") < script.rfind("fade=t=out")
 
 
 def test_too_little_source_is_rejected():

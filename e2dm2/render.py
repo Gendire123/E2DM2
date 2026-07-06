@@ -44,6 +44,7 @@ from .montage import (
 
 ProgressCallback = Callable[[ProgressEvent], None]
 LOGGER = logging.getLogger(__name__)
+MONTAGE_END_FADE_SECONDS = 4.0
 
 
 def _notify(callback: ProgressCallback | None, event: ProgressEvent) -> None:
@@ -254,7 +255,7 @@ def _shortened_montage_song(song: SongManifest, usable_duration: float) -> SongM
         "total_duration_seconds": target_duration,
         "minimum_source_duration_seconds": target_duration,
         "opening_fade_seconds": min(song.opening_fade_seconds, target_duration),
-        # The output-level override applies the five-second fade. Keeping the
+        # The output-level override applies the montage end fade. Keeping the
         # planning timeline open to its endpoint preserves any late authored cue.
         "cuts_end_seconds": target_duration,
         "fade_out_seconds": 0.0,
@@ -408,11 +409,8 @@ def create_render_plan(
                     "frame_aligned": True, "errors": [], "warnings": [],
                 },
                 short_fade_out_seconds=(
-                    5.0
-                    if request.allow_short_footage and usable_duration + 0.001 < (
-                        song.minimum_source_duration_seconds
-                        if song else full_length_track(request.full_length_track_id).duration_seconds
-                    )
+                    MONTAGE_END_FADE_SECONDS
+                    if song and short_footage
                     else None
                 ),
             ))
@@ -464,14 +462,10 @@ def _montage_filter(output: RenderOutputPlan, song: SongManifest) -> str:
     fps = _fps_value(output.fps)
     effective_duration = output.duration_seconds if output.short_fade_out_seconds is not None else song.total_duration_seconds
     ending_fade = min(
-        output.short_fade_out_seconds if output.short_fade_out_seconds is not None else song.fade_out_seconds,
+        output.short_fade_out_seconds if output.short_fade_out_seconds is not None else MONTAGE_END_FADE_SECONDS,
         effective_duration,
     )
-    ending_fade_start = (
-        max(effective_duration - ending_fade, 0.0)
-        if output.short_fade_out_seconds is not None
-        else song.cuts_end_seconds
-    )
+    ending_fade_start = max(effective_duration - ending_fade, 0.0)
     split_labels = [f"[v{segment.index}]" for segment in output.segments]
     filters = [f"[0:v]split={len(split_labels)}{''.join(split_labels)}"]
     for segment in output.segments:
@@ -507,7 +501,6 @@ def _montage_filter(output: RenderOutputPlan, song: SongManifest) -> str:
 
     filters.append(
         f"[{current_label}]fade=t=in:st=0:d={min(song.opening_fade_seconds, effective_duration):.6f},"
-        f"fade=t=out:st={ending_fade_start:.6f}:d={ending_fade:.6f},"
         f"format=yuv420p[basevideo]"
     )
     video_label = "basevideo"
@@ -579,7 +572,10 @@ def _montage_filter(output: RenderOutputPlan, song: SongManifest) -> str:
             video_label = f"slowfadevideo{slowfade_idx}"
             slowfade_idx += 1
 
-    filters.append(f"[{video_label}]scale={output.width}:{output.height}:flags=lanczos,setsar=1,format=yuv420p[videoout]")
+    filters.append(
+        f"[{video_label}]fade=t=out:st={ending_fade_start:.6f}:d={ending_fade:.6f},"
+        f"scale={output.width}:{output.height}:flags=lanczos,setsar=1,format=yuv420p[videoout]"
+    )
     filters.append(
         f"[1:a]atrim=start=0:duration={effective_duration:.6f},asetpts=N/SR/TB,"
         f"afade=t=out:st={ending_fade_start:.6f}:d={ending_fade:.6f},"

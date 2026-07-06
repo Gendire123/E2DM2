@@ -541,7 +541,7 @@ def test_short_footage_modal_shows_durations_and_records_approval(qtbot, tmp_pat
     assert "Footage missing: 1:20.00" in shown["details"]
     assert "Estimated shortened video: 1:23.33" in shown["details"]
     assert "song's cuts and effects" in shown["details"]
-    assert "final 5 seconds" in shown["details"]
+    assert "final 4 seconds" in shown["details"]
 
     def keep_editing(dialog):
         reject = next(button for button in dialog.buttons() if button.text() == "Keep Editing")

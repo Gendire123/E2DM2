@@ -2958,7 +2958,7 @@ class WorkspacePage(QWidget):
                 f"Footage missing: {_duration(float(item['missing_seconds']))}\n"
                 f"Estimated shortened video: {_duration(float(item['estimated_output_seconds']))}\n\n"
                 "If you proceed, the montage will follow the song's cuts and effects for as long as the footage "
-                "allows, then the video and music will fade out together over the final 5 seconds."
+                "allows, then the video and music will fade out together over the final 4 seconds."
             )
         else:
             rows = []
@@ -2972,7 +2972,7 @@ class WorkspacePage(QWidget):
                 f"Song length: {_duration(float(shortfalls[0]['soundtrack_seconds']))}\n\n"
                 + "\n".join(rows)
                 + "\n\nEach shortened output will keep the song's cuts and effects, then fade its video and music "
-                "together over the final 5 seconds."
+                "together over the final 4 seconds."
             )
 
         dialog = QMessageBox(self)

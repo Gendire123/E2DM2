@@ -22,6 +22,7 @@ from e2dm2.models import (
 )
 from e2dm2.project import create_project
 from e2dm2.render import (
+    MONTAGE_END_FADE_SECONDS,
     _finalize_render_file,
     _group_selection_ranges,
     _montage_filter,
@@ -62,7 +63,7 @@ def test_create_plan_snapshots_song_and_serializes(tmp_path):
     assert restored.outputs[1].qc == plan.outputs[1].qc
 
 
-def test_approved_short_montage_ends_with_available_footage_and_five_second_fade(tmp_path):
+def test_approved_short_montage_ends_with_available_footage_and_four_second_fade(tmp_path):
     project = create_project("Short Montage", tmp_path / "projects")
     source = project.path / "source" / "clip.mp4"
     source.write_bytes(b"placeholder")
@@ -98,18 +99,18 @@ def test_approved_short_montage_ends_with_available_footage_and_five_second_fade
     output = plan.outputs[0]
     expected_duration = 60 * 227 / 318
     assert output.duration_seconds == pytest.approx(expected_duration, abs=1 / output.fps)
-    assert output.short_fade_out_seconds == 5
+    assert output.short_fade_out_seconds == MONTAGE_END_FADE_SECONDS
     assert output.qc["short_footage_approved"] is True
     assert output.qc["music_cues_aligned"] == output.qc["music_cues_total"]
     assert len(output.segments) > 1
     assert any(segment.cue for segment in output.segments)
-    assert RenderPlan.from_dict(plan.to_dict()).outputs[0].short_fade_out_seconds == 5
+    assert RenderPlan.from_dict(plan.to_dict()).outputs[0].short_fade_out_seconds == MONTAGE_END_FADE_SECONDS
 
     song = find_song("epic-montage-2", load_song_catalog())
     filter_graph = _montage_filter(output, song)
-    fade_start = output.duration_seconds - 5
-    assert f"fade=t=out:st={fade_start:.6f}:d=5.000000" in filter_graph
-    assert f"afade=t=out:st={fade_start:.6f}:d=5.000000" in filter_graph
+    fade_start = output.duration_seconds - MONTAGE_END_FADE_SECONDS
+    assert f"fade=t=out:st={fade_start:.6f}:d={MONTAGE_END_FADE_SECONDS:.6f}" in filter_graph
+    assert f"afade=t=out:st={fade_start:.6f}:d={MONTAGE_END_FADE_SECONDS:.6f}" in filter_graph
     assert "[heartbeat0]" in filter_graph
 
 
@@ -209,7 +210,7 @@ def test_short_montage_offer_uses_preset_footage_requirement_not_only_song_lengt
         encoder=EncoderInfo("libx264", "CPU x264", False),
     )
     assert plan.outputs[0].duration_seconds == pytest.approx(250 * 227 / 318, abs=1 / 30)
-    assert plan.outputs[0].short_fade_out_seconds == 5
+    assert plan.outputs[0].short_fade_out_seconds == MONTAGE_END_FADE_SECONDS
 
 
 def test_epic_two_30fps_source_delivers_5994_with_all_cues(tmp_path):
