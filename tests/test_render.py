@@ -21,7 +21,14 @@ from e2dm2.models import (
     WorkflowMode,
 )
 from e2dm2.project import create_project
-from e2dm2.render import _group_selection_ranges, _montage_filter, create_render_plan, footage_shortfalls, render
+from e2dm2.render import (
+    _finalize_render_file,
+    _group_selection_ranges,
+    _montage_filter,
+    create_render_plan,
+    footage_shortfalls,
+    render,
+)
 from e2dm2.montage import build_full_length_segment_plan
 
 
@@ -238,6 +245,27 @@ def test_encoder_arguments_cover_all_backends():
         assert "10000k" in arguments
     assert "vbr_peak" in encoder_arguments("h264_amf", 8000)
     assert "vbr" in encoder_arguments("h264_nvenc", 8000)
+
+
+def test_finalize_render_file_copies_across_drives(tmp_path, monkeypatch):
+    temporary = tmp_path / "render.tmp.mp4"
+    destination = tmp_path / "render.mp4"
+    temporary.write_bytes(b"finished render")
+
+    def fail_with_cross_drive_error(self, target):
+        if self == temporary:
+            error = OSError("cross-device move")
+            error.winerror = 17
+            raise error
+        return original_replace(self, target)
+
+    original_replace = Path.replace
+    monkeypatch.setattr(Path, "replace", fail_with_cross_drive_error)
+
+    _finalize_render_file(temporary, destination)
+
+    assert destination.read_bytes() == b"finished render"
+    assert not temporary.exists()
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg is required")

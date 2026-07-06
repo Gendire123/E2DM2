@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import json
+import errno
 import hashlib
+import json
 import logging
 import math
 import os
@@ -145,6 +146,18 @@ def _copy_snapshot(source: Path, destination: Path) -> Path:
     shutil.copy2(source, partial)
     partial.replace(destination)
     return destination
+
+
+def _finalize_render_file(temporary: Path, destination: Path) -> None:
+    try:
+        temporary.replace(destination)
+    except OSError as exc:
+        if exc.errno != errno.EXDEV and getattr(exc, "winerror", None) != 17:
+            raise
+        partial = destination.with_suffix(destination.suffix + ".partial")
+        shutil.copy2(temporary, partial)
+        partial.replace(destination)
+        temporary.unlink()
 
 
 def _snapshot_epic_song(project: Project, song: SongManifest) -> tuple[Path, dict]:
@@ -762,7 +775,7 @@ def render(
                     while destination.exists():
                         destination = destination.with_name(f"{stem}_{counter}{suffix}")
                         counter += 1
-                temporary.replace(destination)
+                _finalize_render_file(temporary, destination)
                 LOGGER.info("Created render: %s", destination)
                 _notify(progress_callback, ProgressEvent("complete", f"Created {destination.name}", output.output_id, 100))
                 results.append(OutputResult(output.output_id, str(destination), True))
