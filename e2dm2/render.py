@@ -175,7 +175,11 @@ def _group_selection_ranges(media) -> tuple[list[tuple[float, float]], list[tupl
     for item in media:
         for selection in item.selections:
             target = excluded if selection.type is SelectionType.EXCLUDE else required
-            target.append((offset + selection.start_ms / 1000, offset + selection.end_ms / 1000))
+            local_start = max(0.0, min(selection.start_ms / 1000, item.duration))
+            local_end = max(0.0, min(selection.end_ms / 1000, item.duration))
+            if local_end <= local_start:
+                continue
+            target.append((offset + local_start, offset + local_end))
         offset += item.duration
         boundaries.append(offset)
     return excluded, required, boundaries[:-1]

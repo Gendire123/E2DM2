@@ -1,11 +1,11 @@
 Run from the project folder:
 
-    .\packaging\build_windows.ps1 -Version 1.0.8
+    .\packaging\build_windows.ps1 -Version 1.0.9
 
 The script runs the complete test suite, compiles the protected Windows application, bundles FFmpeg, and creates:
 
-    dist\E2DM2-Setup-1.0.8.exe
+    dist\E2DM2-Setup-1.0.9.exe
 
-GitHub release notes are read from `packaging\latest_release_notes.md`. When GitHub CLI is installed and authenticated, the build creates tag `v1.0.8`, publishes the detailed notes, and uploads the installer to `Gendire123/E2DM2-Releases`.
+GitHub release notes are read from `packaging\latest_release_notes.md`. When GitHub CLI is installed and authenticated, the build creates tag `v1.0.9`, publishes the detailed notes, and uploads the installer to `Gendire123/E2DM2-Releases`.
 
 VirusTotal upload requires `VIRUSTOTAL_API_KEY`. Publishing the verified release metadata used by the website also requires `SUPABASE_RELEASE_PUBLISH_TOKEN`; that metadata is published only after both the GitHub release and VirusTotal upload succeed.

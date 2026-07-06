@@ -1102,7 +1102,7 @@ def test_splash_screen(qtbot):
     
     version = splash.findChild(QLabel, "splashVersion")
     assert version is not None
-    assert APP_VERSION == "1.0.8"
+    assert APP_VERSION == "1.0.9"
     assert version.text() == f"Version {APP_VERSION}"
     
     status = splash.findChild(QLabel, "splashStatus")

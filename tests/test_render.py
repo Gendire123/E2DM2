@@ -21,7 +21,8 @@ from e2dm2.models import (
     WorkflowMode,
 )
 from e2dm2.project import create_project
-from e2dm2.render import _montage_filter, create_render_plan, footage_shortfalls, render
+from e2dm2.render import _group_selection_ranges, _montage_filter, create_render_plan, footage_shortfalls, render
+from e2dm2.montage import build_full_length_segment_plan
 
 
 def test_create_plan_snapshots_song_and_serializes(tmp_path):
@@ -156,6 +157,24 @@ def test_short_fragmented_montage_demotes_an_unaffordable_source_jump(tmp_path):
     )
     assert plan.outputs[0].qc["status"] == "pass"
     assert plan.outputs[0].qc["ambiguous_long_jump_count"] == 0
+
+
+def test_painted_ranges_clamp_to_fractional_clip_boundaries():
+    media = [
+        MediaItem(
+            "source/clip-1.mp4", "clip-1.mp4", 3840, 2160, 29.97, 1.0006, "h264", 1000,
+            [ClipSelection(SelectionType.EXCLUDE, 500, 1001)],
+        ),
+        MediaItem(
+            "source/clip-2.mp4", "clip-2.mp4", 3840, 2160, 29.97, 1.0, "h264", 1000,
+            [ClipSelection(SelectionType.EXCLUDE, 0, 200)],
+        ),
+    ]
+
+    excluded, _required, boundaries = _group_selection_ranges(media)
+
+    assert excluded == [(0.5, 1.0006), (1.0006, 1.2006)]
+    build_full_length_segment_plan(sum(item.duration for item in media), excluded, boundaries)
 
 
 def test_short_montage_offer_uses_preset_footage_requirement_not_only_song_length(tmp_path):
