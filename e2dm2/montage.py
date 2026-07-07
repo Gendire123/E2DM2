@@ -306,7 +306,7 @@ def _allocate_scored_source(intervals: list[_Interval], slots: list[dict], fps: 
                     maximum_skip = max(cursor.remaining - future - future_minimum, 0.0)
                     if maximum_skip < minimum_skips[index] - 0.5 / canonical_fps(fps):
                         raise ValueError("Fragmented footage cannot preserve an intentional source jump.")
-                    requested = max(minimum_skips[index], base_skips[index] * scale)
+                    requested = base_skips[index]
                     cursor.skip(_snap(min(requested, maximum_skip), fps))
             return pieces
         except ValueError:

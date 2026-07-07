@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "1.0.10",
+    [string]$Version = "1.0.11",
     [string]$Python = "",
     [string]$Ffmpeg = "",
     [string]$Ffprobe = "",

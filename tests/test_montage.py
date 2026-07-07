@@ -287,3 +287,46 @@ def test_music_effects_are_suppressed_inside_protected_output():
     )
     script = _montage_filter(output, song)
     assert f"st={song.cut_timestamps[effect_index]:.6f}" not in script
+
+
+def test_allocate_scored_source_regression_double_scaling():
+    from e2dm2.montage import _allocate_scored_source, _Interval
+
+    # Create intervals and slots that would fail with the double-scaling bug
+    # but succeed with the corrected linear scaling.
+    intervals = [_Interval(0, 10.0), _Interval(12.0, 25.0), _Interval(30.0, 34.0)]
+    
+    # We set up three slots:
+    # - Slot 0 has an intentional jump.
+    # - Slot 1 has no intentional jump.
+    # - Slot 2 has no intentional jump.
+    # This matches the mathematical proof where the scale must be in a specific range
+    # that double-scaling skips over due to quadratic decay.
+    slots = [
+        {
+            "source_frames": 120, "fps": 30.0, "transition_frames": 0, "preferred_transition_frames": 0,
+            "visible_frames": 120, "output_frames": 120, "is_escalation": False,
+            "treatment": {"desired_speed": 1.0, "score": 1.0, "effect": "none", "reason": ""},
+            "intentional_jump": True
+        },
+        {
+            "source_frames": 120, "fps": 30.0, "transition_frames": 0, "preferred_transition_frames": 0,
+            "visible_frames": 120, "output_frames": 120, "is_escalation": False,
+            "treatment": {"desired_speed": 1.0, "score": 1.0, "effect": "none", "reason": ""},
+            "intentional_jump": False
+        },
+        {
+            "source_frames": 120, "fps": 30.0, "transition_frames": 0, "preferred_transition_frames": 0,
+            "visible_frames": 120, "output_frames": 120, "is_escalation": False,
+            "treatment": {"desired_speed": 1.0, "score": 1.0, "effect": "none", "reason": ""},
+            "intentional_jump": False
+        }
+    ]
+
+    # Run the allocation. Under the corrected code, this must succeed.
+    pieces = _allocate_scored_source(intervals, slots, 30.0)
+    assert len(pieces) == 3
+    assert pieces[0].duration == pytest.approx(4.0)
+    assert pieces[1].duration == pytest.approx(4.0)
+    assert pieces[2].duration == pytest.approx(4.0)
+
