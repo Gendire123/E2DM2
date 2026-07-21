@@ -1,0 +1,6 @@
+{
+  "Endpoint": "https://eus.codesigning.azure.net/",
+  "CodeSigningAccountName": "E2DM2",
+  "CertificateProfileName": "E2DM2ReleaseProfile",
+  "ExcludeCredentials": []
+}

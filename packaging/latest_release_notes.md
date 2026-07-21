@@ -1,15 +1,13 @@
-E2DM2 v1.0.11 resolves a rendering failure in the video montage engine, ensuring stable source allocation.
+E2DM2 v1.1.0 introduces verified digital code signing backed by Microsoft Azure Trusted Signing.
 
-## Fixed: Montage render failure
+## Verified Authenticity & Security
 
-Fixes a bug where producing a video montage could fail with the error message:
-`No forward-only contiguous source allocation satisfies the montage timeline.`
-
-This issue occurred due to a double-scaling error in the montage layout algorithm, causing skip calculations to decay quadratically instead of linearly when fitting media within clip exclusions and boundaries. The algorithm now correctly utilizes a smooth linear scale, ensuring robust and successful montage rendering.
+- **Microsoft Azure Trusted Signing:** Both the application executable (`E2DM2.exe`) and the Windows installer (`E2DM2-Setup-1.1.0.exe`) are now officially signed with Microsoft's cloud identity verification service.
+- **Windows SmartScreen Integration:** Delivers an instant, trusted installation experience on Windows 10 and Windows 11 without unverified publisher warnings.
 
 ## Download and Installation
 
-1. Download `E2DM2-Setup-1.0.11.exe` from the assets section below.
+1. Download `E2DM2-Setup-1.1.0.exe` from the assets section below.
 2. Double-click the installer and follow the on-screen instructions.
-3. The installer can replace an earlier E2DM2 version while preserving existing projects and user-created media.
-4. After installation, open **Help > About E2DM2** to confirm that version 1.0.11 is running.
+3. The installer safely upgrades previous E2DM2 installations while preserving existing projects, presets, and media.
+4. After installation, open **Help > About E2DM2** to verify version 1.1.0 is running.

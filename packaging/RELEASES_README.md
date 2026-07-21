@@ -4,29 +4,25 @@
 
 E2DM2 is a local Windows desktop application that transforms drone footage into polished, music-synchronized movies without requiring a traditional video-editing workflow.
 
-## Latest Release: E2DM2 v1.0.8
+## Latest Release: E2DM2 v1.1.0
 
-Download the Windows installer from the v1.0.8 release assets:
+Download the Windows installer from the v1.1.0 release assets:
 
-**[Download E2DM2-Setup-1.0.8.exe](https://github.com/Gendire123/E2DM2-Releases/releases/download/v1.0.8/E2DM2-Setup-1.0.8.exe)**
+**[Download E2DM2-Setup-1.1.0.exe](https://github.com/Gendire123/E2DM2-Releases/releases/download/v1.1.0/E2DM2-Setup-1.1.0.exe)**
 
-Version 1.0.8 is a usability, onboarding, and privacy-transparency release. Its main improvements are:
+Version 1.1.0 introduces verified digital code signing backed by Microsoft Azure Trusted Signing:
 
-- responsive onboarding highlights that stay aligned in maximized and windowed layouts, including displays smaller than 1920x1080;
-- live spotlight repositioning when the application is resized during a tour;
-- clearly checked onboarding options with a visible white checkmark;
-- a new scrollable **Help > Privacy Policy** window describing local processing, limited network functions, licensing, retention, security, and user rights;
-- reliable high-contrast Privacy Policy colors under Windows light and dark themes; and
-- updated About and splash screens showing version 1.0.8.
+- **Verified Identity & Code Integrity:** Both the standalone application executable (`E2DM2.exe`) and the setup installer (`E2DM2-Setup-1.1.0.exe`) are digitally signed using Microsoft's cloud identity verification service.
+- **Windows SmartScreen Integration:** Provides a smooth, trusted installation experience on Windows 10 and Windows 11 without unverified publisher warnings.
 
-See the [v1.0.8 release page](https://github.com/Gendire123/E2DM2-Releases/releases/tag/v1.0.8) for the complete release notes, installer asset, file size, and publication details.
+See the [v1.1.0 release page](https://github.com/Gendire123/E2DM2-Releases/releases/tag/v1.1.0) for the complete release notes, installer asset, file size, and publication details.
 
 ## Installation and Upgrade
 
-1. Download `E2DM2-Setup-1.0.8.exe` from the v1.0.8 release assets.
+1. Download `E2DM2-Setup-1.1.0.exe` from the v1.1.0 release assets.
 2. Double-click the installer and follow the on-screen instructions.
 3. If an earlier version is installed, the setup process replaces the application while leaving projects and user-created media available.
-4. Start E2DM2 and open **Help > About E2DM2** to verify that version 1.0.8 is installed.
+4. Start E2DM2 and open **Help > About E2DM2** to verify that version 1.1.0 is installed.
 
 Windows SmartScreen may warn about a new independent publisher. Confirm that the installer came from the official E2DM2 Releases repository and compare any published checksum before continuing.
 

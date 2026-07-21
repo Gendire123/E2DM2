@@ -1,6 +1,7 @@
 """Easy Epic Drone Movie Maker engine and desktop application."""
 
 from .catalog import load_song_catalog
+from .version import __version__
 from .models import (
     CancellationToken,
     ClipSelection,
@@ -13,6 +14,7 @@ from .models import (
 from .render import create_render_plan, render
 
 __all__ = [
+    "__version__",
     "CancellationToken",
     "ClipSelection",
     "ExportSize",

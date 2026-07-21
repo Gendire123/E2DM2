@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "1.0.11",
+    [string]$Version = "1.1.0",
     [string]$Python = "",
     [string]$Ffmpeg = "",
     [string]$Ffprobe = "",
@@ -9,11 +9,32 @@ param(
     [string]$OutputRoot = "",
     [switch]$SkipTests,
     [switch]$SkipInstaller,
-    [switch]$CleanBuildToolsAfterCompile
+    [switch]$CleanBuildToolsAfterCompile,
+    [switch]$AzureSign,
+    [string]$AzureMetadataPath = "",
+    [string]$AzureDlibPath = "",
+    [string]$SignToolPath = ""
 )
 
 $ErrorActionPreference = "Stop"
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+
+if (-not $PSBoundParameters.ContainsKey('Version')) {
+    $VersionPy = Join-Path $Root "e2dm2\version.py"
+    $UiPy = Join-Path $Root "e2dm2\ui.py"
+    if (Test-Path -LiteralPath $VersionPy -PathType Leaf) {
+        $VersionMatch = Select-String -Path $VersionPy -Pattern '__version__\s*=\s*"([^"]+)"'
+        if ($VersionMatch) {
+            $Version = $VersionMatch.Matches[0].Groups[1].Value
+        }
+    }
+    if (-not $Version -and (Test-Path -LiteralPath $UiPy -PathType Leaf)) {
+        $VersionMatch = Select-String -Path $UiPy -Pattern 'APP_VERSION\s*=\s*"([^"]+)"'
+        if ($VersionMatch) {
+            $Version = $VersionMatch.Matches[0].Groups[1].Value
+        }
+    }
+}
 if (-not $WorkRoot) {
     $WorkRoot = Join-Path $Root "build"
     if ($WorkRoot -match "[^\x00-\x7F]") {
@@ -25,6 +46,14 @@ $BuildRoot = Join-Path $WorkRoot "windows"
 $BuildVenv = Join-Path $WorkRoot ".build-venv"
 $TempRoot = Join-Path $WorkRoot "temp"
 $NuitkaCache = Join-Path $WorkRoot "nuitka-cache"
+
+if (-not $AzureMetadataPath -and $env:AZURE_SIGNING_METADATA) { $AzureMetadataPath = $env:AZURE_SIGNING_METADATA }
+if (-not $AzureMetadataPath) {
+    $DefaultMeta = Join-Path $PSScriptRoot "azure_signing_metadata.json"
+    if (Test-Path -LiteralPath $DefaultMeta -PathType Leaf) { $AzureMetadataPath = $DefaultMeta }
+}
+if (-not $AzureDlibPath -and $env:AZURE_SIGNING_DLIB) { $AzureDlibPath = $env:AZURE_SIGNING_DLIB }
+if (-not $SignToolPath -and $env:SIGNTOOL_PATH) { $SignToolPath = $env:SIGNTOOL_PATH }
 
 if ($env:OS -ne "Windows_NT") {
     throw "This build script produces the Windows distribution and must run on Windows."
@@ -131,6 +160,48 @@ $AppExe = Get-ChildItem -LiteralPath $BuildRoot -Filter "E2DM2.exe" -Recurse -Fi
     Select-Object -First 1
 if (-not $AppExe) { throw "Nuitka completed but E2DM2.exe was not found." }
 $DistDir = $AppExe.Directory.FullName
+
+if ($AzureSign) {
+    if (-not $SignToolPath) {
+        $SignToolCommand = Get-Command signtool.exe -ErrorAction SilentlyContinue
+        if ($SignToolCommand) {
+            $SignToolPath = $SignToolCommand.Source
+        } else {
+            $SdkPaths = @(
+                (Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin\*\x64\signtool.exe"),
+                (Join-Path $env:ProgramFiles "Windows Kits\10\bin\*\x64\signtool.exe")
+            )
+            $ResolvedPaths = Resolve-Path $SdkPaths -ErrorAction SilentlyContinue
+            if ($ResolvedPaths) {
+                $SignToolPath = $ResolvedPaths | Sort-Object Path -Descending | Select-Object -First 1 | ForEach-Object { $_.Path }
+            }
+        }
+    }
+    if (-not $SignToolPath -or -not (Test-Path $SignToolPath)) {
+        throw "signtool.exe not found. Install Windows SDK or pass -SignToolPath."
+    }
+
+    if (-not $AzureDlibPath) {
+        $DlibCandidates = @(
+            (Join-Path $env:LOCALAPPDATA "Microsoft\MicrosoftTrustedSigningClientTools\Azure.CodeSigning.Dlib.dll"),
+            (Join-Path ${env:ProgramFiles} "Microsoft Trusted Signing Client Tools\bin\x64\Azure.CodeSigning.Dlib.dll"),
+            (Join-Path ${env:ProgramFiles(x86)} "Microsoft Trusted Signing Client Tools\bin\x64\Azure.CodeSigning.Dlib.dll")
+        )
+        $AzureDlibPath = $DlibCandidates | Where-Object { Test-Path $_ -PathType Leaf } | Select-Object -First 1
+    }
+    if (-not $AzureDlibPath -or -not (Test-Path $AzureDlibPath)) {
+        throw "Azure.CodeSigning.Dlib.dll not found. Run 'winget install Microsoft.Azure.TrustedSigningClientTools' or pass -AzureDlibPath."
+    }
+
+    if (-not $AzureMetadataPath -or -not (Test-Path $AzureMetadataPath)) {
+        throw "Azure Signing metadata JSON file is required for signing. Pass -AzureMetadataPath."
+    }
+
+    Write-Host "Signing application executable..."
+    & $SignToolPath sign /v /debug /fd SHA256 /tr "http://timestamp.acs.microsoft.com" /td SHA256 /dlib $AzureDlibPath /dmdf $AzureMetadataPath $AppExe.FullName
+    if ($LASTEXITCODE -ne 0) { throw "Failed to sign E2DM2.exe" }
+}
+
 $ToolDir = Join-Path $DistDir "bin"
 $LicenseDir = Join-Path $DistDir "licenses\FFmpeg"
 New-Item -ItemType Directory -Force -Path $ToolDir, $LicenseDir | Out-Null
@@ -172,6 +243,13 @@ if (-not $SkipInstaller) {
     $InstallerScript = Join-Path $PSScriptRoot "installer.iss"
     & $InnoCompiler "/DAppVersion=$Version" "/DDistDir=$DistDir" "/DOutputDir=$OutputRoot" $InstallerScript
     if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed to create the installer." }
+
+    if ($AzureSign) {
+        $InstallerPath = Join-Path $OutputRoot "E2DM2-Setup-$Version.exe"
+        Write-Host "Signing installer..."
+        & $SignToolPath sign /v /debug /fd SHA256 /tr "http://timestamp.acs.microsoft.com" /td SHA256 /dlib $AzureDlibPath /dmdf $AzureMetadataPath $InstallerPath
+        if ($LASTEXITCODE -ne 0) { throw "Failed to sign installer: $InstallerPath" }
+    }
 }
 
 Write-Host "Standalone application: $DistDir"
