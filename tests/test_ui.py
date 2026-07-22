@@ -1092,87 +1092,213 @@ def test_splash_screen(qtbot):
     splash = AppSplashScreen()
     qtbot.addWidget(splash)
     splash.show()
+    assert page.results_list.isHidden()
     
-    # Assert elements exist and have correct labels/properties
+    page.set_project(create_project("Visibility Test", tmp_path / "projects"))
+    assert page.results_list.isHidden()
+    
+    page.start_render()
+    # During render, it should remain hidden
+    assert page.results_list.isHidden()
+    
+    qtbot.waitUntil(lambda: page.thread is None, timeout=5000)
+
+    # 2. Once finished with outputs, it should be visible
+    assert not page.results_list.isHidden()
+    assert page.results_list.count() == 1
+
+    # 3. Starting a new render should hide it again
+    page.start_render()
+    assert page.results_list.isHidden()
+    qtbot.waitUntil(lambda: page.thread is None, timeout=5000)
+
+
+def test_timecode_helpers_use_millisecond_precision():
+    assert format_timecode(3_723_045) == "01:02:03.045"
+    assert parse_timecode("01:02:03.045") == 3_723_045
+    with pytest.raises(ValueError, match="HH:MM:SS.mmm"):
+        parse_timecode("1:02")
+
+
+def test_preview_draft_only_commits_on_save(qtbot, tmp_path):
+    media = MediaItem("source/test.mp4", "test.mp4", 320, 180, 30, 30, "h264", 1)
+    dialog = ClipPreviewDialog(media, str(tmp_path / "missing.mp4"))
+    qtbot.addWidget(dialog)
+    dialog.create_selection(SelectionType.EXCLUDE, 1000, 2000)
+    assert media.selections == []
+    dialog.reject()
+    assert media.selections == []
+
+    saved = ClipPreviewDialog(media, str(tmp_path / "missing.mp4"))
+    qtbot.addWidget(saved)
+    saved.create_selection(SelectionType.REQUIRED, 3000, 23_000)
+    saved.save_and_accept()
+    assert media.selections == [ClipSelection(SelectionType.REQUIRED, 3000, 23_000)]
+
+
+def test_selected_range_can_be_deleted_without_inspector_controls(qtbot, tmp_path):
+    media = MediaItem(
+        "source/test.mp4", "test.mp4", 320, 180, 30, 30, "h264", 1,
+        [ClipSelection(SelectionType.EXCLUDE, 1000, 2000)],
+    )
+    dialog = ClipPreviewDialog(media, str(tmp_path / "missing.mp4"))
+    qtbot.addWidget(dialog)
+    dialog.show()
+    dialog.select_selection(0)
+    qtbot.keyClick(dialog.selection_table, Qt.Key.Key_Delete)
+    assert dialog.draft == []
+
+
+def test_footage_table_displays_mark_counts(qtbot, tmp_path):
+    page = WorkspacePage()
+    qtbot.addWidget(page)
+    project = create_project("Badges", tmp_path / "projects")
+    project.settings.media = [MediaItem(
+        "source/test.mp4", "test.mp4", 320, 180, 30, 30, "h264", 1,
+        [ClipSelection(SelectionType.EXCLUDE, 0, 1000), ClipSelection(SelectionType.REQUIRED, 2000, 3000)],
+    )]
+    page.set_project(project)
+    assert page.media_table.item(0, 2).text() == "R 1 / G 1"
+
+
+def test_combined_timeline_hovers_and_drag_creates_selection(qtbot):
+    timeline = SelectionTimeline(60_000)
+    timeline.resize(1000, 96)
+    qtbot.addWidget(timeline)
+    timeline.show()
+    previewed = []
+    created = []
+    timeline.positionPreviewed.connect(previewed.append)
+    timeline.rangeCreated.connect(lambda kind, start, end: created.append((kind, start, end)))
+
+    qtbot.mouseMove(timeline, QPoint(500, 45))
+    assert previewed[-1] == pytest.approx(30_000, abs=100)
+    assert timeline.hover_ms == previewed[-1]
+
+    qtbot.mousePress(timeline, Qt.MouseButton.LeftButton, pos=QPoint(200, 45))
+    qtbot.mouseMove(timeline, QPoint(400, 45))
+    qtbot.mouseRelease(timeline, Qt.MouseButton.LeftButton, pos=QPoint(400, 45))
+    assert len(created) == 1
+    assert created[0][0] is SelectionType.EXCLUDE
+    assert created[0][1] < created[0][2]
+
+
+def test_preview_dialog_uses_timeline_as_its_scrubber(qtbot, tmp_path):
+    media = MediaItem("source/test.mp4", "test.mp4", 320, 180, 30, 30, "h264", 1)
+    dialog = ClipPreviewDialog(media, str(tmp_path / "missing.mp4"))
+    qtbot.addWidget(dialog)
+    assert dialog.height() >= 660
+    assert dialog.minimumSizeHint().height() <= dialog.height()
+    table_body_height = (
+        dialog.selection_table.maximumHeight()
+        - dialog.selection_table.horizontalHeader().sizeHint().height()
+        - dialog.selection_table.frameWidth() * 2
+    )
+    assert table_body_height >= dialog.selection_table.verticalHeader().defaultSectionSize() * 4
+    assert not hasattr(dialog, "scrubber")
+    dialog.timeline.positionPreviewed.emit(1500)
+    assert dialog.timeline.playhead_ms == 1500
+
+
+def test_fullscreen_keeps_only_video_controls_and_timeline(qtbot, tmp_path):
+    media = MediaItem("source/test.mp4", "test.mp4", 320, 180, 30, 30, "h264", 1)
+    dialog = ClipPreviewDialog(media, str(tmp_path / "missing.mp4"))
+    qtbot.addWidget(dialog)
+    dialog.show()
+    original_geometry = dialog.geometry()
+
+    dialog.toggle_fullscreen()
+    qtbot.waitUntil(dialog.isFullScreen)
+    assert dialog.video.isVisible()
+    assert dialog.timeline.isVisible()
+    assert dialog.selection_mode_panel.isVisible()
+    assert dialog.exclude_tool.isVisible()
+    assert dialog.required_tool.isVisible()
+    assert dialog.selection_table.isHidden()
+    assert dialog.button_box.isHidden()
+    assert dialog.fullscreen_button.text() == "Exit Full Screen"
+    dialog.create_selection(SelectionType.EXCLUDE, 1000, 2000)
+    assert len(dialog.draft) == 1
+
+    dialog.exit_fullscreen()
+    qtbot.waitUntil(lambda: not dialog.isFullScreen())
+    assert not dialog.selection_table.isHidden()
+    assert not dialog.button_box.isHidden()
+    assert dialog.fullscreen_button.text() == "Full Screen"
+    assert dialog.height() == original_geometry.height()
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg is required")
+def test_first_hover_silently_initializes_video_preview(qtbot, tmp_path):
+    source = tmp_path / "hover-preview.mp4"
+    subprocess.run([
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi",
+        "-i", "testsrc2=s=320x180:r=30:d=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(source),
+    ], check=True)
+    media = MediaItem("source/hover-preview.mp4", source.name, 320, 180, 30, 1, "h264", source.stat().st_size)
+    dialog = ClipPreviewDialog(media, str(source))
+    qtbot.addWidget(dialog)
+    dialog.show()
+
+    dialog.timeline.positionPreviewed.emit(600)
+    qtbot.waitUntil(
+        lambda: dialog._preview_ready and not dialog._hover_warming and abs(dialog.player.position() - 600) <= 100,
+        timeout=5000,
+    )
+    assert dialog.player.playbackState() is not dialog.player.PlaybackState.PlayingState
+    assert not dialog.audio.isMuted()
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg is required")
+def test_preview_builds_and_reuses_fast_proxy(qtbot, tmp_path):
+    source = tmp_path / "proxy-source.mp4"
+    proxy = tmp_path / "cache" / "proxy.preview.mp4"
+    subprocess.run([
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi",
+        "-i", "testsrc2=s=1280x720:r=60:d=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(source),
+    ], check=True)
+    media = MediaItem("source/proxy-source.mp4", source.name, 1280, 720, 60, 1, "h264", source.stat().st_size)
+    dialog = ClipPreviewDialog(media, str(source), proxy_path=str(proxy))
+    qtbot.addWidget(dialog)
+    dialog.show()
+    assert not dialog.proxy_progress.isHidden()
+    qtbot.waitUntil(lambda: dialog.proxy_process is None, timeout=10_000)
+    assert proxy.is_file()
+    assert dialog.proxy_progress.value() == 100
+    assert dialog.proxy_progress.format() == "Fast preview ready"
+
+    probe = subprocess.run([
+        "ffprobe", "-v", "error", "-select_streams", "v:0",
+        "-show_entries", "stream=width,r_frame_rate", "-of", "json", str(proxy),
+    ], capture_output=True, text=True, check=True)
+    stream = json.loads(probe.stdout)["streams"][0]
+    assert stream["width"] <= 854
+    assert stream["r_frame_rate"] == "30/1"
+
+    cached = ClipPreviewDialog(media, str(source), proxy_path=str(proxy))
+    qtbot.addWidget(cached)
+    assert cached.proxy_process is None
+    assert Path(cached.player.source().toLocalFile()) == proxy
+
+
+def test_splash_screen(qtbot):
+    from e2dm2.ui import AppSplashScreen, APP_VERSION
+    from PySide6.QtWidgets import QLabel
+    splash = AppSplashScreen()
+    qtbot.addWidget(splash)
+    splash.show()
+    
     assert splash.logo_label is not None
-    
-    # Find child elements and assert their properties
-    title = splash.findChild(QLabel, "splashTitle")
-    assert title is None
+    assert splash.findChild(QLabel, "splashTitle") is None
     
     version = splash.findChild(QLabel, "splashVersion")
     assert version is not None
     assert version.text() == f"Version {APP_VERSION}"
-    
+
     status = splash.findChild(QLabel, "splashStatus")
     assert status is not None
     assert status.text() == "Initializing workflows..."
     assert splash.findChild(QLabel, "splashProBadge") is None
-    
-    # The splash screen should start visible
-    assert splash.isVisible()
-
-
-def test_pro_splash_celebrates_license_owner(qtbot):
-    from e2dm2.ui import AppSplashScreen
-
-    class ProEntitlement:
-        is_pro = True
-
-    splash = AppSplashScreen(ProEntitlement())
-    qtbot.addWidget(splash)
-    splash.show()
-    qtbot.wait(10)
-
-    badge = splash.findChild(QLabel, "splashProBadge")
-    status = splash.findChild(QLabel, "splashStatus")
-
-    assert splash.findChild(QWidget, "splashCardPro") is not None
-    assert badge is not None and badge.text() == "PRO LICENSE OWNER"
-    assert splash.findChild(QLabel, "splashProMessage") is None
-    assert status is not None and status.text() == "Initializing your Pro workspace..."
-    assert splash.width() > 360
-    assert splash.height() > 390
-    screen_center = splash.screen().availableGeometry().center()
-    splash_center = splash.geometry().center()
-    assert abs(splash_center.x() - screen_center.x()) <= 1
-    assert abs(splash_center.y() - screen_center.y()) <= 1
-
-
-def test_sidebar_navigation_changes_workspace_pages(qtbot):
-    page = WorkspacePage()
-    qtbot.addWidget(page)
-    page.show()
-    qtbot.waitUntil(page.nav_selection_indicator.isVisible)
-
-    page.nav_soundtrack.click()
-    assert page.workspace_tabs.currentIndex() == 1
-    assert page._nav_highlight_animation.state() == QAbstractAnimation.State.Running
-    qtbot.waitUntil(
-        lambda: page._nav_highlight_animation.state() == QAbstractAnimation.State.Stopped,
-        timeout=1000,
-    )
-    assert page.nav_selection_highlight.geometry() == page.nav_soundtrack.geometry()
-    assert page.nav_soundtrack.property("active")
-
-    page.nav_produce.click()
-    assert page.workspace_tabs.currentIndex() == 2
-
-    page.nav_footage.click()
-    assert page.workspace_tabs.currentIndex() == 0
-
-
-def test_preview_dialog_default_paint_mode_is_visually_exclude(qtbot, tmp_path):
-    media = MediaItem("source/test.mp4", "test.mp4", 320, 180, 30, 30, "h264", 1)
-    dialog = ClipPreviewDialog(media, str(tmp_path / "missing.mp4"))
-    qtbot.addWidget(dialog)
-
-    assert dialog.timeline.tool is SelectionType.EXCLUDE
-    assert dialog.exclude_tool.isChecked()
-    assert not dialog.required_tool.isChecked()
-    assert dialog.exclude_tool.property("modeActive") == "true"
-    assert dialog.required_tool.property("modeActive") == "false"
-    assert "EXCLUDE" in dialog.current_mode_title.text()
 
 
 def test_preview_dialog_required_button_updates_active_paint_mode(qtbot, tmp_path):
@@ -2140,6 +2266,200 @@ def test_help_menu_updates(qtbot):
     from e2dm2.entitlements import AlphaEntitlementProvider
     from PySide6.QtWidgets import QApplication
 
+    # Return to step 5 (triggers programmatic tab switch back to General)
+    overlay.prev_step()
+    QApplication.processEvents()
+    assert dialog.tabs.currentIndex() == 0
+    assert overlay.current_step == 5
+
+    # Advance back to step 6 for the remainder of the test
+    overlay.next_step()
+    QApplication.processEvents()
+
+    # Test settings opt-out checked updates
+    assert not overlay.popup.opt_out_cb.isChecked()
+    overlay.popup.opt_out_cb.setChecked(True)
+    assert settings.value("startup/show_library_onboarding", True, type=bool) is False
+
+    # Reset settings
+    settings.setValue("startup/show_library_onboarding", True)
+    settings.sync()
+    dialog.close()
+
+
+def test_produce_onboarding_overlay(qtbot):
+    from e2dm2.onboarding import OnboardingOverlay, produce_onboarding_enabled
+    from e2dm2.ui import WorkspacePage
+    from PySide6.QtCore import QSettings
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    app.setApplicationName("E2DM2")
+    app.setOrganizationName("E2DM2")
+    settings = QSettings()
+    settings.setValue("startup/show_produce_onboarding", True)
+    settings.sync()
+
+    workspace = WorkspacePage()
+    qtbot.addWidget(workspace)
+    workspace.show()
+    QApplication.processEvents()
+
+    # Get onboarding steps
+    steps = workspace.get_produce_onboarding_steps()
+    assert len(steps) == 4
+
+    assert steps[0]["title"] == "Export Resolution"
+    assert steps[1]["title"] == "Add to Queue"
+    assert steps[2]["title"] == "Produce Video"
+    assert steps[3]["title"] == "Access Renders"
+
+    overlay = OnboardingOverlay(workspace, steps, "startup/show_produce_onboarding")
+    qtbot.addWidget(overlay)
+    overlay.show_onboarding()
+    QApplication.processEvents()
+    assert overlay.isVisible()
+    assert overlay.current_step == 0
+
+    # Next step
+    overlay.next_step()
+    assert overlay.current_step == 1
+    assert overlay.popup.title_label.text() == "Add to Queue"
+
+    # Verify opt-out checkbox behavior
+    assert not overlay.popup.opt_out_cb.isChecked()
+    overlay.popup.opt_out_cb.setChecked(True)
+    # Process events to ensure signal handlers finish executing
+    QApplication.processEvents()
+    assert settings.value("startup/show_produce_onboarding", True, type=bool) is False
+
+    # Reset settings
+    settings.setValue("startup/show_produce_onboarding", True)
+    settings.sync()
+
+
+
+
+def test_preview_onboarding_overlay_cached(qtbot, tmp_path):
+    from e2dm2.onboarding import OnboardingOverlay
+    from e2dm2.preview import ClipPreviewDialog
+    from e2dm2.models import MediaItem
+    from PySide6.QtCore import QSettings
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    app.setApplicationName("E2DM2")
+    app.setOrganizationName("E2DM2")
+    settings = QSettings()
+    settings.setValue("startup/show_preview_onboarding", True)
+    settings.sync()
+
+    # Create dummy media and mock proxy files
+    media = MediaItem("source/test.mp4", "test.mp4", 320, 180, 30, 30.0, "h264", 1)
+    source_file = tmp_path / "test.mp4"
+    source_file.write_text("mock content")
+    proxy_file = tmp_path / "test.proxy.mp4"
+    proxy_file.write_text("mock proxy content")
+
+    # Instantiate dialog with existing proxy
+    dialog = ClipPreviewDialog(media, str(source_file), proxy_path=str(proxy_file))
+    qtbot.addWidget(dialog)
+
+    # Get onboarding steps (since proxy is current, it should skip the proxy step)
+    steps = dialog.get_onboarding_steps()
+    assert len(steps) == 6 # Skipped "Fast Low-Resolution Preview"
+    
+    # Step 1 should be shortcuts instead of proxy
+    assert steps[1]["title"] == "Keyboard Shortcuts"
+
+    dialog.close()
+
+
+def test_options_onboarding_reset(qtbot, tmp_path):
+    from e2dm2.ui import OptionsDialog
+    from PySide6.QtCore import QSettings
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    settings = QSettings(str(tmp_path / "onboarding-options.ini"), QSettings.Format.IniFormat)
+    
+    # Disable onboarding features
+    settings.setValue("startup/show_welcome_modal", False)
+    settings.setValue("startup/show_onboarding", False)
+    settings.setValue("startup/show_workspace_onboarding", False)
+    settings.setValue("startup/show_preview_onboarding", False)
+    settings.setValue("startup/show_soundtrack_onboarding", False)
+    settings.setValue("startup/show_library_onboarding", False)
+    settings.setValue("startup/show_produce_onboarding", False)
+    settings.sync()
+
+    dialog = OptionsDialog(settings=settings)
+    qtbot.addWidget(dialog)
+    dialog.show()
+    QApplication.processEvents()
+
+    # Assert checkbox is unchecked initially since startup/show_welcome_modal is False
+    assert dialog.welcome_checkbox.isChecked() is False
+
+    # Trigger reset button click programmatically
+    # We mock QMessageBox.information to not block the test
+    from unittest.mock import patch
+    with patch("PySide6.QtWidgets.QMessageBox.information") as mock_info:
+        dialog.reset_onboarding_btn.click()
+        mock_info.assert_called_once()
+
+    # Verify welcome_checkbox is now checked
+    assert dialog.welcome_checkbox.isChecked() is True
+
+    # Verify all onboarding keys have been restored to True
+    assert settings.value("startup/show_welcome_modal", False, type=bool) is True
+    assert settings.value("startup/show_onboarding", False, type=bool) is True
+    assert settings.value("startup/show_workspace_onboarding", False, type=bool) is True
+    assert settings.value("startup/show_preview_onboarding", False, type=bool) is True
+    assert settings.value("startup/show_soundtrack_onboarding", False, type=bool) is True
+    assert settings.value("startup/show_library_onboarding", False, type=bool) is True
+    assert settings.value("startup/show_produce_onboarding", False, type=bool) is True
+
+    # Test toggling the welcome checkbox manually
+    dialog.welcome_checkbox.setChecked(False)
+    assert settings.value("startup/show_welcome_modal", True, type=bool) is False
+
+    dialog.close()
+
+
+def test_mainwindow_open_close_options(qtbot):
+    from e2dm2.ui import MainWindow
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    QApplication.processEvents()
+
+    # Initial state
+    assert window.options_page is None
+
+    # Open options
+    window.open_options()
+    assert window.options_page is not None
+    assert window.stack.currentWidget() == window.options_page
+
+    # Close options
+    window.options_page.close_options()
+    QApplication.processEvents()
+    assert window.options_page is None
+    assert window.stack.currentWidget() == window.home
+
+    window.close()
+
+
+def test_help_menu_updates(qtbot):
+    from e2dm2.ui import MainWindow
+    from e2dm2.editor import SongEditorDialog
+    from e2dm2.entitlements import AlphaEntitlementProvider
+    from PySide6.QtWidgets import QApplication
+
     app = QApplication.instance() or QApplication([])
     window = MainWindow()
     qtbot.addWidget(window)
@@ -2148,7 +2468,7 @@ def test_help_menu_updates(qtbot):
 
     # Initial state (Home Page active)
     actions = window.help_menu.actions()
-    assert len(actions) == 8
+    assert len(actions) == 9
     assert actions[0].text() == "Show Welcome Screen Tour"
     assert actions[1].text() == "Show Workspace Tour"
     assert actions[2].text() == "Show Soundtrack Tour"
@@ -2156,7 +2476,8 @@ def test_help_menu_updates(qtbot):
     assert actions[4].isSeparator()
     assert actions[5].text() == "Contact && Info"
     assert actions[6].text() == "Privacy Policy"
-    assert actions[7].text() == "About E2DM2"
+    assert actions[7].text() == "Buy Me a Coffee ☕"
+    assert actions[8].text() == "About E2DM2"
 
     # Push a SongEditorDialog to the stack
     library_page = SongEditorDialog(AlphaEntitlementProvider(), window)
@@ -2165,12 +2486,13 @@ def test_help_menu_updates(qtbot):
     QApplication.processEvents()
 
     actions = window.help_menu.actions()
-    assert len(actions) == 5
+    assert len(actions) == 6
     assert actions[0].text() == "Show Library Tour"
     assert actions[1].isSeparator()
     assert actions[2].text() == "Contact && Info"
     assert actions[3].text() == "Privacy Policy"
-    assert actions[4].text() == "About E2DM2"
+    assert actions[4].text() == "Buy Me a Coffee ☕"
+    assert actions[5].text() == "About E2DM2"
 
     # Cleanup
     window.stack.removeWidget(library_page)

@@ -563,12 +563,9 @@ class SongEditorDialog(QWidget):
         QApplication.instance().installEventFilter(self)
         self.reload_catalog()
         allowed = self.entitlement.has_feature(PRESET_EDITOR_FEATURE)
-        # Keep this clickable so Free users receive the Pro explanation and activation path.
         self.new_button.setEnabled(True)
         self.duplicate_button.setEnabled(allowed)
         self.save_button.setEnabled(allowed)
-        if not allowed:
-            self.status_label.setText("Preset editing requires the Pro editor entitlement.")
 
     def _build_ui(self) -> None:
         self.song_list = QListWidget()
@@ -1068,7 +1065,7 @@ class SongEditorDialog(QWidget):
         self.delete_button.setEnabled(allowed and not is_legacy)
         self.save_button.setEnabled(allowed)
         if allowed:
-            self.status_label.setText("Pro license active")
+            self.status_label.setText("Preset editor active")
 
     def add_cut_timestamp(self, timestamp: float) -> None:
         # For now, built-in songs CAN be edited
@@ -1436,7 +1433,7 @@ class SongEditorDialog(QWidget):
             {
                 "target": lambda dialog: dialog.new_button,
                 "title": "New Song Preset",
-                "description": "Create a new custom song template (requires a Pro entitlement license)."
+                "description": "Create a new custom song template."
             },
             {
                 "target": lambda dialog: dialog.duplicate_button,

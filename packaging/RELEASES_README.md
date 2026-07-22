@@ -4,25 +4,25 @@
 
 E2DM2 is a local Windows desktop application that transforms drone footage into polished, music-synchronized movies without requiring a traditional video-editing workflow.
 
-## Latest Release: E2DM2 v1.1.0
+## Latest Release: E2DM2 v1.1.1
 
-Download the Windows installer from the v1.1.0 release assets:
+Download the Windows installer from the v1.1.1 release assets:
 
-**[Download E2DM2-Setup-1.1.0.exe](https://github.com/Gendire123/E2DM2-Releases/releases/download/v1.1.0/E2DM2-Setup-1.1.0.exe)**
+**[Download E2DM2-Setup-1.1.1.exe](https://github.com/Gendire123/E2DM2-Releases/releases/download/v1.1.1/E2DM2-Setup-1.1.1.exe)**
 
-Version 1.1.0 introduces verified digital code signing backed by Microsoft Azure Trusted Signing:
+Version 1.1.1 includes general performance improvements, workflow optimizations, and bug fixes:
 
-- **Verified Identity & Code Integrity:** Both the standalone application executable (`E2DM2.exe`) and the setup installer (`E2DM2-Setup-1.1.0.exe`) are digitally signed using Microsoft's cloud identity verification service.
+- **Verified Identity & Code Integrity:** Both the standalone application executable (`E2DM2.exe`) and the setup installer (`E2DM2-Setup-1.1.1.exe`) are digitally signed using Microsoft's cloud identity verification service.
 - **Windows SmartScreen Integration:** Provides a smooth, trusted installation experience on Windows 10 and Windows 11 without unverified publisher warnings.
 
-See the [v1.1.0 release page](https://github.com/Gendire123/E2DM2-Releases/releases/tag/v1.1.0) for the complete release notes, installer asset, file size, and publication details.
+See the [v1.1.1 release page](https://github.com/Gendire123/E2DM2-Releases/releases/tag/v1.1.1) for the complete release notes, installer asset, file size, and publication details.
 
 ## Installation and Upgrade
 
-1. Download `E2DM2-Setup-1.1.0.exe` from the v1.1.0 release assets.
+1. Download `E2DM2-Setup-1.1.1.exe` from the v1.1.1 release assets.
 2. Double-click the installer and follow the on-screen instructions.
 3. If an earlier version is installed, the setup process replaces the application while leaving projects and user-created media available.
-4. Start E2DM2 and open **Help > About E2DM2** to verify that version 1.1.0 is installed.
+4. Start E2DM2 and open **Help > About E2DM2** to verify that version 1.1.1 is installed.
 
 Windows SmartScreen may warn about a new independent publisher. Confirm that the installer came from the official E2DM2 Releases repository and compare any published checksum before continuing.
 
@@ -37,12 +37,9 @@ Windows SmartScreen may warn about a new independent publisher. Confirm that the
 
 E2DM2 performs video and audio processing locally on the user's computer. Imported footage, custom soundtracks, generated previews, project data, and rendered movies are not uploaded for cloud processing.
 
-The application uses limited internet connections for:
+The application uses limited internet connections for automatic or user-requested update checks through GitHub.
 
-- automatic or user-requested update checks through GitHub; and
-- optional Pro license activation and deactivation through the E2DM2 licensing service hosted by Supabase.
-
-Purchases and contact requests open external pages in the user's browser. The complete policy is available inside E2DM2 under **Help > Privacy Policy**.
+Contact requests open external pages in the user's browser. The complete policy is available inside E2DM2 under **Help > Privacy Policy**.
 
 ## Core Features
 
@@ -67,17 +64,6 @@ E2DM2 combines these instructions with its montage planner to preserve required 
 - Source footage remains in its original location.
 - Project settings and recent-project information remain on the local computer.
 - Preview proxies, thumbnails, waveform caches, logs, and renders are generated locally.
-- Existing projects remain compatible with the onboarding and privacy-interface improvements in version 1.0.8.
-
-## E2DM2 Pro
-
-The standard application includes built-in soundtrack workflows. An optional Pro license unlocks additional creative controls:
-
-- import custom soundtracks such as MP3, WAV, AAC, FLAC, and M4A files;
-- create and edit custom timing cuts and effect presets; and
-- export at full source resolution, including supported 4K footage.
-
-Pro activation uses a license code and a randomly generated installation identifier. It does not upload project media or use a hardware serial number.
 
 ## Support and Information
 

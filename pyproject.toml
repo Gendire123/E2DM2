@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "e2dm2"
-version = "1.1.0"
+version = "1.1.1"
 description = "Easy Epic Drone Movie Maker desktop alpha"
 requires-python = ">=3.11"
 dependencies = [

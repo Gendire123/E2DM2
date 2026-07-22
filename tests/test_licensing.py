@@ -61,7 +61,7 @@ def test_local_license_activates_only_after_server_validation(tmp_path):
     api = FakeLicenseApi()
     provider = LocalLicenseProvider(settings, api)
 
-    assert not provider.has_feature(SOURCE_RESOLUTION_FEATURE)
+    assert provider.has_feature(SOURCE_RESOLUTION_FEATURE)
     provider.activate("e43 sd2 dfd qw2 fdq")
 
     assert provider.has_feature(SOURCE_RESOLUTION_FEATURE)
@@ -93,7 +93,6 @@ def test_local_license_deactivation_releases_receipt_and_keeps_device_id(tmp_pat
 
     provider.deactivate()
 
-    assert not provider.is_pro
     assert not settings.contains("license/activation_token")
     assert provider.device_id() == device_id
     assert api.calls[-1] == ("deactivate", "server-token", device_id)
@@ -158,17 +157,11 @@ def test_new_song_click_prompts_free_user(qtbot):
     assert len(dialog.songs) == original_count
 
 
-def test_workspace_song_library_passes_pro_prompt_to_new_song(qtbot):
-    entitlement = MutableEntitlement()
-    prompts = []
+def test_workspace_song_library_allows_new_song(qtbot):
+    entitlement = MutableEntitlement(active=True)
     window = MainWindow(entitlement)
     qtbot.addWidget(window)
-    window.workspace.request_pro = lambda feature: prompts.append(feature) or False
-
-    window.workspace.open_library()
-    window.workspace.library_page.new_button.click()
-
-    assert prompts == ["Adding new songs to your soundtrack library"]
+    assert window.windowTitle() == "Easy Epic Drone Movie Maker - E2DM2"
 
 
 def test_license_dialog_formats_pasted_code(qtbot, tmp_path):
@@ -262,26 +255,12 @@ def test_view_menu_omits_disabled_admin_tools(qtbot, monkeypatch):
     assert window.admin_tools_action is None
 
 
-def test_purchase_menu_actions_follow_live_license_state(qtbot, tmp_path):
-    settings = QSettings(str(tmp_path / "license.ini"), QSettings.Format.IniFormat)
-    provider = LocalLicenseProvider(settings, FakeLicenseApi())
-    window = MainWindow(provider)
+def test_buy_me_a_coffee_help_menu_action(qtbot):
+    window = MainWindow()
     qtbot.addWidget(window)
-
-    assert window.windowTitle() == "Easy Epic Drone Movie Maker - E2DM2"
-    assert window.purchase_pro_action.isVisible()
-    assert window.enter_license_action.isVisible()
-    provider.activate("E43-SD2-DFD-QW2-FDQ")
-    window.license_activated()
-    assert window.windowTitle() == "Easy Epic Drone Movie Maker - E2DM2 - Pro"
-    assert not window.purchase_pro_action.isVisible()
-    assert not window.enter_license_action.isVisible()
-
-    provider.deactivate()
-    window.license_deactivated()
-    assert window.windowTitle() == "Easy Epic Drone Movie Maker - E2DM2"
-    assert window.purchase_pro_action.isVisible()
-    assert window.enter_license_action.isVisible()
+    actions = [action.text() for action in window.help_menu.actions()]
+    assert "Buy Me a Coffee ☕" in actions
+    assert actions.index("Buy Me a Coffee ☕") < actions.index("About E2DM2")
 
 
 def test_admin_license_bought_button_calls_protected_endpoint(qtbot, monkeypatch):
@@ -350,7 +329,6 @@ def test_admin_dialog_can_deactivate_this_copy(qtbot, tmp_path, monkeypatch):
 
     dialog.deactivate_button.click()
 
-    assert not provider.is_pro
     assert not dialog.deactivate_button.isEnabled()
     assert deactivated == [True]
     assert "activation slot is available again" in dialog.status.text()

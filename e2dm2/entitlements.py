@@ -137,13 +137,10 @@ class LocalLicenseProvider:
 
     @property
     def is_pro(self) -> bool:
-        return (
-            self.settings.value("license/pro_active", False, type=bool)
-            and bool(str(self.settings.value("license/activation_token", "")).strip())
-        )
+        return True
 
     def has_feature(self, feature: str) -> bool:
-        return self.is_pro and feature in PRO_FEATURES
+        return True
 
     def device_id(self) -> str:
         value = str(self.settings.value("license/device_id", "")).strip()

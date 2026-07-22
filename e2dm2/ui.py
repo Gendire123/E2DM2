@@ -3430,7 +3430,7 @@ class WorkspacePage(QWidget):
             {
                 "target": lambda ws: ws.manage_button,
                 "title": "Manage Music Library",
-                "description": "Click here to view song details, edit track metadata, or (with a Pro license) import your own custom soundtracks.",
+                "description": "Click here to view song details, edit track metadata, or import your own custom soundtracks.",
                 "position": "left"
             }
         ]
@@ -3467,7 +3467,7 @@ class WorkspacePage(QWidget):
             {
                 "target": lambda ws: ws._get_export_resolutions_rect(),
                 "title": "Export Resolution",
-                "description": "Choose your final video resolution. The standard license exports up to 1080p. Pro users can export up to 1440p or at Source resolution for full-resolution footage."
+                "description": "Choose your final video resolution. Export up to 1440p or at Source resolution for full-resolution footage."
             },
             {
                 "target": lambda ws: ws.add_to_queue_button,
@@ -3490,6 +3490,201 @@ class WorkspacePage(QWidget):
         from PySide6.QtCore import QPoint, QRectF
         top_left = self.source_export.mapTo(self, QPoint(0, 0))
         bottom_right = self.hd_export.mapTo(self, QPoint(self.hd_export.width(), self.hd_export.height()))
+    def show_onboarding(self) -> None:
+        if hasattr(self, "onboarding_overlay") and self.onboarding_overlay and self.onboarding_overlay.isVisible():
+            return
+        from .onboarding import OnboardingOverlay
+        if not hasattr(self, "onboarding_overlay") or not self.onboarding_overlay:
+            self.onboarding_overlay = OnboardingOverlay(self, self.get_onboarding_steps(), "startup/show_workspace_onboarding")
+            self.onboarding_overlay.setGeometry(self.rect())
+        else:
+            self.onboarding_overlay.steps = self.get_onboarding_steps()
+        self.onboarding_overlay.show_onboarding()
+
+    def get_onboarding_steps(self) -> list[dict]:
+        return [
+            {
+                "target": lambda ws: ws._get_sidebar_nav_rect(),
+                "title": "Three Sections, Three Steps",
+                "description": "Navigate between Footage, Soundtrack, and Produce to guide your film editing step-by-step."
+            },
+            {
+                "target": lambda ws: ws._get_table_drop_rect(),
+                "title": "Import files by Drag & Drop",
+                "description": "Drag and drop your drone video files directly into this area to import them."
+            },
+            {
+                "target": lambda ws: ws._get_add_buttons_rect(),
+                "title": "Import via Add Files / Folder",
+                "description": "Use the Add Files or Add Folder buttons to select footage from your directories."
+            },
+            {
+                "target": lambda ws: ws.preview_button,
+                "title": "Preview and Edit Clips",
+                "description": "Select any clip and click Preview / Edit to view it or mark key highlights."
+            },
+            {
+                "target": lambda ws: ws._get_move_buttons_rect(),
+                "title": "Change Clip Order",
+                "description": "Use the arrow buttons to change the order in which clips appear in your movie."
+            },
+            {
+                "target": lambda ws: ws.remove_button,
+                "title": "Delete Selected Videos",
+                "description": "Remove selected clips from the list by clicking the red X button, or by pressing Delete."
+            },
+            {
+                "target": lambda ws: ws.settings_button,
+                "title": "Application Settings",
+                "description": "Access the Settings here to adjust application preferences."
+            },
+            {
+                "target": lambda ws: ws.metric_target_duration,
+                "title": "Target Production Duration",
+                "description": "This shows the target duration for your movie, which updates based on the soundtrack selected."
+            }
+        ]
+
+    def _get_sidebar_nav_rect(self) -> QRectF:
+        from PySide6.QtCore import QPoint, QRectF
+        top_left = self.nav_footage.mapTo(self, QPoint(0, 0))
+        bottom_right = self.nav_produce.mapTo(self, QPoint(self.nav_produce.width(), self.nav_produce.height()))
+        padding = 8
+        return QRectF(
+            top_left.x() - padding,
+            top_left.y() - padding,
+            bottom_right.x() - top_left.x() + 2 * padding,
+            bottom_right.y() - top_left.y() + 2 * padding
+        )
+
+    def _get_table_drop_rect(self) -> QRectF:
+        from PySide6.QtCore import QPoint, QRectF
+        viewport = self.media_table.viewport()
+        pos = viewport.mapTo(self, QPoint(0, 0))
+        margin = 24
+        return QRectF(
+            pos.x() + margin,
+            pos.y() + margin,
+            viewport.width() - 2 * margin,
+            viewport.height() - 2 * margin
+        )
+
+    def _get_add_buttons_rect(self) -> QRectF:
+        from PySide6.QtCore import QPoint, QRectF
+        top_left = self.add_files_button.mapTo(self, QPoint(0, 0))
+        bottom_right = self.add_folder_button.mapTo(self, QPoint(self.add_folder_button.width(), self.add_folder_button.height()))
+        padding = 8
+        return QRectF(
+            top_left.x() - padding,
+            top_left.y() - padding,
+            bottom_right.x() - top_left.x() + 2 * padding,
+            bottom_right.y() - top_left.y() + 2 * padding
+        )
+
+    def _get_move_buttons_rect(self) -> QRectF:
+        from PySide6.QtCore import QPoint, QRectF
+        top_left = self.move_up_button.mapTo(self, QPoint(0, 0))
+        bottom_right = self.move_down_button.mapTo(self, QPoint(self.move_down_button.width(), self.move_down_button.height()))
+        padding = 8
+        return QRectF(
+            top_left.x() - padding,
+            top_left.y() - padding,
+            bottom_right.x() - top_left.x() + 2 * padding,
+            bottom_right.y() - top_left.y() + 2 * padding
+        )
+
+    def show_soundtrack_onboarding(self) -> None:
+        if hasattr(self, "onboarding_overlay") and self.onboarding_overlay and self.onboarding_overlay.isVisible():
+            return
+        from .onboarding import OnboardingOverlay
+        if not hasattr(self, "onboarding_overlay") or not self.onboarding_overlay:
+            self.onboarding_overlay = OnboardingOverlay(self, self.get_soundtrack_onboarding_steps(), "startup/show_soundtrack_onboarding")
+            self.onboarding_overlay.setGeometry(self.rect())
+        else:
+            self.onboarding_overlay.steps = self.get_soundtrack_onboarding_steps()
+            self.onboarding_overlay.popup.settings_key = "startup/show_soundtrack_onboarding"
+        self.onboarding_overlay.show_onboarding()
+
+    def get_soundtrack_onboarding_steps(self) -> list[dict]:
+        return [
+            {
+                "target": lambda ws: ws.workflow_combo,
+                "title": "Choose Editing Workflow",
+                "description": "Select how you want to build your video from available timing modes."
+            },
+            {
+                "target": lambda ws: ws.song_table,
+                "title": "Music Library",
+                "description": "Browse soundtracks and select a song for your final video production."
+            },
+            {
+                "target": lambda ws: ws._get_song_play_btn_rect(),
+                "title": "Preview Soundtrack",
+                "description": "Click the Play button to listen to a track before choosing it."
+            },
+            {
+                "target": lambda ws: ws.manage_button,
+                "title": "Manage Music Library",
+                "description": "View details, edit metadata, or import custom soundtracks.",
+                "position": "left"
+            }
+        ]
+
+    def _get_song_play_btn_rect(self) -> QRectF:
+        from PySide6.QtCore import QPoint, QRectF
+        cell = self.song_table.cellWidget(0, 0)
+        if not cell or not hasattr(cell, "play_button"):
+            return QRectF()
+        btn = cell.play_button
+        top_left = btn.mapTo(self, QPoint(0, 0))
+        padding = 4
+        return QRectF(
+            top_left.x() - padding,
+            top_left.y() - padding,
+            btn.width() + 2 * padding,
+            btn.height() + 2 * padding
+        )
+
+    def show_produce_onboarding(self) -> None:
+        if hasattr(self, "onboarding_overlay") and self.onboarding_overlay and self.onboarding_overlay.isVisible():
+            return
+        from .onboarding import OnboardingOverlay
+        if not hasattr(self, "onboarding_overlay") or not self.onboarding_overlay:
+            self.onboarding_overlay = OnboardingOverlay(self, self.get_produce_onboarding_steps(), "startup/show_produce_onboarding")
+            self.onboarding_overlay.setGeometry(self.rect())
+        else:
+            self.onboarding_overlay.steps = self.get_produce_onboarding_steps()
+            self.onboarding_overlay.popup.settings_key = "startup/show_produce_onboarding"
+        self.onboarding_overlay.show_onboarding()
+
+    def get_produce_onboarding_steps(self) -> list[dict]:
+        return [
+            {
+                "target": lambda ws: ws._get_export_resolutions_rect(),
+                "title": "Export Resolution",
+                "description": "Choose your final video resolution."
+            },
+            {
+                "target": lambda ws: ws.add_to_queue_button,
+                "title": "Add to Queue",
+                "description": "Queue your current project settings to render later."
+            },
+            {
+                "target": lambda ws: ws.render_button,
+                "title": "Produce Video",
+                "description": "Click to start rendering your final movie."
+            },
+            {
+                "target": lambda ws: ws.open_renders_folder_button,
+                "title": "Access Renders",
+                "description": "Click here to open the folder where your finished movies are saved."
+            }
+        ]
+
+    def _get_export_resolutions_rect(self) -> QRectF:
+        from PySide6.QtCore import QPoint, QRectF
+        top_left = self.source_export.mapTo(self, QPoint(0, 0))
+        bottom_right = self.hd_export.mapTo(self, QPoint(self.hd_export.width(), self.hd_export.height()))
         padding = 8
         return QRectF(
             top_left.x() - padding,
@@ -3502,12 +3697,11 @@ class WorkspacePage(QWidget):
 class AppSplashScreen(QWidget):
     def __init__(self, entitlement: LocalLicenseProvider | None = None) -> None:
         super().__init__()
-        self.is_pro = bool(entitlement and entitlement.is_pro)
         self.setWindowFlags(Qt.WindowType.SplashScreen | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
         container = QFrame()
-        container.setObjectName("splashCardPro" if self.is_pro else "splashCard")
+        container.setObjectName("splashCard")
 
         container_layout = QVBoxLayout(container)
         container_layout.setContentsMargins(30, 30, 30, 30)
@@ -3535,15 +3729,7 @@ class AppSplashScreen(QWidget):
         version_label.setObjectName("splashVersion")
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self.pro_badge = None
-        if self.is_pro:
-            self.pro_badge = QLabel("PRO LICENSE OWNER")
-            self.pro_badge.setObjectName("splashProBadge")
-            self.pro_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        status_label = QLabel(
-            "Initializing your Pro workspace..." if self.is_pro else "Initializing workflows..."
-        )
+        status_label = QLabel("Initializing workflows...")
         status_label.setObjectName("splashStatus")
         status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -3552,8 +3738,6 @@ class AppSplashScreen(QWidget):
         copyright_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         container_layout.addWidget(self.logo_label)
-        if self.pro_badge is not None:
-            container_layout.addWidget(self.pro_badge, 0, Qt.AlignmentFlag.AlignCenter)
         container_layout.addWidget(version_label)
         container_layout.addWidget(status_label)
         container_layout.addSpacing(10)
@@ -3563,7 +3747,7 @@ class AppSplashScreen(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(container)
 
-        self.resize(380 if self.is_pro else 360, 420 if self.is_pro else 390)
+        self.resize(360, 390)
         self.center_on_screen()
 
     def center_on_screen(self) -> None:
@@ -3654,9 +3838,8 @@ class AboutDialog(QDialog):
         self.setModal(True)
         self.setFixedWidth(520)
 
-        is_pro = bool(entitlement and entitlement.is_pro)
         card = QFrame()
-        card.setObjectName("aboutCardPro" if is_pro else "aboutCard")
+        card.setObjectName("aboutCard")
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(20, 28, 20, 26)
         card_layout.setSpacing(12)
@@ -3681,15 +3864,7 @@ class AboutDialog(QDialog):
         version.setObjectName("aboutVersion")
         version.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        if is_pro:
-            pro_badge = QLabel("PRO LICENSE OWNER")
-            pro_badge.setObjectName("splashProBadge")
-            pro_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            card_layout.addWidget(self.logo_label, 0, Qt.AlignmentFlag.AlignHCenter)
-            card_layout.addWidget(pro_badge, 0, Qt.AlignmentFlag.AlignCenter)
-        else:
-            card_layout.addWidget(self.logo_label, 0, Qt.AlignmentFlag.AlignHCenter)
-
+        card_layout.addWidget(self.logo_label, 0, Qt.AlignmentFlag.AlignHCenter)
         card_layout.addWidget(version)
 
         thank_you = QLabel(
@@ -4158,17 +4333,11 @@ class MainWindow(QMainWindow):
         view_menu.addSeparator()
         self.options_action = view_menu.addAction("Options...")
         self.options_action.triggered.connect(self.open_options)
-        self.pro_menu_separator = view_menu.addSeparator()
-        self.purchase_pro_action = view_menu.addAction("Purchase Pro License")
-        self.purchase_pro_action.triggered.connect(open_purchase_page)
-        self.enter_license_action = view_menu.addAction("Enter Pro License Code")
-        self.enter_license_action.triggered.connect(self.show_license_entry)
         self.admin_tools_action = None
         if admin_tools_enabled():
             self.admin_tools_separator = view_menu.addSeparator()
             self.admin_tools_action = view_menu.addAction("Admin Tools")
             self.admin_tools_action.triggered.connect(self.open_admin_tools)
-        self.refresh_license_menu()
         self.home.new_requested.connect(self.new_project)
         self.home.open_requested.connect(self.open_project)
         self.home.recent_requested.connect(lambda path: self.load_project_path(Path(path)))
@@ -4311,14 +4480,10 @@ class MainWindow(QMainWindow):
         contact_info_action.triggered.connect(self.open_contact_info)
         privacy_policy_action = self.help_menu.addAction("Privacy Policy")
         privacy_policy_action.triggered.connect(self.show_privacy_policy)
+        buy_coffee_action = self.help_menu.addAction("Buy Me a Coffee ☕")
+        buy_coffee_action.triggered.connect(self.open_buy_me_a_coffee)
         about_action = self.help_menu.addAction("About E2DM2")
         about_action.triggered.connect(self.show_about)
-
-    def show_privacy_policy(self) -> None:
-        PrivacyPolicyDialog(self).exec()
-
-    def show_about(self) -> None:
-        AboutDialog(self.entitlement, self).exec()
 
     def open_contact_info(self) -> None:
         QDesktopServices.openUrl(QUrl("https://e2dm2.com/#contact"))
@@ -4366,7 +4531,6 @@ class MainWindow(QMainWindow):
             self._centered_once = True
             QTimer.singleShot(0, self.center_on_active_screen)
 
-        # Trigger onboarding after the window is shown and layouts settle
         if not getattr(self, "_onboarding_triggered", False):
             self._onboarding_triggered = True
             QTimer.singleShot(200, self.check_onboarding)
@@ -4385,46 +4549,25 @@ class MainWindow(QMainWindow):
         self._centered_once = True
         self.showMaximized()
 
+    def show_privacy_policy(self) -> None:
+        PrivacyPolicyDialog(self).exec()
+
+    def show_about(self) -> None:
+        AboutDialog(self.entitlement, self).exec()
+
+    def open_buy_me_a_coffee(self) -> None:
+        QDesktopServices.openUrl(QUrl("https://buymeacoffee.com/e2dm2"))
+
     def show_pro_license_prompt(self, feature_name: str) -> bool:
-        if self.entitlement.is_pro:
-            return True
-        dialog = ProLicenseDialog(self.entitlement, self, feature_name=feature_name)
-        dialog.activated.connect(self.license_activated)
-        dialog.exec()
-        return self.entitlement.is_pro
-
-    def show_license_entry(self) -> None:
-        dialog = ProLicenseDialog(self.entitlement, self, enter_code_first=True)
-        dialog.activated.connect(self.license_activated)
-        dialog.exec()
-
-    def refresh_license_menu(self) -> None:
-        show_purchase_actions = not self.entitlement.is_pro
-        self.pro_menu_separator.setVisible(show_purchase_actions)
-        self.purchase_pro_action.setVisible(show_purchase_actions)
-        self.enter_license_action.setVisible(show_purchase_actions)
-
-    def license_activated(self) -> None:
-        self.workspace.refresh_entitlements()
-        self.refresh_license_menu()
-        self.refresh_application_title()
-
-    def license_deactivated(self) -> None:
-        self.workspace.refresh_entitlements()
-        self.refresh_license_menu()
-        self.refresh_application_title()
+        return True
 
     def refresh_application_title(self) -> None:
-        title = "Easy Epic Drone Movie Maker - E2DM2"
-        if self.entitlement.is_pro:
-            title += " - Pro"
-        self.setWindowTitle(title)
+        self.setWindowTitle("Easy Epic Drone Movie Maker - E2DM2")
 
     def open_admin_tools(self) -> None:
         if not admin_tools_enabled():
             return
         dialog = AdminToolsDialog(self, self.entitlement)
-        dialog.license_deactivated.connect(self.license_deactivated)
         dialog.exec()
 
 
