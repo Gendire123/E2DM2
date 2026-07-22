@@ -1782,6 +1782,46 @@ class WorkspacePage(QWidget):
         self.results_list.setMinimumHeight(140)
         status_layout.addWidget(self.results_list, 1)
 
+        self.support_card = QFrame()
+        self.support_card.setObjectName("supportBannerCard")
+        self.support_card.setVisible(False)
+        self.support_card.setStyleSheet("""
+            QFrame#supportBannerCard {
+                background: #F0F7FF;
+                border: 1px solid #CCE3F7;
+                border-radius: 8px;
+            }
+        """)
+        support_layout = QHBoxLayout(self.support_card)
+        support_layout.setContentsMargins(14, 10, 14, 10)
+        support_layout.setSpacing(12)
+
+        support_msg = QLabel("Enjoying your movie? Consider buying me a coffee to support E2DM2 development!")
+        support_msg.setWordWrap(True)
+        support_msg.setStyleSheet("font-size: 10pt; color: #1E3A8A; font-weight: 500;")
+
+        support_btn = QPushButton("Buy Me a Coffee ☕")
+        support_btn.setObjectName("secondaryButton")
+        support_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        support_btn.setStyleSheet("""
+            QPushButton {
+                background: #FFDD00;
+                color: #000000;
+                border: 1px solid #E6C700;
+                border-radius: 6px;
+                font-weight: bold;
+                padding: 6px 14px;
+            }
+            QPushButton:hover {
+                background: #F2D200;
+            }
+        """)
+        support_btn.clicked.connect(self.open_buy_me_a_coffee)
+
+        support_layout.addWidget(support_msg, 1)
+        support_layout.addWidget(support_btn)
+        status_layout.addWidget(self.support_card)
+
         self.open_renders_folder_button = QPushButton("Open Renders Folder")
         self.open_renders_folder_button.setObjectName("secondaryButton")
         self.open_renders_folder_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
@@ -2167,6 +2207,8 @@ class WorkspacePage(QWidget):
         self._update_header_details()
         self.results_list.clear()
         self.results_list.setVisible(False)
+        if hasattr(self, "support_card"):
+            self.support_card.setVisible(False)
         self.status_label.setText("Ready")
         self.progress_bar.setValue(0)
         self._refresh_render_queue()
@@ -2727,6 +2769,9 @@ class WorkspacePage(QWidget):
             self.import_dialog.setLabelText(f"Importing {name}")
             self.import_dialog.setValue(val)
 
+    def open_buy_me_a_coffee(self) -> None:
+        QDesktopServices.openUrl(QUrl("https://buymeacoffee.com/e2dm2"))
+
     def import_finished(self, imported) -> None:
         if hasattr(self, "import_dialog") and self.import_dialog:
             self.import_dialog.close()
@@ -3178,6 +3223,8 @@ class WorkspacePage(QWidget):
         self.worker = worker
         self.results_list.clear()
         self.results_list.setVisible(False)
+        if hasattr(self, "support_card"):
+            self.support_card.setVisible(False)
         self._set_busy(True)
         LOGGER.info("UI started production")
         thread.start()
@@ -3226,6 +3273,8 @@ class WorkspacePage(QWidget):
         elif result.successful_outputs:
             self.status_label.setText(f"Production complete: {len(result.successful_outputs)} output(s)")
             self.progress_bar.setValue(100)
+            if hasattr(self, "support_card"):
+                self.support_card.setVisible(True)
         else:
             self.status_label.setText("Production failed. Open a failed result for details.")
 
@@ -4487,6 +4536,9 @@ class MainWindow(QMainWindow):
 
     def open_contact_info(self) -> None:
         QDesktopServices.openUrl(QUrl("https://e2dm2.com/#contact"))
+
+    def open_buy_me_a_coffee(self) -> None:
+        QDesktopServices.openUrl(QUrl("https://buymeacoffee.com/e2dm2"))
 
     def new_project(self) -> None:
         dialog = NewProjectDialog(self)
