@@ -64,7 +64,6 @@ Built-in presets live under `e2dm2/assets/songs`. Custom presets created by the 
 
 ## Support & License
 
-E2DM2 is open-source software licensed under the [MIT License](LICENSE). Free code signing is provided by the [SignPath Foundation](https://signpath.org).
 
 If you enjoy using E2DM2 and want to support ongoing development, consider buying a coffee via **Help > Buy Me a Coffee ☕** in the app or visiting [Buy Me a Coffee](https://buymeacoffee.com/e2dm2).
 
