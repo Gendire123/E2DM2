@@ -319,3 +319,4 @@ if (-not $SkipInstaller) {
         }
     }
 }
+$global:LASTEXITCODE = 0
