@@ -8,14 +8,14 @@ E2DM2 is a local Windows desktop application that transforms drone footage into 
 
 Download the Windows installer from the v1.1.1 release assets:
 
-**[Download E2DM2-Setup-1.1.1.exe](https://github.com/Gendire123/E2DM2-Releases/releases/download/v1.1.1/E2DM2-Setup-1.1.1.exe)**
+**[Download E2DM2-Setup-1.1.1.exe](https://github.com/Gendire123/E2DM2/releases/download/v1.1.1/E2DM2-Setup-1.1.1.exe)**
 
 Version 1.1.1 includes general performance improvements, workflow optimizations, and bug fixes:
 
 - **Verified Identity & Code Integrity:** Both the standalone application executable (`E2DM2.exe`) and the setup installer (`E2DM2-Setup-1.1.1.exe`) are digitally signed using Microsoft's cloud identity verification service.
 - **Windows SmartScreen Integration:** Provides a smooth, trusted installation experience on Windows 10 and Windows 11 without unverified publisher warnings.
 
-See the [v1.1.1 release page](https://github.com/Gendire123/E2DM2-Releases/releases/tag/v1.1.1) for the complete release notes, installer asset, file size, and publication details.
+See the [v1.1.1 release page](https://github.com/Gendire123/E2DM2/releases/tag/v1.1.1) for the complete release notes, installer asset, file size, and publication details.
 
 ## Installation and Upgrade
 

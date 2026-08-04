@@ -50,7 +50,7 @@ def test_publish_release_sends_atomic_manifest(tmp_path, monkeypatch):
     assert captured["payload"] == {
         "version": "1.2.3",
         "download_url": (
-            "https://github.com/Gendire123/E2DM2-Releases/releases/download/"
+            "https://github.com/Gendire123/E2DM2/releases/download/"
             "v1.2.3/E2DM2-Setup-1.2.3.exe"
         ),
         "sha256": "eef523368dce718bb9a2cb6df91baa07ef1669cdc6aee2e3525a0bb2e5b5a55f",

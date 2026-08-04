@@ -341,7 +341,7 @@ class UpdateDialog(QDialog):
         layout.addLayout(buttons_layout)
 
     def open_github_page(self):
-        QDesktopServices.openUrl(QUrl("https://github.com/Gendire123/E2DM2-Releases/releases"))
+        QDesktopServices.openUrl(QUrl("https://github.com/Gendire123/E2DM2/releases"))
 
 
 class UpdateChecker(QObject):
@@ -351,7 +351,7 @@ class UpdateChecker(QObject):
         self.parent_widget = parent
         self.check_thread = None
         self.repo_owner = "Gendire123"
-        self.repo_name = "E2DM2-Releases"
+        self.repo_name = "E2DM2"
         self._silent_on_latest = False
 
     def check(self, silent_on_latest: bool = False, force: bool = False):
