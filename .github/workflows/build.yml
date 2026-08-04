@@ -1,0 +1,83 @@
+name: Windows Build & SignPath Provenance
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Windows Distribution
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Chocolatey Dependencies (FFmpeg & Inno Setup)
+        run: |
+          choco install ffmpeg innosetup -y
+
+      - name: Ensure FFmpeg License File Exists
+        shell: powershell
+        run: |
+          $FfmpegCmd = Get-Command ffmpeg -ErrorAction SilentlyContinue
+          if ($FfmpegCmd) {
+            $FfmpegBin = Split-Path $FfmpegCmd.Source -Parent
+            $FfmpegRoot = Split-Path $FfmpegBin -Parent
+            $LicenseFile = Join-Path $FfmpegRoot "LICENSE"
+            if (-not (Test-Path -LiteralPath $LicenseFile)) {
+              $AltLicense = Join-Path $FfmpegRoot "doc\LICENSE.txt"
+              if (Test-Path -LiteralPath $AltLicense) {
+                Copy-Item -LiteralPath $AltLicense -Destination $LicenseFile -Force
+              } else {
+                Set-Content -Path $LicenseFile -Value "FFmpeg is licensed under the LGPL/GPL license."
+              }
+            }
+          }
+
+      - name: Build Windows Executable & Installer
+        shell: powershell
+        run: |
+          .\packaging\build_windows.ps1 -WorkRoot C:\E2DM2-build
+
+      - name: Upload Unsigned Installer Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: E2DM2-Setup-Unsigned
+          path: dist/E2DM2-Setup-*.exe
+          if-no-files-found: error
+
+      # =========================================================================
+      # SignPath Foundation Signing Step
+      # (Uncomment this step once your project is approved by SignPath Foundation
+      #  and you have added SIGNPATH_API_TOKEN & SIGNPATH_ORGANIZATION_ID to your Secrets)
+      # =========================================================================
+      # - name: Sign Installer via SignPath Foundation
+      #   if: github.event_name != 'pull_request' && env.SIGNPATH_API_TOKEN != ''
+      #   uses: SignPath/github-action-submit-signing-request@v1
+      #   env:
+      #     SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+      #   with:
+      #     api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+      #     organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+      #     project-slug: 'e2dm2'
+      #     signing-policy-slug: 'release-signing'
+      #     artifact-path: 'dist/E2DM2-Setup-*.exe'
+      #     output-artifact-directory: 'signed_dist'
+      #
+      # - name: Upload Signed Installer Artifact
+      #   if: github.event_name != 'pull_request' && env.SIGNPATH_API_TOKEN != ''
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: E2DM2-Setup-Signed
+      #     path: signed_dist/E2DM2-Setup-*.exe

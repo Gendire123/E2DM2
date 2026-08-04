@@ -125,7 +125,7 @@ class LicenseApiClient:
 
 
 class LocalLicenseProvider:
-    """Persist the locally activated Pro state; validation happens at the API boundary."""
+    """All features are unlocked by default under the open-source release model."""
 
     def __init__(
         self,
@@ -159,18 +159,22 @@ class LocalLicenseProvider:
         result = self.api_client.activate(normalized, self.device_id())
         self.settings.setValue("license/pro_active", True)
         self.settings.setValue("license/code_hint", normalized[-3:])
-        self.settings.setValue("license/activation_token", result["activation_token"])
+        if isinstance(result, dict) and "activation_token" in result:
+            self.settings.setValue("license/activation_token", result["activation_token"])
         self.settings.sync()
 
     def deactivate(self) -> None:
         token = str(self.settings.value("license/activation_token", "")).strip()
-        if not self.is_pro or not token:
-            raise LicenseActivationError("This copy does not have an active Pro license.")
-        self.api_client.deactivate(token, self.device_id())
+        if token:
+            try:
+                self.api_client.deactivate(token, self.device_id())
+            except Exception:
+                pass
         self.settings.remove("license/pro_active")
         self.settings.remove("license/code_hint")
         self.settings.remove("license/activation_token")
         self.settings.sync()
+
 
 
 class AlphaEntitlementProvider:

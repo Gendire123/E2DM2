@@ -43,7 +43,7 @@ from .entitlements import (
 )
 
 
-PRO_PURCHASE_URL = "https://buy.stripe.com/fZu6oGeob02Sbgy6Q3aEE01"
+PRO_PURCHASE_URL = "https://buymeacoffee.com/e2dm2"
 ADMIN_TOOLS_ENV = "E2DM2_ENABLE_ADMIN_TOOLS"
 ADMIN_API_ENV = "E2DM2_LICENSE_ADMIN_URL"
 ADMIN_TOKEN_ENV = "E2DM2_ADMIN_ACCESS_TOKEN"

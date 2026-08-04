@@ -2517,7 +2517,7 @@ def test_privacy_policy_dialog_is_complete_and_scrollable(qtbot):
     assert PRIVACY_POLICY_EFFECTIVE_DATE in policy
     assert "Your videos stay on your computer" in policy
     assert "Software update checks" in policy
-    assert "Optional Pro licensing" in policy
+    assert "Support and external links" in policy
     assert "Your choices and privacy rights" in policy
     assert "Contact and complaints" in policy
     assert dialog.policy_browser.verticalScrollBar().maximum() > 0

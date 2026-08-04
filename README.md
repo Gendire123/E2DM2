@@ -60,14 +60,11 @@ The first time a clip is opened, E2DM2 builds a low-resolution, all-keyframe pre
 
 ## Song Library
 
-Built-in presets live under `e2dm2/assets/songs`. Custom presets created by the library editor live under `Documents\E2DM2\Library`. Each song folder contains its audio file and a versioned `preset.json`; projects copy a snapshot of both for reproducible renders.
+Built-in presets live under `e2dm2/assets/songs`. Custom presets created by the library editor live under `Documents\E2DM2\Library`. Each song folder contains its audio file and a versioned `preset.json`; projects copy a snapshot of both for reproducible renders. All features including custom song imports and source-resolution renders are 100% free and open-source under the MIT license.
 
-Importing custom songs and exporting at source resolution require an activated Pro license. Free users can purchase Pro or paste an emailed key from the **View** menu; keys use the paste-friendly `ABC-123-DEF-456-GHI` format.
+## Support & License
 
-## Pro licensing development
+E2DM2 is open-source software licensed under the [MIT License](LICENSE). 
 
-The desktop app calls the licensing Edge Functions in the configured E2DM2 Supabase project. `E2DM2_LICENSE_API_URL` can override the built-in production endpoint for staging. Database records, key generation, activation limits, and Resend delivery remain server-side. Setup and deployment details are in [supabase/README.md](supabase/README.md).
+If you enjoy using E2DM2 and want to support ongoing development, consider buying a coffee via **Help > Buy Me a Coffee ☕** in the app or visiting [Buy Me a Coffee](https://buymeacoffee.com/e2dm2).
 
-Temporary **Admin Tools** are visible under **View** during development. Set `E2DM2_ENABLE_ADMIN_TOOLS=0` in a release build to remove the menu without changing licensing code. The client still needs a short-lived Supabase user token, and the server independently requires that user to be present in `license_admins`; no service-role or Resend secret is compiled into E2DM2.
-
-An activated installation can use **Deactivate this copy** in Admin Tools to remove its local Pro entitlement and securely release its server-side activation slot.
