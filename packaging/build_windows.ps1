@@ -281,7 +281,7 @@ if (-not $SkipInstaller) {
                 Write-Host "GitHub Release created successfully!"
                 $GitHubReleasePublished = $true
             } else {
-                Write-Error "GitHub CLI failed to create the release. Make sure you are authenticated with 'gh auth login'."
+                Write-Warning "GitHub CLI release creation returned exit code $LASTEXITCODE (release may already exist)."
             }
         } else {
             Write-Warning "GitHub CLI (gh) is not installed. Skipping automatic GitHub Release creation."
