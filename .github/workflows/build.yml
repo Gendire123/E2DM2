@@ -25,7 +25,7 @@ jobs:
 
       - name: Install Chocolatey Dependencies (FFmpeg & Inno Setup)
         run: |
-          choco install ffmpeg innosetup -y
+          choco install ffmpeg --version 8.1.2 innosetup -y
 
       - name: Ensure FFmpeg License File Exists
         shell: powershell
