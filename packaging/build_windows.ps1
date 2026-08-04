@@ -276,7 +276,7 @@ if (-not $SkipInstaller) {
             [System.IO.File]::WriteAllText($TempNotesFile, $FullNotes, [System.Text.Encoding]::UTF8)
 
             Write-Host "Creating GitHub Release and uploading installer..."
-            gh release create "v$Version" $InstallerPath --repo "Gendire123/E2DM2-Releases" --title "v$Version" --notes-file $TempNotesFile
+            gh release create "v$Version" $InstallerPath --repo "Gendire123/E2DM2" --title "v$Version" --notes-file $TempNotesFile
             if ($LASTEXITCODE -eq 0) {
                 Write-Host "GitHub Release created successfully!"
                 $GitHubReleasePublished = $true

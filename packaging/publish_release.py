@@ -25,7 +25,7 @@ def publish_release(version: str, installer_path: Path, token: str, api_url: str
     payload = {
         "version": version,
         "download_url": (
-            "https://github.com/Gendire123/E2DM2-Releases/releases/download/"
+            "https://github.com/Gendire123/E2DM2/releases/download/"
             f"v{version}/E2DM2-Setup-{version}.exe"
         ),
         "sha256": file_hash,
