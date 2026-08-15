@@ -1,2 +1,0 @@
-I promise on Mini-Me's tiny pinky finger there are no sharks with laser beams or secret cloud servers here. It really is just plain old local FFmpeg churning through clips so your flight footage actually sees the light of day instead of sitting on a hard drive forever.
-
